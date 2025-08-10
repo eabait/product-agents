@@ -1,0 +1,31 @@
+{
+  "name": "@product-agents/prd-agent",
+  "version": "1.0.0",
+  "description": "Product Requirements Document generator agent",
+  "exports": {
+    ".": "./dist/agent/index.js",
+    "./mcp": "./dist/mcp-server/index.js"
+  },
+  "bin": {
+    "prd-agent": "./bin/cli.js",
+    "prd-agent-mcp": "./bin/mcp-server.js"
+  },
+  "scripts": {
+    "dev": "npm run dev --workspace=frontend",
+    "build": "turbo run build",
+    "test": "vitest",
+    "start": "npm run start --workspace=frontend",
+    "clean": "turbo run clean",
+    "lint": "turbo run lint"
+  },
+  "workspaces": [
+    "agent",
+    "frontend",
+    "mcp-server"
+  ],
+  "devDependencies": {
+    "turbo": "^1.13.0",
+    "typescript": "^5.0.0",
+    "vitest": "^0.34.0"
+  }
+}

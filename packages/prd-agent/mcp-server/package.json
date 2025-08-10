@@ -1,0 +1,27 @@
+{
+  "name": "@product-agents/prd-agent-mcp",
+  "version": "1.0.0",
+  "description": "PRD Generator Agent MCP server",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "prd-agent-mcp": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts",
+    "dev": "tsup src/index.ts --format esm --dts --watch",
+    "clean": "rm -rf dist",
+    "lint": "eslint src --ext .ts",
+    "test": "vitest"
+  },
+  "dependencies": {
+    "@product-agents/prd-agent-core": "*",
+    "@modelcontextprotocol/sdk": "^0.4.0"
+  },
+  "devDependencies": {
+    "tsup": "^7.2.0",
+    "typescript": "^5.0.0",
+    "eslint": "^8.45.0",
+    "vitest": "^0.34.0"
+  }
+}

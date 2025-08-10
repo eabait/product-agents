@@ -1,0 +1,31 @@
+{
+  "name": "product-agents",
+  "version": "1.0.0",
+  "description": "Monorepo for six product management agents",
+  "private": true,
+  "workspaces": [
+    "packages/shared/*",
+    "packages/prd-agent/*",
+    "packages/research-agent/*",
+    "packages/persona-agent/*",
+    "packages/story-mapper-agent/*",
+    "packages/story-generator-agent/*",
+    "packages/story-refiner-agent/*"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "clean": "turbo run clean"
+  },
+  "devDependencies": {
+    "turbo": "^1.13.0",
+    "typescript": "^5.0.0",
+    "@types/node": "^20.0.0"
+  },
+  "packageManager": "npm@10.0.0",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
