@@ -18,31 +18,21 @@ const PRDSchema = z.object({
 
 export type PRD = z.infer<typeof PRDSchema>
 
-// Patch operation types
-const PatchOperationSchema = z.union([
-  z.object({ replace: z.union([z.string(), z.array(z.string()), z.array(z.any())]) }),
-  z.object({ add: z.union([z.string(), z.array(z.string())]) }),
-  z.object({ remove: z.union([z.string(), z.array(z.string())]) })
-])
-
-// PRD Patch schema for edit operations
+// Simplified PRD Patch schema for OpenAI compatibility
 const PRDPatchSchema = z.object({
   mode: z.literal('patch'),
   patch: z.object({
-    problemStatement: z.union([z.string(), PatchOperationSchema]).optional(),
-    solutionOverview: z.union([z.string(), PatchOperationSchema]).optional(),
-    targetUsers: z.union([z.array(z.string()), PatchOperationSchema]).optional(),
-    goals: z.union([z.array(z.string()), PatchOperationSchema]).optional(),
-    successMetrics: z.union([
-      z.array(z.object({
-        metric: z.string(),
-        target: z.string(),
-        timeline: z.string()
-      })),
-      PatchOperationSchema
-    ]).optional(),
-    constraints: z.union([z.array(z.string()), PatchOperationSchema]).optional(),
-    assumptions: z.union([z.array(z.string()), PatchOperationSchema]).optional()
+    problemStatement: z.string().optional(),
+    solutionOverview: z.string().optional(),
+    targetUsers: z.array(z.string()).optional(),
+    goals: z.array(z.string()).optional(),
+    successMetrics: z.array(z.object({
+      metric: z.string(),
+      target: z.string(),
+      timeline: z.string()
+    })).optional(),
+    constraints: z.array(z.string()).optional(),
+    assumptions: z.array(z.string()).optional()
   })
 })
 
@@ -299,18 +289,23 @@ class ChangeWorker extends WorkerAgent {
                  "mode": "patch",
                  "patch": {
                    // Only include fields that need to change
-                   // For simple replacements, use the new value directly
-                   // For complex operations, use objects with "replace", "add", or "remove"
+                   // Provide the complete new value for each field
                  }
                }
                
                Examples:
-               - To replace a field: "problemStatement": "New problem statement"
-               - To remove items from array: "goals": {"remove": ["Goal to remove"]}
-               - To add items to array: "assumptions": {"add": ["New assumption"]}
-               - To replace entire array: "targetUsers": {"replace": ["User 1", "User 2"]}
+               - To update problem statement: "problemStatement": "New problem statement text"
+               - To update goals: "goals": ["Updated goal 1", "Updated goal 2", "New goal 3"]  
+               - To update target users: "targetUsers": ["Updated user persona 1", "Updated user persona 2"]
+               - To update success metrics: "successMetrics": [{"metric": "Updated metric", "target": "New target", "timeline": "Updated timeline"}]
+               - To update constraints: "constraints": ["Updated constraint 1", "Updated constraint 2"]
+               - To update assumptions: "assumptions": ["Updated assumption 1", "Updated assumption 2"]
                
-               IMPORTANT: Return ONLY the JSON patch object. Do not include any explanation or the full PRD.`,
+               IMPORTANT: 
+               - Return ONLY the JSON patch object
+               - Do not use nested objects like {"replace": [...]} or {"add": [...]}
+               - Provide direct values: arrays for array fields, strings for string fields
+               - Do not include any explanation or the full PRD`,
       temperature: this.settings.temperature || 0.2, // Use settings temperature (fixed for consistency)
       maxTokens: this.settings.maxTokens || 2000
     })

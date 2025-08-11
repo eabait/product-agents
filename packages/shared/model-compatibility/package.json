@@ -1,0 +1,15 @@
+{
+  "name": "@product-agents/model-compatibility",
+  "version": "1.0.0",
+  "description": "Model compatibility utilities for tool/function calling support",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "tsup": "^7.2.0",
+    "typescript": "^5.2.2"
+  }
+}

@@ -3,6 +3,7 @@ import * as http from 'http'
 import * as fs from 'fs'
 import * as path from 'path'
 import { PRDSchema, PRDPatchSchema, applyPatch, PRDPatch, PRDGeneratorAgent } from './index'
+import { isModelToolCompatible } from './model-compatibility'
 
 // Simple .env file loader
 try {
@@ -31,7 +32,7 @@ const defaultSettings = {
   apiKey: defaultApiKey,
   model: process.env.PRD_AGENT_MODEL || 'anthropic/claude-3-5-sonnet',
   temperature: parseFloat(process.env.PRD_AGENT_TEMPERATURE || '0.3'),
-  maxTokens: parseInt(process.env.PRD_AGENT_MAX_TOKENS || '4000')
+  maxTokens: parseInt(process.env.PRD_AGENT_MAX_TOKENS || '8000')
 }
 
 // Fixed temperature for ChangeWorker (for consistent patch generation)
@@ -53,6 +54,11 @@ const createAgent = (requestSettings?: any) => {
   
   if (!effectiveSettings.model) {
     throw new Error('No model specified. Please provide a valid model in settings.')
+  }
+  
+  // Validate that the model supports tool use (function calling)
+  if (!isModelToolCompatible(effectiveSettings.model)) {
+    throw new Error(`Model '${effectiveSettings.model}' does not support function calling/tools. Please use a compatible model like 'anthropic/claude-3-5-sonnet', 'openai/gpt-4o', or 'openai/gpt-4-turbo'.`)
   }
   
   // Validate numeric settings

@@ -28,7 +28,7 @@ export class OpenRouterClient {
       schema: params.schema,
       prompt: params.prompt,
       temperature: params.temperature || 0.3,
-      maxTokens: params.maxTokens || 4000
+      maxTokens: params.maxTokens || 8000
     })
     
     return object

@@ -45,6 +45,7 @@ interface EnhancedModel {
   maxCompletionTokens?: number;
   isModerated: boolean;
   provider: string;
+  toolSupport?: boolean;
 }
 
 
@@ -64,7 +65,7 @@ export default function PRDAgentPage() {
   const [settings, setSettings] = useState<AgentSettings>({
     model: "anthropic/claude-3-5-sonnet", // Will be updated with agent defaults
     temperature: 0.7, // Will be updated with agent defaults
-    maxTokens: 4096, // Will be updated with agent defaults
+    maxTokens: 8000, // Will be updated with agent defaults
     apiKey: undefined
   });
   
@@ -269,7 +270,7 @@ export default function PRDAgentPage() {
       console.error("Error fetching models:", error);
       setModelsError(error instanceof Error ? error.message : "Failed to fetch models");
       
-      // Fallback to hardcoded models if API fails
+      // Fallback to hardcoded models if API fails (only tool-compatible models)
       const fallbackModels: EnhancedModel[] = [
         {
           id: "anthropic/claude-3-5-sonnet",
@@ -279,7 +280,8 @@ export default function PRDAgentPage() {
           pricing: { prompt: 3.0, completion: 15.0, promptFormatted: "$3.00", completionFormatted: "$15.00" },
           isTopProvider: true,
           isModerated: false,
-          provider: "anthropic"
+          provider: "anthropic",
+          toolSupport: true
         },
         {
           id: "anthropic/claude-3-haiku",
@@ -289,17 +291,19 @@ export default function PRDAgentPage() {
           pricing: { prompt: 0.25, completion: 1.25, promptFormatted: "$0.25", completionFormatted: "$1.25" },
           isTopProvider: true,
           isModerated: false,
-          provider: "anthropic"
+          provider: "anthropic",
+          toolSupport: true
         },
         {
-          id: "openai/gpt-4-turbo",
-          name: "GPT-4 Turbo",
-          description: "OpenAI's most capable model",
+          id: "openai/gpt-4o",
+          name: "GPT-4o",
+          description: "OpenAI's multimodal flagship model",
           contextLength: 128000,
-          pricing: { prompt: 10.0, completion: 30.0, promptFormatted: "$10.00", completionFormatted: "$30.00" },
+          pricing: { prompt: 5.0, completion: 15.0, promptFormatted: "$5.00", completionFormatted: "$15.00" },
           isTopProvider: true,
           isModerated: true,
-          provider: "openai"
+          provider: "openai",
+          toolSupport: true
         }
       ];
       setModels(fallbackModels);

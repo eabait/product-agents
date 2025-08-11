@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getToolCompatibleModels, isModelToolCompatible } from "../../../lib/model-compatibility";
 
 interface OpenRouterModel {
   id: string;
@@ -59,6 +60,7 @@ export async function GET(request: NextRequest) {
     
     // Filter and enhance model data for frontend use
     const enhancedModels = models
+      .filter(model => isModelToolCompatible(model.id)) // Only include tool-compatible models
       .map(model => ({
         id: model.id,
         name: model.name,
@@ -74,6 +76,7 @@ export async function GET(request: NextRequest) {
         maxCompletionTokens: model.top_provider?.max_completion_tokens,
         isModerated: model.top_provider?.is_moderated || false,
         provider: model.id.split('/')[0], // Extract provider from model ID
+        toolSupport: true, // All filtered models support tools
       }))
       .sort((a, b) => {
         // Sort by: top providers first, then by price (cheaper first)
