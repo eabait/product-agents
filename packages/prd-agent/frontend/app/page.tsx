@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { ChatMessages } from "@/components/chat/ChatMessages";
 import {
   Menu,
@@ -12,6 +13,9 @@ import {
   Send,
   Settings,
   Loader,
+  Edit3,
+  Check,
+  X,
 } from "lucide-react";
 import { Conversation, Message } from "@/types";
 import { PRD } from "@/lib/prd-schema";
@@ -26,6 +30,10 @@ export default function PRDAgentPage() {
 
   const [input, setInput] = useState("");
   const [isChatLoading, setIsChatLoading] = useState(false);
+  
+  // Title editing state
+  const [editingConversationId, setEditingConversationId] = useState<string | null>(null);
+  const [tempTitle, setTempTitle] = useState("");
 
   // track initialization so we don't run sync effects before we've loaded from localStorage
   const isInitializedRef = useRef(false);
@@ -40,6 +48,66 @@ export default function PRDAgentPage() {
     setConversations(prev => 
       prev.map(c => c.id === activeId ? updater(c) : c)
     );
+  };
+
+  // Helper to update any conversation by ID
+  const updateConversation = (conversationId: string, updater: (conv: Conversation) => Conversation) => {
+    setConversations(prev => 
+      prev.map(c => c.id === conversationId ? updater(c) : c)
+    );
+  };
+
+  // Generate smart title from first message
+  const generateTitleFromMessage = (content: string): string => {
+    const cleaned = content.trim();
+    if (cleaned.length <= 50) return cleaned;
+    
+    // Extract first sentence or first 50 chars
+    const firstSentence = cleaned.split('.')[0];
+    if (firstSentence.length <= 50) return firstSentence;
+    
+    return cleaned.substring(0, 47) + "...";
+  };
+
+  // Update conversation title
+  const updateConversationTitle = (conversationId: string, newTitle: string) => {
+    const trimmedTitle = newTitle.trim();
+    if (!trimmedTitle || trimmedTitle.length === 0) {
+      return false; // Invalid title
+    }
+    
+    if (trimmedTitle.length > 100) {
+      return false; // Too long
+    }
+
+    updateConversation(conversationId, conv => ({
+      ...conv,
+      title: trimmedTitle
+    }));
+    
+    return true;
+  };
+
+  // Start editing a conversation title
+  const startEditingTitle = (conversationId: string, currentTitle: string) => {
+    setEditingConversationId(conversationId);
+    setTempTitle(currentTitle);
+  };
+
+  // Save title edit
+  const saveTitle = () => {
+    if (!editingConversationId) return;
+    
+    if (updateConversationTitle(editingConversationId, tempTitle)) {
+      setEditingConversationId(null);
+      setTempTitle("");
+    }
+  };
+
+  // Cancel title edit
+  const cancelTitleEdit = () => {
+    setEditingConversationId(null);
+    setTempTitle("");
   };
 
   // ---------- Initialization (load from localStorage) ----------
@@ -242,7 +310,15 @@ export default function PRDAgentPage() {
       };
 
       const finalMessages = [...newMessages, assistantMessage];
-      updateActiveConversation(conv => ({ ...conv, messages: finalMessages }));
+      updateActiveConversation(conv => {
+        // Auto-generate title from first user message if still using default
+        const shouldUpdateTitle = conv.title === "New PRD" && conv.messages.length === 0;
+        return {
+          ...conv, 
+          messages: finalMessages,
+          title: shouldUpdateTitle ? generateTitleFromMessage(userMessage.content) : conv.title
+        };
+      });
     } catch (error) {
       console.error("Chat error:", error);
       const errorMessage: Message = {
@@ -252,7 +328,15 @@ export default function PRDAgentPage() {
         timestamp: new Date(),
       };
       const finalMessages = [...newMessages, errorMessage];
-      updateActiveConversation(conv => ({ ...conv, messages: finalMessages }));
+      updateActiveConversation(conv => {
+        // Auto-generate title from first user message if still using default
+        const shouldUpdateTitle = conv.title === "New PRD" && conv.messages.length === 0;
+        return {
+          ...conv, 
+          messages: finalMessages,
+          title: shouldUpdateTitle ? generateTitleFromMessage(userMessage.content) : conv.title
+        };
+      });
     } finally {
       setIsChatLoading(false);
     }
@@ -308,26 +392,97 @@ export default function PRDAgentPage() {
 
           <div className="flex-1 overflow-auto px-2 py-2">
             {conversations.map((conv) => (
-              <button
+              <div
                 key={conv.id}
-                onClick={() => {
-                  setActiveId(conv.id);
-                }}
                 className={`w-full text-left flex items-center gap-3 p-2 rounded-md hover:bg-accent ${
                   conv.id === activeId ? "ring-2 ring-sidebar-ring" : ""
                 }`}
-                title={conv.title}
               >
-                <MessageCircle className="h-5 w-5" />
+                <MessageCircle className="h-5 w-5 flex-shrink-0" />
                 {open && (
-                  <div className="flex-1">
-                    <div className="font-medium text-sm truncate">{conv.title}</div>
+                  <div className="flex-1 min-w-0">
+                    {editingConversationId === conv.id ? (
+                      // Edit mode
+                      <div className="flex items-center gap-1 mb-1">
+                        <Input
+                          value={tempTitle}
+                          onChange={(e) => setTempTitle(e.target.value)}
+                          className="h-6 text-sm font-medium"
+                          placeholder="Conversation title"
+                          autoFocus
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              saveTitle();
+                            } else if (e.key === 'Escape') {
+                              e.preventDefault();
+                              cancelTitleEdit();
+                            }
+                          }}
+                          onBlur={() => {
+                            // Save on blur unless user clicked cancel
+                            setTimeout(() => saveTitle(), 100);
+                          }}
+                        />
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-6 w-6 flex-shrink-0"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            saveTitle();
+                          }}
+                        >
+                          <Check className="h-3 w-3" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-6 w-6 flex-shrink-0"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            cancelTitleEdit();
+                          }}
+                        >
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    ) : (
+                      // Display mode
+                      <div className="flex items-center group">
+                        <button
+                          className="flex-1 text-left"
+                          onClick={() => setActiveId(conv.id)}
+                          title={conv.title}
+                        >
+                          <div className="font-medium text-sm truncate">{conv.title}</div>
+                        </button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-5 w-5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            startEditingTitle(conv.id, conv.title);
+                          }}
+                        >
+                          <Edit3 className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    )}
                     <div className="text-xs text-muted-foreground">
                       {new Date(conv.createdAt).toLocaleString()}
                     </div>
                   </div>
                 )}
-              </button>
+                {!open && (
+                  <button
+                    className="absolute inset-0"
+                    onClick={() => setActiveId(conv.id)}
+                    title={conv.title}
+                  />
+                )}
+              </div>
             ))}
           </div>
         </aside>
