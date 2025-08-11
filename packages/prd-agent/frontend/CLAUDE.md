@@ -13,14 +13,20 @@ This is a PRD (Product Requirements Document) Agent frontend built with Next.js,
 ## Key Files Structure
 ```
 app/
-├── page.tsx              # Main PRD Agent page component
-├── components/
-│   └── ChatUI.tsx        # Chat interface component
+├── page.tsx              # Main PRD Agent page component with integrated chat UI
 ├── api/
 │   └── chat/
-│       └── route.ts      # API endpoint for AI chat
+│       └── route.ts      # AI SDK streaming API endpoint
 ├── globals.css           # Global styles and Tailwind config
 └── layout.tsx           # Root layout
+components/
+├── chat/                 # Chat UI components
+│   ├── ChatMessages.tsx  # Message display with PRD editing
+│   ├── PRDEditor.tsx     # Interactive PRD editor
+│   └── ...other chat components
+└── ui/                   # shadcn/ui components
+lib/
+└── prd-schema.ts         # Zod schema for PRD validation
 ```
 
 ## UI Design Philosophy
@@ -34,16 +40,11 @@ The interface is designed to exactly match Claude's UI:
 ## Component Architecture
 
 ### Main Page (page.tsx)
-- Manages conversation state and localStorage persistence
-- Handles sidebar collapse/expand functionality
-- Contains settings modal (hidden by default)
-- Integrates with ChatUI component
-
-### ChatUI Component (ChatUI.tsx)
-- Renders message bubbles with proper spacing
-- Handles input field with auto-resize
-- Shows typing indicators during AI responses
-- Provides suggestion cards on welcome screen
+- Integrated chat interface with AI SDK streaming
+- Conversation management with localStorage persistence
+- Sidebar collapse/expand functionality
+- Direct communication with PRD agent backend
+- Real-time streaming responses from AI agent
 
 ## Key Features
 1. **Conversation Management**: Create, switch between, and delete conversations
@@ -53,10 +54,16 @@ The interface is designed to exactly match Claude's UI:
 5. **Responsive Design**: Works on desktop and mobile
 
 ## AI Integration
-- Uses `/api/chat` endpoint for AI communication
-- Supports editing existing PRDs vs creating new ones
-- Formats responses as structured markdown PRD documents
-- Maintains conversation context and PRD state
+- **AI SDK Streaming**: Uses AI SDK compatible streaming format for better UX
+- **Unified Interface**: Single chat interface that automatically handles:
+  - **PRD Creation**: Detects new PRD requests and calls `/prd` endpoint
+  - **PRD Editing**: Detects existing PRDs and calls `/prd/edit` endpoint  
+  - **General Chat**: Conversational interactions with the PRD agent
+- **Backend Communication**: Integrates with existing PRD agent at `PRD_AGENT_URL`
+- **Real-time Streaming**: AI SDK compatible streaming responses
+- **Smart Context Detection**: Automatically determines create vs edit based on conversation history
+- **API Route**: Single `/api/chat` endpoint handles all interactions with proper streaming
+- **Type Safety**: Zod schemas available for PRD validation when needed
 
 ## Styling Notes
 - Uses shadcn/ui components for consistency
@@ -72,10 +79,13 @@ The interface is designed to exactly match Claude's UI:
 ## Dependencies
 Key packages used:
 - `next` - React framework
-- `react-markdown` - Markdown rendering
+- `@ai-sdk/react` - AI SDK React package (for potential future enhancements)
+- `ai` - Core AI SDK for streaming functionality and format compatibility
+- `zod` - Schema validation and type safety for PRD structures
+- `react-markdown` - Markdown rendering in chat messages
 - `lucide-react` - Icon library
-- `uuid` - ID generation
-- `tailwindcss` - Styling
+- `uuid` - ID generation for messages and conversations
+- `tailwindcss` - Styling framework
 - `@radix-ui/react-*` - shadcn/ui base components
 
 ## State Management
@@ -83,9 +93,3 @@ Uses React hooks with localStorage for persistence:
 - Conversations stored in `prd-agent-conversations`
 - Active conversation ID in `prd-agent-active-conversation`
 - Settings in `prd-agent-settings`
-
-## Future Improvements
-- Add conversation search functionality
-- Implement conversation sharing
-- Add more PRD templates and suggestions
-- Enhanced mobile responsiveness

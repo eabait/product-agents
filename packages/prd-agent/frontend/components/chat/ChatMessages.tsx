@@ -1,6 +1,7 @@
 import { motion } from 'framer-motion';
 import { MessageBubble } from './MessageBubble';
 import { TypingIndicator } from './TypingIndicator';
+import { PRD } from './PRDEditor';
 import { Message } from '../../types';
 
 interface ChatMessagesProps {
@@ -8,6 +9,7 @@ interface ChatMessagesProps {
   isProcessing: boolean;
   copied: string | null;
   onCopy: (content: string, messageId: string) => void;
+  onPRDUpdate?: (messageId: string, updatedPRD: PRD) => void;
 }
 
 export function ChatMessages({
@@ -15,6 +17,7 @@ export function ChatMessages({
   isProcessing,
   copied,
   onCopy,
+  onPRDUpdate,
 }: ChatMessagesProps) {
   return (
     <div className="max-w-3xl mx-auto px-6 py-4 space-y-6">
@@ -29,6 +32,7 @@ export function ChatMessages({
             message={message}
             onCopy={onCopy}
             copied={copied === message.id}
+            onPRDUpdate={onPRDUpdate}
           />
         </motion.div>
       ))}

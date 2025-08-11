@@ -1,15 +1,17 @@
 import { User, Bot, Copy, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { MarkdownMessage } from '@/components/chat/MarkdownMessage';
+import { SmartMessageRenderer } from './SmartMessageRenderer';
+import { PRD } from './PRDEditor';
 import { Message } from '../../types';
 
 interface MessageBubbleProps {
   message: Message;
   onCopy: (content: string, messageId: string) => void;
   copied: boolean;
+  onPRDUpdate?: (messageId: string, updatedPRD: PRD) => void;
 }
 
-export function MessageBubble({ message, onCopy, copied }: MessageBubbleProps) {
+export function MessageBubble({ message, onCopy, copied, onPRDUpdate }: MessageBubbleProps) {
   const isUser = message.role === 'user';
 
   return (
@@ -53,7 +55,11 @@ export function MessageBubble({ message, onCopy, copied }: MessageBubbleProps) {
         {isUser ? (
           <div className="whitespace-pre-wrap break-words">{message.content}</div>
         ) : (
-          <MarkdownMessage content={message.content} />
+          <SmartMessageRenderer 
+            content={message.content} 
+            messageId={message.id}
+            onPRDUpdate={onPRDUpdate}
+          />
         )}
       </div>
     </div>
