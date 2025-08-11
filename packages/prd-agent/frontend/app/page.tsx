@@ -1,10 +1,12 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Slider } from "@/components/ui/slider";
 import { ChatMessages } from "@/components/chat/ChatMessages";
 import {
   Menu,
@@ -19,6 +21,32 @@ import {
 } from "lucide-react";
 import { Conversation, Message } from "@/types";
 import { PRD } from "@/lib/prd-schema";
+// AgentSettings interface
+interface AgentSettings {
+  model: string;
+  temperature: number;
+  maxTokens: number;
+  apiKey?: string;
+}
+
+// Enhanced model interface from OpenRouter
+interface EnhancedModel {
+  id: string;
+  name: string;
+  description?: string;
+  contextLength: number;
+  pricing: {
+    prompt: number;
+    completion: number;
+    promptFormatted: string;
+    completionFormatted: string;
+  };
+  isTopProvider: boolean;
+  maxCompletionTokens?: number;
+  isModerated: boolean;
+  provider: string;
+}
+
 
 export default function PRDAgentPage() {
   const [open, setOpen] = useState(true);
@@ -31,6 +59,23 @@ export default function PRDAgentPage() {
   const [input, setInput] = useState("");
   const [isChatLoading, setIsChatLoading] = useState(false);
   
+  // Settings state  
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settings, setSettings] = useState<AgentSettings>({
+    model: "anthropic/claude-3-5-sonnet", // Will be updated with agent defaults
+    temperature: 0.7, // Will be updated with agent defaults
+    maxTokens: 4096, // Will be updated with agent defaults
+    apiKey: undefined
+  });
+  
+  // Models state
+  const [models, setModels] = useState<EnhancedModel[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [modelsError, setModelsError] = useState<string | null>(null);
+  
+  // Provider selection state
+  const [selectedProvider, setSelectedProvider] = useState<string>("");
+  
   // Title editing state
   const [editingConversationId, setEditingConversationId] = useState<string | null>(null);
   const [tempTitle, setTempTitle] = useState("");
@@ -41,6 +86,33 @@ export default function PRDAgentPage() {
   // Computed helpers for working with active conversation
   const activeConversation = conversations.find(c => c.id === activeId);
   const activeMessages = activeConversation?.messages || [];
+
+  // Computed helpers for provider/model selection
+  const availableProviders = React.useMemo(() => {
+    const providerMap = new Map<string, { name: string; count: number; isTopProvider: boolean }>();
+    
+    models.forEach(model => {
+      const provider = model.provider;
+      const existing = providerMap.get(provider);
+      providerMap.set(provider, {
+        name: provider,
+        count: (existing?.count || 0) + 1,
+        isTopProvider: existing?.isTopProvider || model.isTopProvider
+      });
+    });
+    
+    return Array.from(providerMap.values()).sort((a, b) => {
+      // Sort by top providers first, then alphabetically
+      if (a.isTopProvider && !b.isTopProvider) return -1;
+      if (!a.isTopProvider && b.isTopProvider) return 1;
+      return a.name.localeCompare(b.name);
+    });
+  }, [models]);
+
+  const modelsForProvider = React.useMemo(() => {
+    if (!selectedProvider) return [];
+    return models.filter(model => model.provider === selectedProvider);
+  }, [models, selectedProvider]);
 
   // Helper to update the active conversation
   const updateActiveConversation = (updater: (conv: Conversation) => Conversation) => {
@@ -110,14 +182,173 @@ export default function PRDAgentPage() {
     setTempTitle("");
   };
 
+  // Helper function to extract provider from model ID
+  const extractProviderFromModel = (modelId: string): string => {
+    // Model IDs are typically in format "provider/model-name"
+    const parts = modelId.split('/');
+    return parts.length > 1 ? parts[0] : modelId;
+  };
+
+  // Fetch agent defaults from backend
+  const fetchAgentDefaults = useCallback(async () => {
+    try {
+      console.log("Fetching agent defaults...");
+      const response = await fetch("/api/agent-defaults");
+      
+      if (!response.ok) {
+        throw new Error(`Failed to fetch agent defaults: ${response.status}`);
+      }
+      
+      const defaults = await response.json();
+      console.log("Agent defaults received:", defaults);
+      
+      // Update settings with agent defaults (but preserve any existing apiKey)
+      setSettings(prev => ({
+        ...prev,
+        model: defaults.model || prev.model,
+        temperature: defaults.temperature || prev.temperature,
+        maxTokens: defaults.maxTokens || prev.maxTokens,
+        // Don't override apiKey from localStorage
+      }));
+      
+      // Immediately derive and set provider from default model
+      if (defaults.model) {
+        const provider = extractProviderFromModel(defaults.model);
+        console.log("Setting provider from agent default model:", provider);
+        setSelectedProvider(provider);
+      }
+      
+      return defaults;
+    } catch (error) {
+      console.error("Failed to fetch agent defaults:", error);
+      return null;
+    }
+  }, []);
+
+  // Fetch models from OpenRouter
+  const fetchModels = useCallback(async () => {
+    console.log("fetchModels called, modelsLoading:", modelsLoading);
+    if (modelsLoading) return; // Prevent duplicate requests
+    
+    console.log("Starting to fetch models...");
+    setModelsLoading(true);
+    setModelsError(null);
+    
+    try {
+      const headers: HeadersInit = { "Content-Type": "application/json" };
+      
+      // Include API key if available
+      if (settings.apiKey) {
+        headers["x-api-key"] = settings.apiKey;
+        console.log("Using provided API key");
+      } else {
+        console.log("No API key provided, using environment variables");
+      }
+      
+      console.log("Fetching from /api/models...");
+      const response = await fetch("/api/models", { headers });
+      console.log("Response status:", response.status);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("API error response:", errorText);
+        throw new Error(`Failed to fetch models: ${response.status} - ${errorText}`);
+      }
+      
+      const data = await response.json();
+      console.log("Received data:", data);
+      
+      if (data.error) {
+        throw new Error(data.error);
+      }
+      
+      setModels(data.models || []);
+      console.log(`Successfully loaded ${data.models?.length || 0} models from OpenRouter`);
+      
+    } catch (error) {
+      console.error("Error fetching models:", error);
+      setModelsError(error instanceof Error ? error.message : "Failed to fetch models");
+      
+      // Fallback to hardcoded models if API fails
+      const fallbackModels: EnhancedModel[] = [
+        {
+          id: "anthropic/claude-3-5-sonnet",
+          name: "Claude 3.5 Sonnet",
+          description: "Most intelligent model, best for complex reasoning",
+          contextLength: 200000,
+          pricing: { prompt: 3.0, completion: 15.0, promptFormatted: "$3.00", completionFormatted: "$15.00" },
+          isTopProvider: true,
+          isModerated: false,
+          provider: "anthropic"
+        },
+        {
+          id: "anthropic/claude-3-haiku",
+          name: "Claude 3 Haiku",
+          description: "Fastest model, best for simple tasks",
+          contextLength: 200000,
+          pricing: { prompt: 0.25, completion: 1.25, promptFormatted: "$0.25", completionFormatted: "$1.25" },
+          isTopProvider: true,
+          isModerated: false,
+          provider: "anthropic"
+        },
+        {
+          id: "openai/gpt-4-turbo",
+          name: "GPT-4 Turbo",
+          description: "OpenAI's most capable model",
+          contextLength: 128000,
+          pricing: { prompt: 10.0, completion: 30.0, promptFormatted: "$10.00", completionFormatted: "$30.00" },
+          isTopProvider: true,
+          isModerated: true,
+          provider: "openai"
+        }
+      ];
+      setModels(fallbackModels);
+    } finally {
+      setModelsLoading(false);
+    }
+  }, [settings.apiKey]);
+
+
   // ---------- Initialization (load from localStorage) ----------
   useEffect(() => {
     console.log("Initializing from localStorage...");
+    
+    // Declare variables with broader scope for use in finally block
+    let savedSettings: AgentSettings | null = null;
+    
     try {
       const raw = localStorage.getItem("prd-agent-conversations");
       const activeRaw = localStorage.getItem("prd-agent-active-conversation");
+      const settingsRaw = localStorage.getItem("prd-agent-settings");
       
-      console.log("Raw localStorage data:", { raw, activeRaw });
+      console.log("Raw localStorage data:", { raw, activeRaw, settingsRaw });
+
+      // Load settings (will be merged with agent defaults later)
+      savedSettings = settingsRaw && settingsRaw.trim() && settingsRaw !== "undefined" && settingsRaw !== "null" 
+        ? (() => {
+            try {
+              const parsed = JSON.parse(settingsRaw) as AgentSettings;
+              console.log("Loaded settings from localStorage:", parsed);
+              return parsed;
+            } catch (parseErr) {
+              console.warn("Failed to parse settings from localStorage:", parseErr);
+              return null;
+            }
+          })()
+        : null;
+
+      // Load selected provider
+      const providerRaw = localStorage.getItem("prd-agent-selected-provider");
+      if (providerRaw && providerRaw.trim() && providerRaw !== "undefined" && providerRaw !== "null") {
+        try {
+          const savedProvider = JSON.parse(providerRaw) as string;
+          setSelectedProvider(savedProvider);
+          console.log("Loaded provider from localStorage:", savedProvider);
+        } catch (parseErr) {
+          console.warn("Failed to parse provider from localStorage:", parseErr);
+        }
+      }
+
 
       let parsed: Conversation[] = [];
       let needsInitialization = true;
@@ -187,8 +418,45 @@ export default function PRDAgentPage() {
       // Allow other effects to run safely after initialization finishes
       isInitializedRef.current = true;
       console.log("Initialization complete");
+      
+      // Fetch agent defaults and then models after initialization
+      setTimeout(async () => {
+        const agentDefaults = await fetchAgentDefaults();
+        
+        // Merge agent defaults with localStorage settings (localStorage takes precedence for user customizations)
+        // Note: fetchAgentDefaults already updated settings and set provider, so we need to be careful not to override
+        if (agentDefaults && savedSettings) {
+          // Only update settings if localStorage has different values than what fetchAgentDefaults set
+          const currentModel = savedSettings.model || agentDefaults.model;
+          setSettings(prev => ({
+            model: currentModel,
+            temperature: savedSettings.temperature !== undefined ? savedSettings.temperature : (agentDefaults.temperature || prev.temperature),
+            maxTokens: savedSettings.maxTokens || agentDefaults.maxTokens || prev.maxTokens,
+            apiKey: savedSettings.apiKey || prev.apiKey // Always prefer localStorage apiKey
+          }));
+          
+          // Re-derive provider if the final model is different from what fetchAgentDefaults set
+          if (currentModel && currentModel !== agentDefaults.model) {
+            const provider = extractProviderFromModel(currentModel);
+            console.log("Re-setting provider based on localStorage model:", provider);
+            setSelectedProvider(provider);
+          }
+        } else if (savedSettings) {
+          // Only localStorage available
+          setSettings(savedSettings);
+          // Derive provider from localStorage model
+          if (savedSettings.model) {
+            const provider = extractProviderFromModel(savedSettings.model);
+            console.log("Setting provider from localStorage model:", provider);
+            setSelectedProvider(provider);
+          }
+        }
+        // If only agentDefaults available, settings and provider are already updated by fetchAgentDefaults
+        
+        fetchModels();
+      }, 100);
     }
-  }, []);
+  }, [fetchModels, fetchAgentDefaults]);
 
 
   useEffect(() => {
@@ -229,6 +497,68 @@ export default function PRDAgentPage() {
       console.error("Error saving conversations to localStorage:", err);
     }
   }, [conversations, activeId]);
+
+  // Save settings to localStorage
+  useEffect(() => {
+    if (!isInitializedRef.current) {
+      console.log("Skipping settings save - not initialized yet");
+      return;
+    }
+
+    try {
+      console.log("Saving settings to localStorage:", settings);
+      localStorage.setItem("prd-agent-settings", JSON.stringify(settings));
+    } catch (err) {
+      console.error("Error saving settings to localStorage:", err);
+    }
+  }, [settings]);
+
+  // Save selected provider to localStorage
+  useEffect(() => {
+    if (!isInitializedRef.current) {
+      console.log("Skipping provider save - not initialized yet");
+      return;
+    }
+
+    if (selectedProvider) {
+      try {
+        console.log("Saving provider to localStorage:", selectedProvider);
+        localStorage.setItem("prd-agent-selected-provider", JSON.stringify(selectedProvider));
+      } catch (err) {
+        console.error("Error saving provider to localStorage:", err);
+      }
+    }
+  }, [selectedProvider]);
+
+  // Fetch models when API key changes (after initialization)
+  useEffect(() => {
+    if (!isInitializedRef.current) return;
+    
+    fetchModels();
+  }, [settings.apiKey, fetchModels]);
+
+  // Fallback provider selection (only when no provider is set and models are available)
+  useEffect(() => {
+    if (!isInitializedRef.current) return;
+    if (models.length === 0) return;
+    if (selectedProvider) return; // Provider already set
+    
+    // If current model exists in fetched models, derive provider from it
+    const currentModel = models.find(model => model.id === settings.model);
+    if (currentModel) {
+      console.log("Fallback: Setting provider based on current model:", currentModel.provider);
+      setSelectedProvider(currentModel.provider);
+    } else if (availableProviders.length > 0) {
+      // If current model doesn't exist, select first available provider and model
+      const firstProvider = availableProviders[0];
+      const firstModel = models.find(model => model.provider === firstProvider.name);
+      if (firstModel) {
+        console.log("Fallback: Model not found, defaulting to first available:", firstProvider.name, firstModel.id);
+        setSelectedProvider(firstProvider.name);
+        setSettings(prev => ({ ...prev, model: firstModel.id }));
+      }
+    }
+  }, [models, settings.model, selectedProvider, availableProviders]);
 
 
   useEffect(() => {
@@ -294,7 +624,10 @@ export default function PRDAgentPage() {
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: newMessages }),
+        body: JSON.stringify({ 
+          messages: newMessages, 
+          settings: settings
+        }),
       });
 
       if (!response.ok) throw new Error("Chat request failed");
@@ -359,7 +692,7 @@ export default function PRDAgentPage() {
         </div>
 
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm">
+          <Button variant="ghost" size="sm" onClick={() => setSettingsOpen(!settingsOpen)}>
             <Settings className="h-4 w-4 mr-2" />
             Settings
           </Button>
@@ -557,7 +890,232 @@ export default function PRDAgentPage() {
             </div>
           </div>
         </main>
+
+        {/* Right Settings Sidebar */}
+        <aside
+          className={`${
+            settingsOpen ? "w-80" : "w-0"
+          } transition-all duration-200 border-l bg-sidebar-background overflow-hidden flex flex-col`}
+        >
+          {settingsOpen && (
+            <>
+              <div className="flex items-center justify-between p-3 border-b">
+                <div className="text-sm font-semibold">Settings</div>
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  onClick={() => setSettingsOpen(false)}
+                  className="h-8 w-8 p-0"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+              
+              <div className="flex-1 overflow-auto p-4">
+                <div className="space-y-6">
+                  {/* Model Configuration */}
+                  <div>
+                    <div className="text-xs text-muted-foreground uppercase tracking-wide mb-3">
+                      Model Configuration
+                    </div>
+                    
+                    {/* Provider Selection */}
+                    <div className="space-y-4">
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <label className="block text-sm font-medium">Provider</label>
+                          <div className="flex items-center gap-2">
+                            {modelsLoading && (
+                              <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                                <div className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" />
+                                Loading...
+                              </div>
+                            )}
+                            {modelsError && (
+                              <button
+                                onClick={fetchModels}
+                                className="text-xs text-red-500 hover:text-red-700 underline"
+                              >
+                                Retry
+                              </button>
+                            )}
+                            {!modelsLoading && (
+                              <button
+                                onClick={fetchModels}
+                                className="text-xs text-blue-500 hover:text-blue-700 underline"
+                                title="Refresh models"
+                              >
+                                Refresh
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        <Select
+                          value={selectedProvider}
+                          onValueChange={(value: string) => {
+                            setSelectedProvider(value);
+                            // Reset model selection when provider changes
+                            const firstModel = models.find(model => model.provider === value);
+                            if (firstModel) {
+                              setSettings(prev => ({ ...prev, model: firstModel.id }));
+                            }
+                          }}
+                          disabled={modelsLoading}
+                        >
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder={modelsLoading ? "Loading providers..." : "Select a provider"} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {availableProviders.length === 0 && !modelsLoading ? (
+                              <div className="p-2 text-sm text-muted-foreground text-center">
+                                {modelsError 
+                                  ? `Error: ${modelsError}` 
+                                  : "No providers available. Click Refresh or add API key."
+                                }
+                              </div>
+                            ) : (
+                              availableProviders.map((provider) => (
+                                <SelectItem key={provider.name} value={provider.name}>
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-medium capitalize">{provider.name}</span>
+                                    {provider.isTopProvider && (
+                                      <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded flex-shrink-0">
+                                        ⭐ Top
+                                      </span>
+                                    )}
+                                    <span className="text-xs text-muted-foreground">
+                                      ({provider.count} model{provider.count !== 1 ? 's' : ''})
+                                    </span>
+                                  </div>
+                                </SelectItem>
+                              ))
+                            )}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {/* Model Selection */}
+                      <div>
+                        <label className="block text-sm font-medium mb-2">Model</label>
+                        <Select
+                          value={settings.model}
+                          onValueChange={(value: string) => setSettings(prev => ({ ...prev, model: value }))}
+                          disabled={modelsLoading || !selectedProvider}
+                        >
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder={
+                              !selectedProvider ? "Select a provider first" : 
+                              modelsLoading ? "Loading models..." : 
+                              "Select a model"
+                            } />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {modelsForProvider.length === 0 && !modelsLoading && selectedProvider ? (
+                              <div className="p-2 text-sm text-muted-foreground text-center">
+                                No models available for {selectedProvider}
+                              </div>
+                            ) : (
+                              modelsForProvider.map((model) => (
+                                <SelectItem key={model.id} value={model.id}>
+                                  <div className="flex items-start justify-between w-full min-w-0">
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center gap-2">
+                                        <span className="font-medium truncate">{model.name}</span>
+                                        {model.isTopProvider && (
+                                          <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded flex-shrink-0">
+                                            ⭐ Top
+                                          </span>
+                                        )}
+                                        {model.isModerated && (
+                                          <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded flex-shrink-0">
+                                            🛡️ Safe
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="text-xs text-muted-foreground mt-0.5 space-y-0.5">
+                                        <div className="flex items-center gap-3">
+                                          <span>{(model.contextLength / 1000).toFixed(0)}K context</span>
+                                          <span>{model.pricing.promptFormatted}/{model.pricing.completionFormatted} per 1M</span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </SelectItem>
+                              ))
+                            )}
+                          </SelectContent>
+                        </Select>
+                        {modelsError && (
+                          <p className="text-xs text-red-500 mt-1">
+                            {modelsError}. Using fallback models.
+                          </p>
+                        )}
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {selectedProvider ? 
+                            `${modelsForProvider.length} model${modelsForProvider.length !== 1 ? 's' : ''} available` :
+                            `${availableProviders.length} provider${availableProviders.length !== 1 ? 's' : ''} available`
+                          }
+                          {modelsLoading && ' (loading...)'}
+                        </p>
+                      </div>
+                      
+                      {/* Temperature */}
+                      <div>
+                        <label className="block text-sm font-medium mb-2">
+                          Temperature: {settings.temperature}
+                        </label>
+                        <Slider
+                          value={[settings.temperature]}
+                          onValueChange={([value]) => setSettings(prev => ({ ...prev, temperature: value }))}
+                          max={2}
+                          min={0}
+                          step={0.1}
+                          className="w-full"
+                        />
+                        <div className="flex justify-between text-xs text-muted-foreground mt-1">
+                          <span>Precise</span>
+                          <span>Balanced</span>
+                          <span>Creative</span>
+                        </div>
+                      </div>
+                      
+                      {/* Max Tokens */}
+                      <div>
+                        <label className="block text-sm font-medium mb-2">Max Tokens</label>
+                        <Input
+                          type="number"
+                          value={settings.maxTokens}
+                          onChange={(e) => setSettings(prev => ({ ...prev, maxTokens: parseInt(e.target.value) }))}
+                          className="w-full"
+                        />
+                      </div>
+                      
+                      {/* API Key */}
+                      <div>
+                        <label className="block text-sm font-medium mb-2">
+                          OpenRouter API Key (Optional)
+                        </label>
+                        <Input
+                          type="password"
+                          value={settings.apiKey || ''}
+                          onChange={(e) => setSettings(prev => ({ ...prev, apiKey: e.target.value }))}
+                          placeholder="sk-or-..."
+                          className="w-full"
+                        />
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Leave empty to use environment variable
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                </div>
+              </div>
+            </>
+          )}
+        </aside>
       </div>
+
     </div>
   );
 }

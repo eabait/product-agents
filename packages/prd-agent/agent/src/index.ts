@@ -311,7 +311,7 @@ class ChangeWorker extends WorkerAgent {
                - To replace entire array: "targetUsers": {"replace": ["User 1", "User 2"]}
                
                IMPORTANT: Return ONLY the JSON patch object. Do not include any explanation or the full PRD.`,
-      temperature: 0.2, // Lower temperature for more deterministic patches
+      temperature: this.settings.temperature || 0.2, // Use settings temperature (fixed for consistency)
       maxTokens: this.settings.maxTokens || 2000
     })
 
@@ -403,7 +403,12 @@ export class PRDGeneratorAgent extends BaseAgent {
       new PRDSynthesisWorker(this.settings)
     ]
     
-    this.changeWorker = new ChangeWorker(this.settings)
+    // Create ChangeWorker with fixed temperature for consistent patch generation
+    const changeWorkerSettings = {
+      ...this.settings,
+      temperature: (this.settings as any).changeWorkerTemperature || 0.2
+    }
+    this.changeWorker = new ChangeWorker(changeWorkerSettings)
   }
 
   async chat(message: string, context?: any): Promise<PRD | { prd: PRD; patch: PRDPatch }> {

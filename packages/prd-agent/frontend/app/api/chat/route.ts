@@ -5,7 +5,7 @@ const PRD_AGENT_URL = process.env.PRD_AGENT_URL || 'http://localhost:3001';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { messages } = body;
+    const { messages, settings } = body;
     
     // Convert AI SDK messages to the format expected by the PRD agent
     const lastMessage = messages[messages.length - 1];
@@ -27,10 +27,14 @@ export async function POST(request: NextRequest) {
     // Call the actual PRD agent backend
     const endpoint = isEdit ? '/prd/edit' : '/prd';
     const payload = isEdit 
-      ? { message: userMessage, existingPRD }
-      : { message: userMessage };
+      ? { message: userMessage, existingPRD, settings }
+      : { message: userMessage, settings };
     
-    const response = await fetch(`${PRD_AGENT_URL}${endpoint}`, {
+    const fullUrl = `${PRD_AGENT_URL}${endpoint}`;
+    console.log('Making request to:', fullUrl);
+    console.log('Payload:', JSON.stringify(payload, null, 2));
+    
+    const response = await fetch(fullUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)

@@ -23,15 +23,65 @@ try {
   console.log('No .env file found or error reading it')
 }
 
-const apiKey = process.env.OPENROUTER_API_KEY
-console.log('OpenRouter API Key configured:', apiKey ? `${apiKey.substring(0, 8)}...` : 'NOT SET')
+const defaultApiKey = process.env.OPENROUTER_API_KEY
+console.log('Default OpenRouter API Key configured:', defaultApiKey ? `${defaultApiKey.substring(0, 8)}...` : 'NOT SET')
 
-const agent = new PRDGeneratorAgent({
-  apiKey: apiKey,
+// Default settings from environment variables
+const defaultSettings = {
+  apiKey: defaultApiKey,
   model: process.env.PRD_AGENT_MODEL || 'anthropic/claude-3-5-sonnet',
   temperature: parseFloat(process.env.PRD_AGENT_TEMPERATURE || '0.3'),
   maxTokens: parseInt(process.env.PRD_AGENT_MAX_TOKENS || '4000')
-})
+}
+
+// Fixed temperature for ChangeWorker (for consistent patch generation)
+const changeWorkerTemperature = parseFloat(process.env.PRD_AGENT_CHANGE_WORKER_TEMPERATURE || '0.2')
+
+// Helper function to create agent with merged settings
+const createAgent = (requestSettings?: any) => {
+  const effectiveSettings = {
+    ...defaultSettings,
+    ...(requestSettings || {}),
+    // Use request API key if provided, otherwise fall back to environment
+    apiKey: requestSettings?.apiKey || defaultSettings.apiKey
+  }
+  
+  // Validate critical settings
+  if (!effectiveSettings.apiKey) {
+    throw new Error('No API key configured. Please set OPENROUTER_API_KEY environment variable or provide apiKey in settings.')
+  }
+  
+  if (!effectiveSettings.model) {
+    throw new Error('No model specified. Please provide a valid model in settings.')
+  }
+  
+  // Validate numeric settings
+  if (typeof effectiveSettings.temperature !== 'number' || effectiveSettings.temperature < 0 || effectiveSettings.temperature > 2) {
+    console.warn(`Invalid temperature ${effectiveSettings.temperature}, using default 0.3`)
+    effectiveSettings.temperature = 0.3
+  }
+  
+  if (typeof effectiveSettings.maxTokens !== 'number' || effectiveSettings.maxTokens < 1) {
+    console.warn(`Invalid maxTokens ${effectiveSettings.maxTokens}, using default 4000`)
+    effectiveSettings.maxTokens = 4000
+  }
+  
+  console.log('Creating agent with validated settings:', {
+    model: effectiveSettings.model,
+    temperature: effectiveSettings.temperature,
+    maxTokens: effectiveSettings.maxTokens,
+    changeWorkerTemperature: changeWorkerTemperature,
+    apiKey: effectiveSettings.apiKey ? `${effectiveSettings.apiKey.substring(0, 8)}...` : 'NOT SET'
+  })
+  
+  // Add changeWorkerTemperature to settings
+  const agentSettings = {
+    ...effectiveSettings,
+    changeWorkerTemperature
+  }
+  
+  return new PRDGeneratorAgent(agentSettings)
+}
 
 const parseJsonBody = (req: http.IncomingMessage): Promise<any> => {
   return new Promise((resolve) => {
@@ -55,12 +105,34 @@ const port = process.env.PRD_AGENT_HTTP_PORT ? parseInt(process.env.PRD_AGENT_HT
 const server = http.createServer(async (req, res) => {
   const url = req.url || ''
   const method = req.method || 'GET'
+  
+  // Add CORS headers
+  res.setHeader('Access-Control-Allow-Origin', '*')
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+  
+  // Handle preflight requests
+  if (method === 'OPTIONS') {
+    res.statusCode = 200
+    res.end()
+    return
+  }
+  
+  console.log(`${method} ${url} - Request received`)
 
   // Health check
   if (method === 'GET' && url === '/health') {
     res.statusCode = 200
     res.setHeader('Content-Type', 'application/json')
-    res.end(JSON.stringify({ status: 'ok' }))
+    res.end(JSON.stringify({ 
+      status: 'ok',
+      defaultSettings: {
+        model: defaultSettings.model,
+        temperature: defaultSettings.temperature,
+        maxTokens: defaultSettings.maxTokens,
+        apiKeyConfigured: !!defaultSettings.apiKey
+      }
+    }))
     return
   }
 
@@ -68,17 +140,23 @@ const server = http.createServer(async (req, res) => {
   if (method === 'POST' && url === '/prd') {
     const body = await parseJsonBody(req)
     const message = body?.message
+    const settings = body?.settings
+    
     if (!message) {
       res.statusCode = 400
       res.end(JSON.stringify({ error: 'Missing message' }))
       return
     }
+    
     try {
+      // Create agent with request-specific settings
+      const agent = createAgent(settings)
       const result = await (agent as any).chat(message)
       res.statusCode = 200
       res.setHeader('Content-Type', 'application/json')
       res.end(JSON.stringify({ prd: result }))
     } catch (e: any) {
+      console.error('PRD creation error:', e)
       res.statusCode = 500
       res.end(JSON.stringify({ error: String(e?.message || e) }))
     }
@@ -90,23 +168,30 @@ const server = http.createServer(async (req, res) => {
     const body = await parseJsonBody(req)
     const message = body?.message
     const existingPRD = body?.existingPRD
+    const settings = body?.settings
+    
     if (!message || !existingPRD) {
       res.statusCode = 400
       res.end(JSON.stringify({ error: 'Missing message or existingPRD' }))
       return
     }
+    
     try {
+      // Create agent with request-specific settings
+      const agent = createAgent(settings)
       const result = await (agent as any).chat(message, { operation: 'edit', existingPRD })
       res.statusCode = 200
       res.setHeader('Content-Type', 'application/json')
       res.end(JSON.stringify(result))
     } catch (e: any) {
+      console.error('PRD edit error:', e)
       res.statusCode = 500
       res.end(JSON.stringify({ error: String(e?.message || e) }))
     }
     return
   }
 
+  console.log(`404 - Unhandled request: ${method} ${url}`)
   res.statusCode = 404
   res.end(JSON.stringify({ error: 'Not found' }))
 })
