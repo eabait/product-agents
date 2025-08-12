@@ -50,7 +50,7 @@ interface EnhancedModel {
 
 
 export default function PRDAgentPage() {
-  const [open, setOpen] = useState(true);
+  const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
@@ -683,13 +683,9 @@ export default function PRDAgentPage() {
     <div className="h-screen w-screen flex flex-col bg-background text-foreground">
       {/* Header */}
       <header className="h-14 flex flex-row items-center gap-4 px-4 border-b">
-        <button
-          aria-label="Toggle sidebar"
-          onClick={() => setOpen((v) => !v)}
-          className="inline-flex items-center justify-center p-2 rounded-md hover:bg-accent"
-        >
-          <Menu className="h-5 w-5" />
-        </button>
+        <Button variant="ghost" size="sm" onClick={() => setLeftSidebarOpen(!leftSidebarOpen)}>
+          <Menu className="h-4 w-4" />
+        </Button>
 
         <div className="flex-1">
           <h1 className="text-lg font-semibold">PRD Generator Agent</h1>
@@ -708,19 +704,19 @@ export default function PRDAgentPage() {
         {/* Left collapsible sidebar */}
         <aside
           className={`${
-            open ? "w-72" : "w-16"
-          } transition-all duration-200 border-r bg-sidebar-background overflow-hidden flex flex-col`}
+            leftSidebarOpen ? "w-80" : "w-16"
+          } transition-all duration-200 border-l bg-sidebar overflow-hidden flex flex-col`}
         >
           <div className="flex items-center justify-between p-3">
             <div className="flex items-center gap-2">
               <div className="rounded-md bg-muted px-2 py-1 text-sm font-medium">
                 PRD
               </div>
-              {open && (
+              {leftSidebarOpen && (
                 <div className="text-sm font-semibold">Conversations</div>
               )}
             </div>
-            {open && (
+            {leftSidebarOpen && (
               <Button size="sm" variant="outline" onClick={createConversation}>
                 <Plus className="h-4 w-4 mr-2" /> New
               </Button>
@@ -736,7 +732,7 @@ export default function PRDAgentPage() {
                 }`}
               >
                 <MessageCircle className="h-5 w-5 flex-shrink-0" />
-                {open && (
+                {leftSidebarOpen && (
                   <div className="flex-1 min-w-0">
                     {editingConversationId === conv.id ? (
                       // Edit mode
@@ -812,13 +808,13 @@ export default function PRDAgentPage() {
                     </div>
                   </div>
                 )}
-                {!open && (
+                {/* {!leftSidebarOpen && (
                   <button
                     className="absolute inset-0"
                     onClick={() => setActiveId(conv.id)}
                     title={conv.title}
                   />
-                )}
+                )} */}
               </div>
             ))}
           </div>
@@ -899,7 +895,7 @@ export default function PRDAgentPage() {
         <aside
           className={`${
             settingsOpen ? "w-80" : "w-0"
-          } transition-all duration-200 border-l bg-sidebar-background overflow-hidden flex flex-col`}
+          } transition-all duration-200 border-l bg-sidebar overflow-hidden flex flex-col`}
         >
           {settingsOpen && (
             <>
