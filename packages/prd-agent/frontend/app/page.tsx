@@ -808,13 +808,6 @@ export default function PRDAgentPage() {
                     </div>
                   </div>
                 )}
-                {/* {!leftSidebarOpen && (
-                  <button
-                    className="absolute inset-0"
-                    onClick={() => setActiveId(conv.id)}
-                    title={conv.title}
-                  />
-                )} */}
               </div>
             ))}
           </div>
