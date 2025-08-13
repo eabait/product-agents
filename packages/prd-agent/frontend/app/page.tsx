@@ -18,6 +18,7 @@ import {
   Edit3,
   Check,
   X,
+  Trash2,
 } from "lucide-react";
 import { Conversation, Message } from "@/types";
 import { PRD } from "@/lib/prd-schema";
@@ -81,6 +82,9 @@ export default function PRDAgentPage() {
   // Title editing state
   const [editingConversationId, setEditingConversationId] = useState<string | null>(null);
   const [tempTitle, setTempTitle] = useState("");
+
+  // Delete confirmation state
+  const [deletingConversationId, setDeletingConversationId] = useState<string | null>(null);
 
   // track initialization so we don't run sync effects before we've loaded from localStorage
   const isInitializedRef = useRef(false);
@@ -185,6 +189,49 @@ export default function PRDAgentPage() {
   const cancelTitleEdit = () => {
     setEditingConversationId(null);
     setTempTitle("");
+  };
+
+  // Delete conversation
+  const deleteConversation = (conversationId: string) => {
+    const conversationToDelete = conversations.find(c => c.id === conversationId);
+    if (!conversationToDelete) return;
+
+    // Remove the conversation from the list
+    const updatedConversations = conversations.filter(c => c.id !== conversationId);
+    setConversations(updatedConversations);
+
+    // Handle active conversation switching
+    if (conversationId === activeId) {
+      // If we're deleting the active conversation, switch to another one
+      if (updatedConversations.length > 0) {
+        // Switch to the first remaining conversation
+        setActiveId(updatedConversations[0].id);
+      } else {
+        // If no conversations left, create a new one
+        const newId = uuidv4();
+        const newConv: Conversation = {
+          id: newId,
+          title: "New PRD",
+          messages: [],
+          createdAt: new Date().toISOString(),
+        };
+        setConversations([newConv]);
+        setActiveId(newId);
+      }
+    }
+
+    // Clear delete confirmation state
+    setDeletingConversationId(null);
+  };
+
+  // Confirm deletion
+  const confirmDelete = (conversationId: string) => {
+    setDeletingConversationId(conversationId);
+  };
+
+  // Cancel deletion
+  const cancelDelete = () => {
+    setDeletingConversationId(null);
   };
 
   // Helper function to extract provider from model ID
@@ -756,17 +803,60 @@ export default function PRDAgentPage() {
                         >
                           <div className="font-medium text-sm truncate">{conv.title}</div>
                         </button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-5 w-5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            startEditingTitle(conv.id, conv.title);
-                          }}
-                        >
-                          <Edit3 className="h-3 w-3" />
-                        </Button>
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-5 w-5 flex-shrink-0"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              startEditingTitle(conv.id, conv.title);
+                            }}
+                          >
+                            <Edit3 className="h-3 w-3" />
+                          </Button>
+                          {deletingConversationId === conv.id ? (
+                            <div className="flex items-center gap-1">
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-5 w-5 text-red-600 hover:text-red-700 hover:bg-red-50 flex-shrink-0"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  deleteConversation(conv.id);
+                                }}
+                                title="Confirm delete"
+                              >
+                                <Check className="h-3 w-3" />
+                              </Button>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-5 w-5 flex-shrink-0"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  cancelDelete();
+                                }}
+                                title="Cancel delete"
+                              >
+                                <X className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          ) : (
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-5 w-5 text-muted-foreground hover:text-red-600 hover:bg-red-50 flex-shrink-0"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                confirmDelete(conv.id);
+                              }}
+                              title="Delete conversation"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                          )}
+                        </div>
                       </div>
                     )}
                     <div className="text-xs text-muted-foreground">
