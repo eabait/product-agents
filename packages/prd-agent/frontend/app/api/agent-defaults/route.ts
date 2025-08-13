@@ -25,18 +25,18 @@ export async function GET() {
       model: defaults.model,
       temperature: defaults.temperature,
       maxTokens: defaults.maxTokens,
-      apiKeyConfigured: defaults.apiKeyConfigured
+      agentInfo: data.agentInfo || null
     });
     
   } catch (error) {
     console.error('Error fetching agent defaults:', error);
     
-    // Return fallback defaults if agent is not available
+    // Return fallback defaults instead of undefined
     return NextResponse.json({
       model: 'anthropic/claude-3-5-sonnet',
       temperature: 0.3,
-      maxTokens: 4000,
-      apiKeyConfigured: false
+      maxTokens: 8000,
+      agentInfo: null
     });
   }
 }

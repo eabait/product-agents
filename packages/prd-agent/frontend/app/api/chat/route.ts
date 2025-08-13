@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const PRD_AGENT_URL = process.env.PRD_AGENT_URL || 'http://localhost:3001';
+const PRD_AGENT_URL = process.env.PRD_AGENT_URL;
 
 export async function POST(request: NextRequest) {
   try {

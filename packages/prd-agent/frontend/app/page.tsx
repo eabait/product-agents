@@ -46,6 +46,7 @@ interface EnhancedModel {
   isModerated: boolean;
   provider: string;
   toolSupport?: boolean;
+  capabilities?: string[];
 }
 
 
@@ -63,7 +64,7 @@ export default function PRDAgentPage() {
   // Settings state  
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settings, setSettings] = useState<AgentSettings>({
-    model: "anthropic/claude-3-5-sonnet", // Will be updated with agent defaults
+    model: "anthropic/claude-3-7-sonnet", // Will be updated with agent defaults
     temperature: 0.7, // Will be updated with agent defaults
     maxTokens: 8000, // Will be updated with agent defaults
     apiKey: undefined
@@ -83,10 +84,13 @@ export default function PRDAgentPage() {
 
   // track initialization so we don't run sync effects before we've loaded from localStorage
   const isInitializedRef = useRef(false);
+  
+  // Use ref to track fetch in progress to prevent duplicate requests
+  const fetchingModelsRef = useRef(false);
 
   // Computed helpers for working with active conversation
   const activeConversation = conversations.find(c => c.id === activeId);
-  const activeMessages = activeConversation?.messages || [];
+  const activeMessages = React.useMemo(() => activeConversation?.messages || [], [activeConversation]);
 
   // Computed helpers for provider/model selection
   const availableProviders = React.useMemo(() => {
@@ -227,11 +231,12 @@ export default function PRDAgentPage() {
   }, []);
 
   // Fetch models from OpenRouter
-  const fetchModels = useCallback(async () => {
-    console.log("fetchModels called, modelsLoading:", modelsLoading);
-    if (modelsLoading) return; // Prevent duplicate requests
+  const fetchModels = useCallback(async (apiKey?: string) => {
+    console.log("fetchModels called, fetchingModelsRef.current:", fetchingModelsRef.current);
+    if (fetchingModelsRef.current) return; // Prevent duplicate requests
     
     console.log("Starting to fetch models...");
+    fetchingModelsRef.current = true;
     setModelsLoading(true);
     setModelsError(null);
     
@@ -239,16 +244,12 @@ export default function PRDAgentPage() {
       const headers: HeadersInit = { "Content-Type": "application/json" };
       
       // Include API key if available
-      if (settings.apiKey) {
-        headers["x-api-key"] = settings.apiKey;
-        console.log("Using provided API key");
+      if (apiKey) {
+        headers["x-api-key"] = apiKey;
       } else {
         console.log("No API key provided, using environment variables");
-      }
-      
-      console.log("Fetching from /api/models...");
+      }      
       const response = await fetch("/api/models", { headers });
-      console.log("Response status:", response.status);
       
       if (!response.ok) {
         const errorText = await response.text();
@@ -257,8 +258,7 @@ export default function PRDAgentPage() {
       }
       
       const data = await response.json();
-      console.log("Received data:", data);
-      
+
       if (data.error) {
         throw new Error(data.error);
       }
@@ -269,51 +269,12 @@ export default function PRDAgentPage() {
     } catch (error) {
       console.error("Error fetching models:", error);
       setModelsError(error instanceof Error ? error.message : "Failed to fetch models");
-      
-      // Fallback to hardcoded models if API fails (only tool-compatible models)
-      const fallbackModels: EnhancedModel[] = [
-        {
-          id: "anthropic/claude-3-5-sonnet",
-          name: "Claude 3.5 Sonnet",
-          description: "Most intelligent model, best for complex reasoning",
-          contextLength: 200000,
-          pricing: { prompt: 3.0, completion: 15.0, promptFormatted: "$3.00", completionFormatted: "$15.00" },
-          isTopProvider: true,
-          isModerated: false,
-          provider: "anthropic",
-          toolSupport: true
-        },
-        {
-          id: "anthropic/claude-3-haiku",
-          name: "Claude 3 Haiku",
-          description: "Fastest model, best for simple tasks",
-          contextLength: 200000,
-          pricing: { prompt: 0.25, completion: 1.25, promptFormatted: "$0.25", completionFormatted: "$1.25" },
-          isTopProvider: true,
-          isModerated: false,
-          provider: "anthropic",
-          toolSupport: true
-        },
-        {
-          id: "openai/gpt-4o",
-          name: "GPT-4o",
-          description: "OpenAI's multimodal flagship model",
-          contextLength: 128000,
-          pricing: { prompt: 5.0, completion: 15.0, promptFormatted: "$5.00", completionFormatted: "$15.00" },
-          isTopProvider: true,
-          isModerated: true,
-          provider: "openai",
-          toolSupport: true
-        }
-      ];
-      setModels(fallbackModels);
     } finally {
       setModelsLoading(false);
+      fetchingModelsRef.current = false;
     }
-  }, [settings.apiKey]);
+  }, []);
 
-
-  // ---------- Initialization (load from localStorage) ----------
   useEffect(() => {
     console.log("Initializing from localStorage...");
     
@@ -427,11 +388,14 @@ export default function PRDAgentPage() {
       setTimeout(async () => {
         const agentDefaults = await fetchAgentDefaults();
         
+        let finalApiKey: string | undefined;
+        
         // Merge agent defaults with localStorage settings (localStorage takes precedence for user customizations)
         // Note: fetchAgentDefaults already updated settings and set provider, so we need to be careful not to override
         if (agentDefaults && savedSettings) {
           // Only update settings if localStorage has different values than what fetchAgentDefaults set
           const currentModel = savedSettings.model || agentDefaults.model;
+          finalApiKey = savedSettings.apiKey;
           setSettings(prev => ({
             model: currentModel,
             temperature: savedSettings.temperature !== undefined ? savedSettings.temperature : (agentDefaults.temperature || prev.temperature),
@@ -447,6 +411,7 @@ export default function PRDAgentPage() {
           }
         } else if (savedSettings) {
           // Only localStorage available
+          finalApiKey = savedSettings.apiKey;
           setSettings(savedSettings);
           // Derive provider from localStorage model
           if (savedSettings.model) {
@@ -457,10 +422,11 @@ export default function PRDAgentPage() {
         }
         // If only agentDefaults available, settings and provider are already updated by fetchAgentDefaults
         
-        fetchModels();
+        // Fetch models with the final API key
+        fetchModels(finalApiKey);
       }, 100);
     }
-  }, [fetchModels, fetchAgentDefaults]);
+  }, []);
 
 
   useEffect(() => {
@@ -538,8 +504,8 @@ export default function PRDAgentPage() {
   useEffect(() => {
     if (!isInitializedRef.current) return;
     
-    fetchModels();
-  }, [settings.apiKey, fetchModels]);
+    fetchModels(settings.apiKey);
+  }, [settings.apiKey]);
 
   // Fallback provider selection (only when no provider is set and models are available)
   useEffect(() => {
@@ -821,7 +787,7 @@ export default function PRDAgentPage() {
               <div className="mx-auto max-w-2xl text-center py-24">
                 <h2 className="text-2xl font-bold mb-2">Welcome to PRD Agent</h2>
                 <p className="text-muted-foreground mb-6">
-                  Ask the agent to generate or edit a PRD. Try: "Create a PRD for a mobile payment app"
+                  Ask the agent to generate or edit a PRD. Try: &quot;Create a PRD for a mobile payment app&quot;
                 </p>
                 <div className="grid gap-2">
                   <button
@@ -926,7 +892,7 @@ export default function PRDAgentPage() {
                             )}
                             {modelsError && (
                               <button
-                                onClick={fetchModels}
+                                onClick={() => fetchModels(settings.apiKey)}
                                 className="text-xs text-red-500 hover:text-red-700 underline"
                               >
                                 Retry
@@ -934,7 +900,7 @@ export default function PRDAgentPage() {
                             )}
                             {!modelsLoading && (
                               <button
-                                onClick={fetchModels}
+                                onClick={() => fetchModels(settings.apiKey)}
                                 className="text-xs text-blue-500 hover:text-blue-700 underline"
                                 title="Refresh models"
                               >

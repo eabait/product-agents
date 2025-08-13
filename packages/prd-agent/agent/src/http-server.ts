@@ -2,8 +2,7 @@
 import * as http from 'http'
 import * as fs from 'fs'
 import * as path from 'path'
-import { PRDSchema, PRDPatchSchema, applyPatch, PRDPatch, PRDGeneratorAgent } from './index'
-import { isModelToolCompatible } from './model-compatibility'
+import { PRDGeneratorAgent } from './index'
 
 // Simple .env file loader
 try {
@@ -30,7 +29,7 @@ console.log('Default OpenRouter API Key configured:', defaultApiKey ? `${default
 // Default settings from environment variables
 const defaultSettings = {
   apiKey: defaultApiKey,
-  model: process.env.PRD_AGENT_MODEL || 'anthropic/claude-3-5-sonnet',
+  model: process.env.PRD_AGENT_MODEL || PRDGeneratorAgent.defaultModel,
   temperature: parseFloat(process.env.PRD_AGENT_TEMPERATURE || '0.3'),
   maxTokens: parseInt(process.env.PRD_AGENT_MAX_TOKENS || '8000')
 }
@@ -39,7 +38,7 @@ const defaultSettings = {
 const changeWorkerTemperature = parseFloat(process.env.PRD_AGENT_CHANGE_WORKER_TEMPERATURE || '0.2')
 
 // Helper function to create agent with merged settings
-const createAgent = (requestSettings?: any) => {
+const createAgent = async (requestSettings?: any) => {
   const effectiveSettings = {
     ...defaultSettings,
     ...(requestSettings || {}),
@@ -54,11 +53,6 @@ const createAgent = (requestSettings?: any) => {
   
   if (!effectiveSettings.model) {
     throw new Error('No model specified. Please provide a valid model in settings.')
-  }
-  
-  // Validate that the model supports tool use (function calling)
-  if (!isModelToolCompatible(effectiveSettings.model)) {
-    throw new Error(`Model '${effectiveSettings.model}' does not support function calling/tools. Please use a compatible model like 'anthropic/claude-3-5-sonnet', 'openai/gpt-4o', or 'openai/gpt-4-turbo'.`)
   }
   
   // Validate numeric settings
@@ -76,8 +70,7 @@ const createAgent = (requestSettings?: any) => {
     model: effectiveSettings.model,
     temperature: effectiveSettings.temperature,
     maxTokens: effectiveSettings.maxTokens,
-    changeWorkerTemperature: changeWorkerTemperature,
-    apiKey: effectiveSettings.apiKey ? `${effectiveSettings.apiKey.substring(0, 8)}...` : 'NOT SET'
+    changeWorkerTemperature: changeWorkerTemperature
   })
   
   // Add changeWorkerTemperature to settings
@@ -135,8 +128,13 @@ const server = http.createServer(async (req, res) => {
       defaultSettings: {
         model: defaultSettings.model,
         temperature: defaultSettings.temperature,
-        maxTokens: defaultSettings.maxTokens,
-        apiKeyConfigured: !!defaultSettings.apiKey
+        maxTokens: defaultSettings.maxTokens
+      },
+      agentInfo: {
+        name: PRDGeneratorAgent.agentName,
+        description: PRDGeneratorAgent.agentDescription,
+        requiredCapabilities: PRDGeneratorAgent.requiredCapabilities,
+        defaultModel: PRDGeneratorAgent.defaultModel
       }
     }))
     return
@@ -156,7 +154,7 @@ const server = http.createServer(async (req, res) => {
     
     try {
       // Create agent with request-specific settings
-      const agent = createAgent(settings)
+      const agent = await createAgent(settings)
       const result = await (agent as any).chat(message)
       res.statusCode = 200
       res.setHeader('Content-Type', 'application/json')
@@ -184,7 +182,7 @@ const server = http.createServer(async (req, res) => {
     
     try {
       // Create agent with request-specific settings
-      const agent = createAgent(settings)
+      const agent = await createAgent(settings)
       const result = await (agent as any).chat(message, { operation: 'edit', existingPRD })
       res.statusCode = 200
       res.setHeader('Content-Type', 'application/json')

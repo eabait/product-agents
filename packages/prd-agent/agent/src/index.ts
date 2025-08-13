@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { OpenRouterClient } from '@product-agents/openrouter-client'
 import { BaseAgent, WorkerAgent, WorkerResult } from '@product-agents/agent-core'
+import { ModelCapability } from '@product-agents/model-compatibility'
 
 const PRDSchema = z.object({
   problemStatement: z.string(),
@@ -18,7 +19,8 @@ const PRDSchema = z.object({
 
 export type PRD = z.infer<typeof PRDSchema>
 
-// Simplified PRD Patch schema for OpenAI compatibility
+// Simplified PRD Patch schema for Cerebras/DeepSeek compatibility
+// Using only required non-null types to avoid JSON schema issues
 const PRDPatchSchema = z.object({
   mode: z.literal('patch'),
   patch: z.object({
@@ -33,7 +35,7 @@ const PRDPatchSchema = z.object({
     })).optional(),
     constraints: z.array(z.string()).optional(),
     assumptions: z.array(z.string()).optional()
-  })
+  }).strict()  // Only allow defined fields, no additional properties
 })
 
 export type PRDPatch = z.infer<typeof PRDPatchSchema>
@@ -272,7 +274,7 @@ class ChangeWorker extends WorkerAgent {
     }
 
     // Generate a patch for the PRD
-    const patchResponse = await this.client.generateStructured({
+    const rawPatchResponse = await this.client.generateStructured({
       model: this.settings.model,
       schema: PRDPatchSchema,
       prompt: `You are editing an existing Product Requirements Document. 
@@ -288,8 +290,9 @@ class ChangeWorker extends WorkerAgent {
                {
                  "mode": "patch",
                  "patch": {
-                   // Only include fields that need to change
-                   // Provide the complete new value for each field
+                   // ONLY include fields that need to change
+                   // Do NOT include fields that should remain unchanged
+                   // Provide the complete new value for each field that changes
                  }
                }
                
@@ -301,21 +304,41 @@ class ChangeWorker extends WorkerAgent {
                - To update constraints: "constraints": ["Updated constraint 1", "Updated constraint 2"]
                - To update assumptions: "assumptions": ["Updated assumption 1", "Updated assumption 2"]
                
-               IMPORTANT: 
+               CRITICAL RULES: 
                - Return ONLY the JSON patch object
+               - OMIT fields that don't need to change completely from the JSON
+               - NEVER use null values, undefined, or empty strings
                - Do not use nested objects like {"replace": [...]} or {"add": [...]}
                - Provide direct values: arrays for array fields, strings for string fields
-               - Do not include any explanation or the full PRD`,
+               - Do not include any explanation or the full PRD
+               - Example: If only constraints change, return {"mode":"patch","patch":{"constraints":["new constraint"]}}`,
       temperature: this.settings.temperature || 0.2, // Use settings temperature (fixed for consistency)
       maxTokens: this.settings.maxTokens || 2000
     })
 
+    // Clean the patch response by removing null values to avoid schema issues
+    const cleanPatch = cleanPatchResponse(rawPatchResponse as PRDPatch)
+
     return {
       name: 'prdPatch',
-      data: patchResponse,
+      data: cleanPatch,
       confidence: 0.95
     }
   }
+}
+
+// Helper function to clean patch response by removing null values
+function cleanPatchResponse(patch: PRDPatch): PRDPatch {
+  const cleanedPatch = { ...patch }
+  
+  // Remove null values from the patch object
+  for (const [key, value] of Object.entries(cleanedPatch.patch)) {
+    if (value === null) {
+      delete (cleanedPatch.patch as any)[key]
+    }
+  }
+  
+  return cleanedPatch
 }
 
 // Helper function to apply a patch to a PRD
@@ -323,7 +346,7 @@ export function applyPatch(basePRD: PRD, patch: PRDPatch['patch']): PRD {
   const result = { ...basePRD }
   
   for (const [field, operation] of Object.entries(patch)) {
-    if (!operation) continue
+    if (operation === null || operation === undefined) continue
     
     // Handle different field types
     if (typeof operation === 'string') {
@@ -384,6 +407,12 @@ export function applyPatch(basePRD: PRD, patch: PRDPatch['patch']): PRD {
 }
 
 export class PRDGeneratorAgent extends BaseAgent {
+  // Agent capabilities and default configuration
+  static readonly requiredCapabilities: ModelCapability[] = ['structured_output' as ModelCapability]
+  static readonly defaultModel = 'anthropic/claude-3-7-sonnet'
+  static readonly agentName = 'PRD Generator'
+  static readonly agentDescription = 'Generates comprehensive Product Requirements Documents from user requirements'
+
   private workers: WorkerAgent[]
   private changeWorker: ChangeWorker
 
