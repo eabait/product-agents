@@ -1,6 +1,7 @@
 import { OpenRouterClient } from '@product-agents/openrouter-client'
 import { WorkerAgent, WorkerResult } from '@product-agents/agent-core'
 import { PRDSchema } from '../schemas'
+import { createPRDSynthesisPrompt } from '../prompts'
 
 export class PRDSynthesisWorker extends WorkerAgent {
   private client: OpenRouterClient
@@ -20,17 +21,7 @@ export class PRDSynthesisWorker extends WorkerAgent {
     const prd = await this.client.generateStructured({
       model: this.settings.model,
       schema: PRDSchema,
-      prompt: `Synthesize a complete Product Requirements Document from this analysis:
-               ${JSON.stringify(allResults)}
-               
-               Create a comprehensive PRD with:
-               - Clear problem statement
-               - Solution overview
-               - Target users (be specific about user personas)
-               - Goals (business and user goals)
-               - Success metrics (measurable KPIs with targets and timelines)
-               - Constraints (technical, business, regulatory)
-               - Assumptions (key assumptions being made)`,
+      prompt: createPRDSynthesisPrompt(allResults),
       temperature: this.settings.temperature,
       maxTokens: this.settings.maxTokens
     })

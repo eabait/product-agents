@@ -1,5 +1,6 @@
 import { OpenRouterClient } from '@product-agents/openrouter-client'
 import { WorkerAgent, WorkerResult } from '@product-agents/agent-core'
+import { createProblemStatementPrompt } from '../prompts'
 
 export class ProblemStatementWorker extends WorkerAgent {
   private client: OpenRouterClient
@@ -19,12 +20,7 @@ export class ProblemStatementWorker extends WorkerAgent {
 
     const statement = await this.client.generateText({
       model: this.settings.model,
-      prompt: `Create a clear, concise problem statement for this product:
-               Original request: ${input.message}
-               Context: ${JSON.stringify(contextAnalysis)}
-               Requirements: ${JSON.stringify(requirements)}
-               
-               The problem statement should be 2-3 sentences that clearly define what problem this product solves.`,
+      prompt: createProblemStatementPrompt(input.message, contextAnalysis, requirements),
       temperature: this.settings.temperature
     })
 

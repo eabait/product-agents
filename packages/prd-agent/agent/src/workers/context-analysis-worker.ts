@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { OpenRouterClient } from '@product-agents/openrouter-client'
 import { WorkerAgent, WorkerResult } from '@product-agents/agent-core'
+import { createContextAnalysisPrompt } from '../prompts'
 
 export class ContextAnalysisWorker extends WorkerAgent {
   private client: OpenRouterClient
@@ -29,7 +30,7 @@ export class ContextAnalysisWorker extends WorkerAgent {
         user_experience: z.array(z.string()).optional(),
         constraints: z.array(z.string()).optional()
       }),
-      prompt: `Analyze this product request and extract key themes, requirements, and constraints: ${input.message}`,
+      prompt: createContextAnalysisPrompt(input.message),
       temperature: this.settings.temperature
     })
 

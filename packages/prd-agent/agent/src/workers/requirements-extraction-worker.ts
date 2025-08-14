@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { OpenRouterClient } from '@product-agents/openrouter-client'
 import { WorkerAgent, WorkerResult } from '@product-agents/agent-core'
+import { createRequirementsExtractionPrompt } from '../prompts'
 
 export class RequirementsExtractionWorker extends WorkerAgent {
   private client: OpenRouterClient
@@ -23,9 +24,7 @@ export class RequirementsExtractionWorker extends WorkerAgent {
         functional: z.array(z.string()),
         nonFunctional: z.array(z.string())
       }),
-      prompt: `Extract functional and non-functional requirements from:
-               Original request: ${input.message}
-               Context analysis: ${JSON.stringify(contextAnalysis)}`,
+      prompt: createRequirementsExtractionPrompt(input.message, contextAnalysis),
       temperature: this.settings.temperature
     })
 
