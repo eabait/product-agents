@@ -53,7 +53,7 @@ const SelectValue = React.forwardRef<
   if (!context) throw new Error("SelectValue must be used within Select")
 
   return (
-    <span ref={ref} className={cn("block truncate", className)} {...props}>
+    <span ref={ref} className={cn("block", className)} title={context.value || placeholder} {...props}>
       {context.value || placeholder}
     </span>
   )
@@ -183,7 +183,7 @@ const SelectItem = React.forwardRef<
       <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
         {isSelected && <Check className="h-4 w-4" />}
       </span>
-      <span className="truncate">{children}</span>
+      <span className="break-words">{children}</span>
     </div>
   )
 })

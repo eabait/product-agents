@@ -1069,7 +1069,7 @@ export default function PRDAgentPage() {
                                   <div className="flex items-start justify-between w-full min-w-0">
                                     <div className="flex-1 min-w-0">
                                       <div className="flex items-center gap-2">
-                                        <span className="font-medium truncate">{model.name}</span>
+                                        <span className="font-medium break-words">{model.name}</span>
                                         {model.isTopProvider && (
                                           <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded flex-shrink-0">
                                             ⭐ Top
