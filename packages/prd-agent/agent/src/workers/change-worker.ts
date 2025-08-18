@@ -16,7 +16,7 @@ export class ChangeWorker extends WorkerAgent {
     return this.execute({ message })
   }
 
-  async execute(input: any, context?: Map<string, any>): Promise<WorkerResult> {
+  async execute(input: any, _context?: Map<string, any>): Promise<WorkerResult> {
     const { message, existingPRD } = input
     
     if (!existingPRD) {
