@@ -116,6 +116,9 @@ export class MockOpenRouterClient {
   }
 
   private determineWorkerFromPrompt(prompt: string): string {
+    if (prompt.includes('Analyze this product request for PRD generation completeness')) {
+      return 'clarification'
+    }
     if (prompt.includes('Analyze this product request and extract key themes')) {
       return 'contextAnalysis'
     }

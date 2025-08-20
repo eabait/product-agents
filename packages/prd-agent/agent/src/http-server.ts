@@ -156,9 +156,16 @@ const server = http.createServer(async (req, res) => {
       // Create agent with request-specific settings
       const agent = await createAgent(settings)
       const result = await (agent as any).chat(message)
+      
       res.statusCode = 200
       res.setHeader('Content-Type', 'application/json')
-      res.end(JSON.stringify({ prd: result }))
+      
+      // Check if result is clarification questions
+      if (result && typeof result === 'object' && 'needsClarification' in result) {
+        res.end(JSON.stringify(result))
+      } else {
+        res.end(JSON.stringify({ prd: result }))
+      }
     } catch (e: any) {
       console.error('PRD creation error:', e)
       res.statusCode = 500

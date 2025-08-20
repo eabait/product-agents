@@ -4,6 +4,7 @@
  * Centralizes access to all prompt functions used by worker agents.
  */
 
+export { createClarificationPrompt } from './clarification'
 export { createContextAnalysisPrompt } from './context-analysis'
 export { createRequirementsExtractionPrompt } from './requirements-extraction'
 export { createProblemStatementPrompt } from './problem-statement'

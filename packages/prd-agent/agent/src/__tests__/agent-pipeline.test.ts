@@ -6,6 +6,7 @@
  */
 
 import { 
+  ClarificationWorker,
   ContextAnalysisWorker,
   RequirementsExtractionWorker,
   ProblemStatementWorker,
@@ -35,6 +36,59 @@ describe('Individual Worker Prompt Generation', () => {
 
   beforeEach(() => {
     mockClient.clearTraces()
+  })
+
+  describe('ClarificationWorker', () => {
+    it('should generate clarification prompt and return questions when context insufficient', async () => {
+      const worker = new ClarificationWorker(testSettings)
+      
+      mockClient.setMockResponse('clarification', {
+        needsClarification: true,
+        confidence: 30,
+        missingCritical: ['target users unclear', 'platform requirements missing'],
+        questions: [
+          'Who are the primary users of this platform?',
+          'What platforms should this support?',
+          'What is the business model and revenue strategy?'
+        ]
+      })
+
+      const userMessage = 'Build a social media platform'
+      await worker.execute({ message: userMessage })
+
+      const traces = mockClient.getTracesForWorker('clarification')
+      expect(traces).toHaveLength(1)
+
+      const trace = traces[0]
+      expect(trace.prompt).toContain('Analyze this product request for PRD generation completeness')
+      expect(trace.prompt).toContain(`"${userMessage}"`)
+      expect(trace.prompt).toContain('EVALUATION CRITERIA')
+      expect(trace.prompt).toContain('needsClarification')
+
+      console.log('\n=== CLARIFICATION PROMPT ===')
+      console.log(trace.prompt)
+    })
+
+    it('should indicate no clarification needed for sufficient context', async () => {
+      const worker = new ClarificationWorker(testSettings)
+      
+      mockClient.setMockResponse('clarification', {
+        needsClarification: false,
+        confidence: 90,
+        missingCritical: [],
+        questions: []
+      })
+
+      const detailedMessage = 'Build a task management platform for remote software development teams of 5-10 people. Users are developers and project managers who need to track sprint progress, assign tasks, and collaborate on code reviews. The platform should integrate with GitHub, support real-time notifications, and work on web and mobile. Success metrics include 90% user adoption within 3 months and 50% reduction in missed deadlines.'
+      
+      await worker.execute({ message: detailedMessage })
+
+      const traces = mockClient.getTracesForWorker('clarification')
+      expect(traces).toHaveLength(1)
+
+      console.log('\n=== CLARIFICATION PROMPT (SUFFICIENT CONTEXT) ===')
+      console.log(traces[0].prompt)
+    })
   })
 
   describe('ContextAnalysisWorker', () => {
@@ -324,6 +378,53 @@ describe('Individual Worker Prompt Generation', () => {
       traces.forEach((trace, index) => {
         console.log(`\nStep ${index + 1} (${trace.workerName}): ${trace.prompt.length} characters`)
       })
+    })
+  })
+
+  describe('Clarification Integration Tests', () => {
+    it('should demonstrate full clarification flow', async () => {
+      // Step 1: Initial vague request triggers clarification
+      const clarificationWorker = new ClarificationWorker(testSettings)
+      mockClient.setMockResponse('clarification', {
+        needsClarification: true,
+        confidence: 20,
+        missingCritical: ['target users not specified', 'business model unclear'],
+        questions: [
+          'Who are the target users?',
+          'What is the business model?'
+        ]
+      })
+
+      const vageMessage = 'Build an app'
+      const clarificationResult = await clarificationWorker.execute({ message: vageMessage })
+      
+      expect(clarificationResult.data.needsClarification).toBe(true)
+      expect(clarificationResult.data.questions).toHaveLength(2)
+
+      // Step 2: User provides additional context, no more clarification needed
+      mockClient.setMockResponse('clarification', {
+        needsClarification: false,
+        confidence: 85,
+        missingCritical: [],
+        questions: []
+      })
+
+      const detailedMessage = `${vageMessage}
+
+Additional context: 
+- Target users: Small business owners who manage inventory
+- Business model: SaaS subscription at $29/month
+- Key features: Inventory tracking, low stock alerts, sales reporting
+- Platform: Web-based with mobile companion app
+- Success metrics: 100 paying customers in 6 months`
+
+      const finalClarification = await clarificationWorker.execute({ message: detailedMessage })
+      
+      expect(finalClarification.data.needsClarification).toBe(false)
+
+      console.log('\n=== CLARIFICATION FLOW VALIDATION ===')
+      console.log('✅ Vague request triggers clarification questions')
+      console.log('✅ Detailed context bypasses clarification')
     })
   })
 })

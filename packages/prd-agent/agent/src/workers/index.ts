@@ -1,3 +1,4 @@
+export { ClarificationWorker } from './clarification-worker'
 export { ContextAnalysisWorker } from './context-analysis-worker'
 export { RequirementsExtractionWorker } from './requirements-extraction-worker'
 export { ProblemStatementWorker } from './problem-statement-worker'

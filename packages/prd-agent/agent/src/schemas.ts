@@ -36,3 +36,13 @@ export const PRDPatchSchema = z.object({
 })
 
 export type PRDPatch = z.infer<typeof PRDPatchSchema>
+
+// Clarification schemas - enhanced with confidence scoring and critical gap detection
+export const ClarificationResultSchema = z.object({
+  needsClarification: z.boolean(),
+  confidence: z.number().min(0).max(100),
+  missingCritical: z.array(z.string()),
+  questions: z.array(z.string())
+})
+
+export type ClarificationResult = z.infer<typeof ClarificationResultSchema>

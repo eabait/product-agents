@@ -27,6 +27,12 @@ describe('PRD Agent Prompt Tracing', () => {
     
     // Set up mock responses for each worker
     mockClient.setMockResponses({
+      clarification: {
+        needsClarification: false,
+        confidence: 80,
+        missingCritical: [],
+        questions: []
+      },
       contextAnalysis: {
         themes: ['User authentication', 'Data security', 'Performance'],
         requirements: {
@@ -123,11 +129,12 @@ describe('PRD Agent Prompt Tracing', () => {
 
       // Verify all workers were called in the correct sequence
       const traces = mockClient.traces
-      expect(traces).toHaveLength(5) // Should have 5 worker calls
+      expect(traces).toHaveLength(6) // Should have 6 worker calls (including clarification)
 
       // Check the sequence of worker execution
       const workerSequence = traces.map(trace => trace.workerName)
       expect(workerSequence).toEqual([
+        'clarification',
         'contextAnalysis',
         'requirementsExtraction', 
         'problemStatement',
@@ -253,6 +260,11 @@ describe('PRD Agent Prompt Tracing', () => {
       const traces = mockClient.traces
 
       // Analyze each worker's prompt characteristics
+      const clarificationTrace = traces.find(t => t.workerName === 'clarification')
+      expect(clarificationTrace?.prompt).toMatch(/Analyze this product request for PRD generation completeness/)
+      expect(clarificationTrace?.prompt).toContain('EVALUATION CRITERIA')
+      expect(clarificationTrace?.prompt).toContain('needsClarification')
+
       const contextTrace = traces.find(t => t.workerName === 'contextAnalysis')
       expect(contextTrace?.prompt).toMatch(/Analyze this product request and extract key themes/)
 

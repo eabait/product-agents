@@ -7,28 +7,18 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { messages, settings } = body;
     
-    // Convert AI SDK messages to the format expected by the PRD agent
-    const lastMessage = messages[messages.length - 1];
-    const userMessage = lastMessage.content;
+    // Build comprehensive context from conversation history
+    const conversationContext = buildConversationContext(messages);
     
-    // Check if we're dealing with a PRD conversation by looking at previous messages
-    const hasPRDContent = messages.some((msg: any) => {
-      try {
-        const parsed = JSON.parse(msg.content);
-        return parsed && typeof parsed.problemStatement === 'string';
-      } catch {
-        return false;
-      }
-    });
-    
-    const existingPRD = hasPRDContent ? getPRDFromMessages(messages) : null;
+    // Check if there's an existing PRD to edit
+    const existingPRD = getPRDFromMessages(messages);
     const isEdit = existingPRD !== null;
     
-    // Call the actual PRD agent backend
+    // Call the appropriate PRD agent endpoint
     const endpoint = isEdit ? '/prd/edit' : '/prd';
     const payload = isEdit 
-      ? { message: userMessage, existingPRD, settings }
-      : { message: userMessage, settings };
+      ? { message: conversationContext, existingPRD, settings }
+      : { message: conversationContext, settings };
     
     const fullUrl = `${PRD_AGENT_URL}${endpoint}`;
     console.log('Making request to:', fullUrl);
@@ -47,6 +37,20 @@ export async function POST(request: NextRequest) {
     
     const data = await response.json();
     
+    // Handle clarification questions
+    if (data.needsClarification) {
+      const questionsText = data.questions.map((q: string, index: number) => 
+        `**${index + 1}. ${q}**`
+      ).join('\n\n');
+      
+      const confidenceNote = data.confidence !== undefined ? 
+        `\n\n*Confidence: ${data.confidence}% - focusing on critical gaps only*` : '';
+      
+      const content = `I need more information to create a comprehensive PRD. Please help me understand:\n\n${questionsText}${confidenceNote}\n\nPlease provide as much detail as possible for each area.`;
+      
+      return NextResponse.json({ content, clarificationQuestions: data.questions });
+    }
+    
     // Return the response in a simple JSON format
     const content = data.prd ? JSON.stringify(data.prd, null, 2) : data.message || JSON.stringify(data);
     
@@ -61,6 +65,37 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
+}
+
+function buildConversationContext(messages: any[]): string {
+  // Filter to user messages only and build accumulated context
+  const userMessages = messages.filter((msg: any) => msg.role === 'user');
+  
+  if (userMessages.length === 1) {
+    // Single message, return as-is
+    return userMessages[0].content;
+  }
+  
+  // Multiple messages - accumulate context intelligently
+  const originalRequest = userMessages[0].content;
+  const clarificationResponses = userMessages.slice(1);
+  
+  // Check if we have clarification responses
+  if (clarificationResponses.length === 0) {
+    return originalRequest;
+  }
+  
+  // Build comprehensive context
+  let context = `Original Request: ${originalRequest}\n\n`;
+  context += `Additional Context from Clarifications:\n`;
+  
+  clarificationResponses.forEach((msg: any, index: number) => {
+    context += `${index + 1}. ${msg.content}\n`;
+  });
+  
+  context += `\nPlease create a PRD that incorporates both the original request and all the additional context provided above.`;
+  
+  return context;
 }
 
 function getPRDFromMessages(messages: any[]): any {

@@ -1,8 +1,9 @@
 import { BaseAgent, WorkerAgent, WorkerResult } from '@product-agents/agent-core'
 import { ModelCapability } from '@product-agents/model-compatibility'
-import { PRD, PRDPatch } from './schemas'
+import { PRD, PRDPatch, ClarificationResult } from './schemas'
 import { applyPatch } from './utils'
 import {
+  ClarificationWorker,
   ContextAnalysisWorker,
   RequirementsExtractionWorker,
   ProblemStatementWorker,
@@ -25,6 +26,7 @@ export class PRDGeneratorAgent extends BaseAgent {
     super(settings)
     
     this.workers = [
+      new ClarificationWorker(this.settings),
       new ContextAnalysisWorker(this.settings),
       new RequirementsExtractionWorker(this.settings),
       new ProblemStatementWorker(this.settings),
@@ -40,10 +42,9 @@ export class PRDGeneratorAgent extends BaseAgent {
     this.changeWorker = new ChangeWorker(changeWorkerSettings)
   }
 
-  async chat(message: string, context?: any): Promise<PRD | { prd: PRD; patch: PRDPatch }> {
-    // Check if this is an edit operation
+  async chat(message: string, context?: any): Promise<PRD | { prd: PRD; patch: PRDPatch } | ClarificationResult> {
+    // Handle edit operations
     if (context?.operation === 'edit' && context?.existingPRD) {
-      // Use ChangeWorker for edits
       const patchResult = await this.changeWorker.execute({
         message,
         existingPRD: context.existingPRD
@@ -58,13 +59,17 @@ export class PRDGeneratorAgent extends BaseAgent {
       }
     }
     
-    // Default: create new PRD
+    // Execute workers sequentially
     const results = new Map<string, WorkerResult>()
     
-    // Execute workers sequentially (Orchestrator-Workers pattern)
     for (const worker of this.workers) {
       const result = await worker.execute({ message, context }, results)
       results.set(result.name, result)
+      
+      // If clarification worker needs clarification, return questions immediately
+      if (result.name === 'clarification' && (result.data as ClarificationResult).needsClarification) {
+        return result.data as ClarificationResult
+      }
     }
     
     // Return the final PRD
