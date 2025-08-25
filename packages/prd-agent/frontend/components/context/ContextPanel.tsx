@@ -5,8 +5,6 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { 
   Plus, 
@@ -14,11 +12,8 @@ import {
   Filter, 
   Upload, 
   Download, 
-  Settings, 
-  X,
   FileText,
   AlertCircle,
-  Check,
   CheckSquare,
   XSquare
 } from 'lucide-react'
@@ -201,7 +196,7 @@ export function ContextPanel({ isOpen, onClose }: ContextPanelProps) {
 
             {/* Filters */}
             <div className="flex gap-2">
-              <Select value={selectedCategory} onValueChange={(value: ContextCategory | 'all') => setSelectedCategory(value)}>
+              <Select className='flex-1' value={selectedCategory} onValueChange={(value: ContextCategory | 'all') => setSelectedCategory(value)}>
                 <SelectTrigger className="flex-1">
                   <SelectValue placeholder="Filter by category" />
                 </SelectTrigger>
@@ -215,7 +210,7 @@ export function ContextPanel({ isOpen, onClose }: ContextPanelProps) {
                 </SelectContent>
               </Select>
 
-              <Select value={selectedPriority} onValueChange={(value: ContextPriority | 'all') => setSelectedPriority(value)}>
+              <Select className='flex-1' value={selectedPriority} onValueChange={(value: ContextPriority | 'all') => setSelectedPriority(value)}>
                 <SelectTrigger className="flex-1">
                   <SelectValue placeholder="Filter by priority" />
                 </SelectTrigger>

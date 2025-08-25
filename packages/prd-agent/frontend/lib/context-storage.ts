@@ -233,11 +233,25 @@ class ContextStorage {
   toggleContextItemActive(id: ContextItemId | string): CategorizedContextItem | null {
     const context = this.getCategorizedContext()
     const contextId = typeof id === 'string' ? createContextItemId(id) : id
-    const item = context.find(item => item.id === contextId)
+    const itemIndex = context.findIndex(item => item.id === contextId)
     
-    if (!item) return null
+    if (itemIndex === -1) return null
     
-    return this.updateContextItem(id, { isActive: !item.isActive })
+    const currentItem = context[itemIndex]
+    const updatedItem: CategorizedContextItem = {
+      ...currentItem,
+      isActive: !currentItem.isActive,
+      lastUsed: new Date()
+    }
+    
+    // Create new context array with updated item
+    const updatedContext = [...context]
+    updatedContext[itemIndex] = updatedItem
+    
+    // Use immediate save to prevent race conditions
+    this.saveCategorizedContext(updatedContext)
+    
+    return updatedItem
   }
 
   /**

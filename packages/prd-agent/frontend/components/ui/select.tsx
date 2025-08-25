@@ -10,9 +10,27 @@ interface SelectContextType {
   open: boolean
   setOpen: (open: boolean) => void
   disabled?: boolean
+  itemLabels: Map<string, string>
 }
 
 const SelectContext = React.createContext<SelectContextType | null>(null)
+
+// Helper function to extract text content from React children
+function extractTextFromChildren(children: React.ReactNode): string {
+  if (typeof children === 'string') {
+    return children
+  }
+  if (typeof children === 'number') {
+    return children.toString()
+  }
+  if (React.isValidElement(children) && children.props.children) {
+    return extractTextFromChildren(children.props.children)
+  }
+  if (Array.isArray(children)) {
+    return children.map(extractTextFromChildren).join('')
+  }
+  return ''
+}
 
 const Select = React.forwardRef<
   HTMLDivElement,
@@ -21,13 +39,37 @@ const Select = React.forwardRef<
     onValueChange?: (value: string) => void
     disabled?: boolean
     children: React.ReactNode
+    className?: string
   }
->(({ value = "", onValueChange = () => {}, disabled = false, children }, ref) => {
+>(({ value = "", onValueChange = () => {}, disabled = false, children, className }, ref) => {
   const [open, setOpen] = React.useState(false)
+  
+  // Synchronously extract item labels from children
+  const itemLabels = React.useMemo(() => {
+    const labels = new Map<string, string>()
+    
+    // Traverse children to find SelectContent
+    React.Children.forEach(children, (child) => {
+      if (React.isValidElement(child) && child.type === SelectContent) {
+        // Traverse SelectContent children to find SelectItems
+        React.Children.forEach(child.props.children, (item) => {
+          if (React.isValidElement(item) && item.type === SelectItem) {
+            const itemValue = item.props.value
+            const itemLabel = extractTextFromChildren(item.props.children)
+            if (itemValue && itemLabel) {
+              labels.set(itemValue, itemLabel)
+            }
+          }
+        })
+      }
+    })
+    
+    return labels
+  }, [children])
 
   return (
-    <SelectContext.Provider value={{ value, onValueChange, open, setOpen, disabled }}>
-      <div ref={ref} className="relative">
+    <SelectContext.Provider value={{ value, onValueChange, open, setOpen, disabled, itemLabels }}>
+      <div ref={ref} className={cn("relative", className)}>
         {children}
       </div>
     </SelectContext.Provider>
@@ -52,9 +94,14 @@ const SelectValue = React.forwardRef<
   const context = React.useContext(SelectContext)
   if (!context) throw new Error("SelectValue must be used within Select")
 
+  // Get the display text from the labels map, fallback to value or placeholder
+  const displayText = context.value 
+    ? (context.itemLabels.get(context.value) || context.value)
+    : (placeholder || "")
+
   return (
-    <span ref={ref} className={cn("block", className)} title={context.value || placeholder} {...props}>
-      {context.value || placeholder}
+    <span ref={ref} className={cn("block", className)} title={displayText} {...props}>
+      {displayText}
     </span>
   )
 })
