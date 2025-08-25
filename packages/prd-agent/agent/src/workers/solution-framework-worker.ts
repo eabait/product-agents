@@ -25,7 +25,7 @@ export class SolutionFrameworkWorker extends WorkerAgent {
         components: z.array(z.string()).optional(),
         technologies: z.array(z.string()).optional()
       }),
-      prompt: createSolutionFrameworkPrompt(problemStatement),
+      prompt: createSolutionFrameworkPrompt(problemStatement, input.context?.contextPayload),
       temperature: this.settings.temperature
     })
 

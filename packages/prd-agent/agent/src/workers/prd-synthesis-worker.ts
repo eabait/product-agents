@@ -21,7 +21,7 @@ export class PRDSynthesisWorker extends WorkerAgent {
     const prd = await this.client.generateStructured({
       model: this.settings.model,
       schema: PRDSchema,
-      prompt: createPRDSynthesisPrompt(allResults),
+      prompt: createPRDSynthesisPrompt(allResults, input.context?.contextPayload),
       temperature: this.settings.temperature,
       maxTokens: this.settings.maxTokens
     })

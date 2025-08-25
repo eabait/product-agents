@@ -23,11 +23,11 @@ export class ChangeWorker extends WorkerAgent {
       throw new Error('ChangeWorker requires an existing PRD to edit')
     }
 
-    // Generate a patch for the PRD
+    // Generate a patch for the PRD, including context payload
     const rawPatchResponse = await this.client.generateStructured({
       model: this.settings.model,
       schema: PRDPatchSchema,
-      prompt: createChangeWorkerPrompt(existingPRD, message),
+      prompt: createChangeWorkerPrompt(existingPRD, message, input.contextPayload),
       temperature: this.settings.temperature || 0.2, // Use settings temperature (fixed for consistency)
       maxTokens: this.settings.maxTokens || 2000
     })

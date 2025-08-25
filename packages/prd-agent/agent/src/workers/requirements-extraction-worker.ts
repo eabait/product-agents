@@ -24,7 +24,7 @@ export class RequirementsExtractionWorker extends WorkerAgent {
         functional: z.array(z.string()),
         nonFunctional: z.array(z.string())
       }),
-      prompt: createRequirementsExtractionPrompt(input.message, contextAnalysis),
+      prompt: createRequirementsExtractionPrompt(input.message, contextAnalysis, input.context?.contextPayload),
       temperature: this.settings.temperature
     })
 

@@ -30,7 +30,7 @@ export class ContextAnalysisWorker extends WorkerAgent {
         user_experience: z.array(z.string()).optional(),
         constraints: z.array(z.string()).optional()
       }),
-      prompt: createContextAnalysisPrompt(input.message),
+      prompt: createContextAnalysisPrompt(input.message, input.context?.contextPayload),
       temperature: this.settings.temperature
     })
 

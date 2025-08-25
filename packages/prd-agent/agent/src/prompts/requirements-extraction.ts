@@ -7,9 +7,31 @@
 
 export function createRequirementsExtractionPrompt(
   message: string, 
-  contextAnalysis: any
+  contextAnalysis: any,
+  contextPayload?: any
 ): string {
-  return `Extract functional and non-functional requirements from:
-               Original request: ${message}
-               Context analysis: ${JSON.stringify(contextAnalysis)}`
+  let prompt = `Extract functional and non-functional requirements from:
+Original request: ${message}
+Context analysis: ${JSON.stringify(contextAnalysis)}`
+  
+  // Add specific requirements from context payload
+  if (contextPayload?.categorizedContext?.length > 0) {
+    const requirements = contextPayload.categorizedContext
+      .filter((item: any) => item.category === 'requirement' && item.isActive)
+      .sort((a: any, b: any) => {
+        const priorityOrder = { high: 3, medium: 2, low: 1 }
+        return priorityOrder[b.priority] - priorityOrder[a.priority]
+      })
+    
+    if (requirements.length > 0) {
+      prompt += '\n\nAdditional Business Requirements:\n'
+      requirements.forEach((item: any) => {
+        prompt += `- ${item.title}: ${item.content}\n`
+      })
+    }
+  }
+  
+  prompt += '\n\nPlease extract comprehensive functional and non-functional requirements, incorporating both the context analysis and any additional requirements provided.'
+  
+  return prompt
 }

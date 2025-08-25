@@ -145,6 +145,7 @@ const server = http.createServer(async (req, res) => {
     const body = await parseJsonBody(req)
     const message = body?.message
     const settings = body?.settings
+    const contextPayload = body?.contextPayload
     
     if (!message) {
       res.statusCode = 400
@@ -155,7 +156,11 @@ const server = http.createServer(async (req, res) => {
     try {
       // Create agent with request-specific settings
       const agent = await createAgent(settings)
-      const result = await (agent as any).chat(message)
+      
+      // Build context object with contextPayload if provided
+      const context = contextPayload ? { contextPayload } : undefined
+      
+      const result = await (agent as any).chat(message, context)
       
       res.statusCode = 200
       res.setHeader('Content-Type', 'application/json')
@@ -180,6 +185,7 @@ const server = http.createServer(async (req, res) => {
     const message = body?.message
     const existingPRD = body?.existingPRD
     const settings = body?.settings
+    const contextPayload = body?.contextPayload
     
     if (!message || !existingPRD) {
       res.statusCode = 400
@@ -190,7 +196,15 @@ const server = http.createServer(async (req, res) => {
     try {
       // Create agent with request-specific settings
       const agent = await createAgent(settings)
-      const result = await (agent as any).chat(message, { operation: 'edit', existingPRD })
+      
+      // Build context object with both edit operation and contextPayload
+      const context = { 
+        operation: 'edit', 
+        existingPRD,
+        ...(contextPayload && { contextPayload })
+      }
+      
+      const result = await (agent as any).chat(message, context)
       res.statusCode = 200
       res.setHeader('Content-Type', 'application/json')
       res.end(JSON.stringify(result))

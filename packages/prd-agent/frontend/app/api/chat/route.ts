@@ -3,26 +3,93 @@ import { NextRequest, NextResponse } from 'next/server';
 const PRD_AGENT_URL = process.env.PRD_AGENT_URL;
 
 export async function POST(request: NextRequest) {
+  const requestId = Math.random().toString(36).substring(7);
+  console.log(`[${requestId}] === NEW REQUEST ===`);
+  console.log(`[${requestId}] Timestamp:`, new Date().toISOString());
+  
   try {
     const body = await request.json();
-    const { messages, settings } = body;
+    const { messages, settings, contextPayload } = body;
     
-    // Build comprehensive context from conversation history
-    const conversationContext = buildConversationContext(messages);
+    console.log(`[${requestId}] Request body structure:`, {
+      messagesCount: messages?.length || 0,
+      hasSettings: !!settings,
+      hasContextPayload: !!contextPayload,
+      settingsKeys: settings ? Object.keys(settings) : [],
+      contextPayloadKeys: contextPayload ? Object.keys(contextPayload) : []
+    });
+    
+    console.log(`[${requestId}] Messages:`, messages?.map((msg, idx) => ({
+      index: idx,
+      id: msg.id,
+      role: msg.role,
+      contentLength: msg.content?.length || 0,
+      contentPreview: msg.content?.substring(0, 100) + (msg.content?.length > 100 ? '...' : ''),
+      timestamp: msg.timestamp
+    })));
     
     // Check if there's an existing PRD to edit
     const existingPRD = getPRDFromMessages(messages);
     const isEdit = existingPRD !== null;
     
+    console.log(`[${requestId}] PRD Analysis:`, {
+      hasExistingPRD: !!existingPRD,
+      isEditMode: isEdit,
+      existingPRDPreview: existingPRD ? JSON.stringify(existingPRD).substring(0, 200) + '...' : null
+    });
+    
+    // Extract the user's latest message content for the backend
+    const latestUserMessage = messages.filter(m => m.role === 'user').pop()?.content || '';
+    console.log(`[${requestId}] Latest user message:`, {
+      content: latestUserMessage,
+      length: latestUserMessage.length
+    });
+    
+    // Log context payload details
+    if (contextPayload) {
+      console.log(`[${requestId}] Context payload details:`, {
+        categorizedContextItems: contextPayload.categorizedContext?.length || 0,
+        selectedMessages: contextPayload.selectedMessages?.length || 0,
+        currentPRD: !!contextPayload.currentPRD,
+        tokenLimitPercentage: contextPayload.contextSettings?.tokenLimitPercentage || 30,
+        categorizedContextPreview: contextPayload.categorizedContext?.map(item => ({
+          title: item.title,
+          category: item.category,
+          priority: item.priority,
+          contentLength: item.content?.length || 0
+        })),
+        selectedMessagesPreview: contextPayload.selectedMessages?.map(msg => ({
+          id: msg.id,
+          role: msg.role,
+          contentLength: msg.content?.length || 0
+        }))
+      });
+    } else {
+      console.log(`[${requestId}] No context payload provided`);
+    }
+    
     // Call the appropriate PRD agent endpoint
     const endpoint = isEdit ? '/prd/edit' : '/prd';
-    const payload = isEdit 
-      ? { message: conversationContext, existingPRD, settings }
-      : { message: conversationContext, settings };
+    
+    // Send both conversation and context - clarification regression is now fixed
+    const payload = {
+      message: buildConversationContext(messages), // Send full conversation for proper clarification flow
+      ...(isEdit && { existingPRD }),
+      settings,
+      ...(contextPayload && { contextPayload }) // Re-enable context payload now that clarifications work
+    };
     
     const fullUrl = `${PRD_AGENT_URL}${endpoint}`;
-    console.log('Making request to:', fullUrl);
-    console.log('Payload:', JSON.stringify(payload, null, 2));
+    console.log(`[${requestId}] Backend request:`, {
+      url: fullUrl,
+      endpoint: endpoint,
+      isEdit: isEdit,
+      messageLength: payload.message.length,
+      hasExistingPRD: !!payload.existingPRD,
+      settings: payload.settings
+    });
+    
+    console.log(`[${requestId}] Full payload being sent to backend:`, JSON.stringify(payload, null, 2));
     
     const response = await fetch(fullUrl, {
       method: 'POST',
@@ -30,15 +97,37 @@ export async function POST(request: NextRequest) {
       body: JSON.stringify(payload)
     });
     
+    console.log(`[${requestId}] Backend response status:`, {
+      status: response.status,
+      statusText: response.statusText,
+      ok: response.ok,
+      headers: Object.fromEntries(response.headers.entries())
+    });
+    
     if (!response.ok) {
       const errorText = await response.text();
+      console.log(`[${requestId}] Backend error response:`, errorText);
       throw new Error(`Backend error: ${response.statusText} - ${errorText}`);
     }
     
     const data = await response.json();
+    console.log(`[${requestId}] Backend response data:`, {
+      hasContent: !!data.content,
+      contentLength: data.content?.length || 0,
+      contentPreview: data.content?.substring(0, 200) + (data.content?.length > 200 ? '...' : ''),
+      needsClarification: !!data.needsClarification,
+      questionsCount: data.questions?.length || 0,
+      confidence: data.confidence,
+      otherKeys: Object.keys(data).filter(k => !['content', 'needsClarification', 'questions', 'confidence'].includes(k))
+    });
     
     // Handle clarification questions
     if (data.needsClarification) {
+      console.log(`[${requestId}] Clarification needed:`, {
+        questions: data.questions,
+        confidence: data.confidence
+      });
+      
       const questionsText = data.questions.map((q: string, index: number) => 
         `**${index + 1}. ${q}**`
       ).join('\n\n');
@@ -48,16 +137,32 @@ export async function POST(request: NextRequest) {
       
       const content = `I need more information to create a comprehensive PRD. Please help me understand:\n\n${questionsText}${confidenceNote}\n\nPlease provide as much detail as possible for each area.`;
       
+      console.log(`[${requestId}] Returning clarification response:`, {
+        contentLength: content.length,
+        questionsCount: data.questions.length
+      });
+      
       return NextResponse.json({ content, clarificationQuestions: data.questions });
     }
     
     // Return the response in a simple JSON format
     const content = data.prd ? JSON.stringify(data.prd, null, 2) : data.message || JSON.stringify(data);
     
+    console.log(`[${requestId}] Final response:`, {
+      contentType: data.prd ? 'PRD' : (data.message ? 'message' : 'raw'),
+      contentLength: content.length,
+      hasPRD: !!data.prd
+    });
+    
+    console.log(`[${requestId}] === REQUEST COMPLETE ===`);
+    
     return NextResponse.json({ content });
     
   } catch (error) {
-    console.error('API route error:', error);
+    console.error(`[${requestId}] API route error:`, error);
+    console.error(`[${requestId}] Error stack:`, error instanceof Error ? error.stack : 'No stack');
+    console.log(`[${requestId}] === REQUEST FAILED ===`);
+    
     return NextResponse.json(
       { 
         error: error instanceof Error ? error.message : 'Failed to process request'
@@ -67,35 +172,12 @@ export async function POST(request: NextRequest) {
   }
 }
 
+
+// Build conversation context in the original format expected by backend
 function buildConversationContext(messages: any[]): string {
-  // Filter to user messages only and build accumulated context
-  const userMessages = messages.filter((msg: any) => msg.role === 'user');
-  
-  if (userMessages.length === 1) {
-    // Single message, return as-is
-    return userMessages[0].content;
-  }
-  
-  // Multiple messages - accumulate context intelligently
-  const originalRequest = userMessages[0].content;
-  const clarificationResponses = userMessages.slice(1);
-  
-  // Check if we have clarification responses
-  if (clarificationResponses.length === 0) {
-    return originalRequest;
-  }
-  
-  // Build comprehensive context
-  let context = `Original Request: ${originalRequest}\n\n`;
-  context += `Additional Context from Clarifications:\n`;
-  
-  clarificationResponses.forEach((msg: any, index: number) => {
-    context += `${index + 1}. ${msg.content}\n`;
-  });
-  
-  context += `\nPlease create a PRD that incorporates both the original request and all the additional context provided above.`;
-  
-  return context;
+  return messages
+    .map(msg => `${msg.role}: ${msg.content}`)
+    .join('\n\n');
 }
 
 function getPRDFromMessages(messages: any[]): any {

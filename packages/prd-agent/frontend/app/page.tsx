@@ -7,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ChatMessages } from "@/components/chat/ChatMessages";
 import {
   Menu,
@@ -19,9 +20,13 @@ import {
   Check,
   X,
   Trash2,
+  Database,
 } from "lucide-react";
 import { Conversation, Message } from "@/types";
 import { PRD } from "@/lib/prd-schema";
+import { ContextPanel } from "@/components/context";
+import { contextStorage } from "@/lib/context-storage";
+import { buildEnhancedContextPayload, getContextSummary } from "@/lib/context-utils";
 // AgentSettings interface
 interface AgentSettings {
   model: string;
@@ -70,6 +75,12 @@ export default function PRDAgentPage() {
     maxTokens: 8000, // Will be updated with agent defaults
     apiKey: undefined
   });
+  
+  // Context panel state
+  const [contextOpen, setContextOpen] = useState(false);
+  const [contextSummary, setContextSummary] = useState<string>('');
+
+  // Note: Context summary useEffect will be defined after computed values
   
   // Models state
   const [models, setModels] = useState<EnhancedModel[]>([]);
@@ -148,6 +159,22 @@ export default function PRDAgentPage() {
     if (firstSentence.length <= 50) return firstSentence;
     
     return cleaned.substring(0, 47) + "...";
+  };
+
+  // Helper function to extract PRD from messages (same as server-side)
+  const getPRDFromMessages = (messages: any[]): any => {
+    // Look for the most recent PRD content in the conversation
+    for (let i = messages.length - 1; i >= 0; i--) {
+      try {
+        const parsed = JSON.parse(messages[i].content);
+        if (parsed && typeof parsed.problemStatement === 'string') {
+          return parsed;
+        }
+      } catch {
+        continue;
+      }
+    }
+    return null;
   };
 
   // Update conversation title
@@ -321,6 +348,43 @@ export default function PRDAgentPage() {
       fetchingModelsRef.current = false;
     }
   }, []);
+
+  // Update context summary whenever context changes
+  useEffect(() => {
+    const updateContextSummary = () => {
+      try {
+        // Get current active conversation messages
+        const currentMessages = activeConversation?.messages || [];
+        const contextPayload = buildEnhancedContextPayload(currentMessages);
+        setContextSummary(getContextSummary(contextPayload));
+      } catch (error) {
+        console.error('Error updating context summary:', error);
+        setContextSummary('No active context');
+      }
+    };
+    
+    updateContextSummary();
+    
+    // Update on storage events (when context is modified in other tabs)
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key?.startsWith('prd-agent-categorized-context') || 
+          e.key?.startsWith('prd-agent-selected-messages') ||
+          e.key?.startsWith('prd-agent-context-settings')) {
+        updateContextSummary();
+      }
+    };
+    
+    window.addEventListener('storage', handleStorageChange);
+    
+    // Also update when context panel opens/closes (might have changes)
+    if (!contextOpen) {
+      updateContextSummary();
+    }
+    
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+    };
+  }, [contextOpen, activeConversation]);
 
   useEffect(() => {
     console.log("Initializing from localStorage...");
@@ -638,12 +702,29 @@ export default function PRDAgentPage() {
     setIsChatLoading(true);
 
     try {
+      // Sync conversation messages to selectable messages storage
+      newMessages.forEach(message => {
+        if (message.role === 'user' || message.role === 'assistant') {
+          contextStorage.addSelectableMessage({
+            id: message.id,
+            content: message.content,
+            role: message.role,
+            timestamp: message.timestamp || new Date()
+          });
+        }
+      });
+
+      // Build enhanced context payload including categorized context, selected messages, and current PRD
+      const existingPRD = getPRDFromMessages(newMessages);
+      const contextPayload = buildEnhancedContextPayload(newMessages, existingPRD);
+
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           messages: newMessages, 
-          settings: settings
+          settings: settings,
+          contextPayload: contextPayload
         }),
       });
 
@@ -693,9 +774,10 @@ export default function PRDAgentPage() {
   };
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-background text-foreground">
-      {/* Header */}
-      <header className="h-14 flex flex-row items-center gap-4 px-4 border-b">
+    <TooltipProvider>
+      <div className="h-screen w-screen flex flex-col bg-background text-foreground">
+        {/* Header */}
+        <header className="h-14 flex flex-row items-center gap-4 px-4 border-b">
         <Button variant="ghost" size="sm" onClick={() => setLeftSidebarOpen(!leftSidebarOpen)}>
           <Menu className="h-4 w-4" />
         </Button>
@@ -705,6 +787,27 @@ export default function PRDAgentPage() {
         </div>
 
         <div className="flex items-center gap-2">
+          {contextSummary !== 'No active context' && (
+            <div className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded">
+              {contextSummary}
+            </div>
+          )}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={() => setContextOpen(!contextOpen)}
+                className={contextSummary !== 'No active context' ? 'text-blue-600' : ''}
+              >
+                <Database className="h-4 w-4 mr-2" />
+                Context
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>{contextSummary === 'No active context' ? 'Open context management to add and select context items' : `Active context: ${contextSummary}`}</p>
+            </TooltipContent>
+          </Tooltip>
           <Button variant="ghost" size="sm" onClick={() => setSettingsOpen(!settingsOpen)}>
             <Settings className="h-4 w-4 mr-2" />
             Settings
@@ -1158,13 +1261,68 @@ export default function PRDAgentPage() {
                     </div>
                   </div>
 
+                  {/* Context Settings */}
+                  <div>
+                    <div className="text-xs text-muted-foreground uppercase tracking-wide mb-3">
+                      Context Configuration
+                    </div>
+                    
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium mb-2">
+                          Context Token Limit: {contextStorage.getContextSettings().tokenLimitPercentage}%
+                        </label>
+                        <Slider
+                          value={[contextStorage.getContextSettings().tokenLimitPercentage]}
+                          onValueChange={([value]) => {
+                            contextStorage.updateContextSettings({ tokenLimitPercentage: value });
+                          }}
+                          max={50}
+                          min={10}
+                          step={5}
+                          className="w-full"
+                        />
+                        <div className="flex justify-between text-xs text-muted-foreground mt-1">
+                          <span>10% (Conservative)</span>
+                          <span>30% (Balanced)</span>
+                          <span>50% (Maximum)</span>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Percentage of model context window to allocate for context items.
+                        </p>
+                      </div>
+
+                      <div className="flex items-center space-x-2">
+                        <input
+                          type="checkbox"
+                          id="autoIncludePRD"
+                          checked={contextStorage.getContextSettings().autoIncludeCurrentPRD}
+                          onChange={(e) => contextStorage.updateContextSettings({ 
+                            autoIncludeCurrentPRD: e.target.checked 
+                          })}
+                          className="rounded"
+                        />
+                        <label htmlFor="autoIncludePRD" className="text-sm font-medium">
+                          Auto-include current PRD in context
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+
                 </div>
               </div>
             </>
           )}
         </aside>
+
+        {/* Context Panel */}
+        <ContextPanel
+          isOpen={contextOpen}
+          onClose={() => setContextOpen(false)}
+        />
       </div>
 
-    </div>
+      </div>
+    </TooltipProvider>
   );
 }
