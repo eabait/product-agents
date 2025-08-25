@@ -18,7 +18,9 @@ import {
   X,
   FileText,
   AlertCircle,
-  Check
+  Check,
+  CheckSquare,
+  XSquare
 } from 'lucide-react'
 import { 
   CategorizedContextItem, 
@@ -173,12 +175,7 @@ export function ContextPanel({ isOpen, onClose }: ContextPanelProps) {
       <SheetContent side="right" className="w-96 p-0 overflow-hidden">
         <div className="flex flex-col h-full">
           <SheetHeader className="p-4 border-b">
-            <div className="flex items-center justify-between">
-              <SheetTitle>Context Management</SheetTitle>
-              <Button variant="ghost" size="sm" onClick={onClose}>
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
+            <SheetTitle>Context Management</SheetTitle>
             
             {/* Active context summary */}
             {activeItems.length > 0 && (
@@ -206,7 +203,7 @@ export function ContextPanel({ isOpen, onClose }: ContextPanelProps) {
             <div className="flex gap-2">
               <Select value={selectedCategory} onValueChange={(value: ContextCategory | 'all') => setSelectedCategory(value)}>
                 <SelectTrigger className="flex-1">
-                  <SelectValue placeholder="Category" />
+                  <SelectValue placeholder="Filter by category" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Categories</SelectItem>
@@ -220,7 +217,7 @@ export function ContextPanel({ isOpen, onClose }: ContextPanelProps) {
 
               <Select value={selectedPriority} onValueChange={(value: ContextPriority | 'all') => setSelectedPriority(value)}>
                 <SelectTrigger className="flex-1">
-                  <SelectValue placeholder="Priority" />
+                  <SelectValue placeholder="Filter by priority" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Priorities</SelectItem>
@@ -248,10 +245,12 @@ export function ContextPanel({ isOpen, onClose }: ContextPanelProps) {
             {/* Bulk operations */}
             {filteredItems.length > 0 && (
               <div className="flex gap-2 text-sm">
-                <Button onClick={handleSelectAll} variant="ghost" size="sm" className="flex-1">
+                <Button onClick={handleSelectAll} variant="outline" size="sm" className="flex-1 text-green-600 border-green-200 hover:bg-green-50">
+                  <CheckSquare className="h-4 w-4 mr-2" />
                   Select All
                 </Button>
-                <Button onClick={handleClearAll} variant="ghost" size="sm" className="flex-1">
+                <Button onClick={handleClearAll} variant="outline" size="sm" className="flex-1 text-red-600 border-red-200 hover:bg-red-50">
+                  <XSquare className="h-4 w-4 mr-2" />
                   Clear All
                 </Button>
               </div>

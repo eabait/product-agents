@@ -5,80 +5,215 @@ import {
   ContextSettings, 
   SelectedMessage, 
   DEFAULT_CONTEXT_SETTINGS,
-  ContextCategory 
+  ContextCategory,
+  ContextItemId,
+  MessageId,
+  createContextItemId,
+  createMessageId,
+  validateContextItem
 } from './context-types'
 
+/**
+ * Storage keys for localStorage
+ */
 const STORAGE_KEYS = {
   CATEGORIZED_CONTEXT: 'prd-agent-categorized-context',
   CONTEXT_SETTINGS: 'prd-agent-context-settings',
   SELECTED_MESSAGES: 'prd-agent-selected-messages'
 } as const
 
+/**
+ * Custom error types for better error handling
+ */
+export class ContextStorageError extends Error {
+  constructor(message: string, public readonly operation: string, public readonly cause?: Error) {
+    super(message)
+    this.name = 'ContextStorageError'
+  }
+}
+
+export class StorageQuotaExceededError extends ContextStorageError {
+  constructor(operation: string, cause?: Error) {
+    super('Storage quota exceeded. Please remove some context items.', operation, cause)
+    this.name = 'StorageQuotaExceededError'
+  }
+}
+
+/**
+ * Debounced operation tracking
+ */
+interface DebounceState {
+  timer?: NodeJS.Timeout
+  pendingData?: any
+}
+
+const debounceState = new Map<string, DebounceState>()
+
+/**
+ * Context storage manager with enhanced error handling and performance optimizations
+ */
 class ContextStorage {
-  // Categorized Context CRUD Operations
+  private cache = new Map<string, { data: any; timestamp: number }>()
+  private readonly CACHE_TTL = 30000 // 30 seconds
+  private readonly MAX_RETRY_ATTEMPTS = 3
+  private readonly DEBOUNCE_DELAY = 500 // milliseconds
+
+  /**
+   * Retrieves categorized context items with caching
+   */
   getCategorizedContext(): CategorizedContextItem[] {
+    return this.getCachedOrFetch(
+      STORAGE_KEYS.CATEGORIZED_CONTEXT,
+      () => this.loadCategorizedContextFromStorage()
+    )
+  }
+
+  /**
+   * Loads categorized context from localStorage with validation and error handling
+   */
+  private loadCategorizedContextFromStorage(): CategorizedContextItem[] {
     try {
       const stored = localStorage.getItem(STORAGE_KEYS.CATEGORIZED_CONTEXT)
       if (!stored) return []
       
       const parsed = JSON.parse(stored)
-      return parsed.map((item: any) => ({
-        ...item,
-        createdAt: new Date(item.createdAt),
-        lastUsed: new Date(item.lastUsed)
-      }))
+      if (!Array.isArray(parsed)) {
+        throw new ContextStorageError('Invalid data format', 'load')
+      }
+      
+      return parsed
+        .filter(this.isValidStoredContextItem)
+        .map((item: any) => ({
+          ...item,
+          id: createContextItemId(item.id),
+          createdAt: new Date(item.createdAt),
+          lastUsed: new Date(item.lastUsed),
+          tags: Array.isArray(item.tags) ? item.tags : []
+        }))
     } catch (error) {
-      console.error('Error loading categorized context:', error)
-      return []
+      if (error instanceof ContextStorageError) {
+        throw error
+      }
+      throw new ContextStorageError(
+        'Failed to load categorized context',
+        'load',
+        error as Error
+      )
     }
   }
 
+  /**
+   * Type guard for validating stored context items
+   */
+  private isValidStoredContextItem(item: any): boolean {
+    return (
+      typeof item === 'object' &&
+      item !== null &&
+      typeof item.id === 'string' &&
+      typeof item.title === 'string' &&
+      typeof item.content === 'string' &&
+      typeof item.category === 'string' &&
+      typeof item.priority === 'string' &&
+      typeof item.isActive === 'boolean'
+    )
+  }
+
+  /**
+   * Saves categorized context with retry logic and quota handling
+   */
   saveCategorizedContext(context: CategorizedContextItem[]): void {
-    try {
-      localStorage.setItem(STORAGE_KEYS.CATEGORIZED_CONTEXT, JSON.stringify(context))
-    } catch (error) {
-      console.error('Error saving categorized context:', error)
-    }
+    this.saveWithRetry(
+      STORAGE_KEYS.CATEGORIZED_CONTEXT,
+      context,
+      'save categorized context'
+    )
+    this.invalidateCache(STORAGE_KEYS.CATEGORIZED_CONTEXT)
   }
 
+  /**
+   * Debounced save for frequent operations
+   */
+  saveCategorizedContextDebounced(context: CategorizedContextItem[]): void {
+    this.debouncedSave(
+      STORAGE_KEYS.CATEGORIZED_CONTEXT,
+      context,
+      () => this.saveCategorizedContext(context)
+    )
+  }
+
+  /**
+   * Adds a new context item with validation
+   */
   addContextItem(item: Omit<CategorizedContextItem, 'id' | 'createdAt' | 'lastUsed'>): CategorizedContextItem {
+    // Validate input
+    const errors = validateContextItem(item)
+    if (errors.length > 0) {
+      throw new ContextStorageError(`Validation failed: ${errors.join(', ')}`, 'add')
+    }
+
     const newItem: CategorizedContextItem = {
       ...item,
-      id: crypto.randomUUID(),
+      id: createContextItemId(crypto.randomUUID()),
       createdAt: new Date(),
-      lastUsed: new Date()
+      lastUsed: new Date(),
+      tags: Array.isArray(item.tags) ? [...item.tags] : []
     }
 
     const context = this.getCategorizedContext()
-    context.push(newItem)
-    this.saveCategorizedContext(context)
+    const updatedContext = [...context, newItem]
+    this.saveCategorizedContext(updatedContext)
     
     return newItem
   }
 
-  updateContextItem(id: string, updates: Partial<CategorizedContextItem>): CategorizedContextItem | null {
+  /**
+   * Updates a context item with validation
+   */
+  updateContextItem(id: ContextItemId | string, updates: Partial<CategorizedContextItem>): CategorizedContextItem | null {
     const context = this.getCategorizedContext()
-    const itemIndex = context.findIndex(item => item.id === id)
+    const contextId = typeof id === 'string' ? createContextItemId(id) : id
+    const itemIndex = context.findIndex(item => item.id === contextId)
     
-    if (itemIndex === -1) return null
-    
-    const updatedItem = {
-      ...context[itemIndex],
-      ...updates,
-      lastUsed: new Date()
+    if (itemIndex === -1) {
+      throw new ContextStorageError(`Context item not found: ${id}`, 'update')
     }
     
-    context[itemIndex] = updatedItem
-    this.saveCategorizedContext(context)
+    const currentItem = context[itemIndex]
+    const proposedItem = { ...currentItem, ...updates }
+    
+    // Validate the updated item
+    const errors = validateContextItem(proposedItem)
+    if (errors.length > 0) {
+      throw new ContextStorageError(`Update validation failed: ${errors.join(', ')}`, 'update')
+    }
+    
+    const updatedItem: CategorizedContextItem = {
+      ...proposedItem,
+      id: currentItem.id, // Preserve original ID
+      createdAt: currentItem.createdAt, // Preserve creation time
+      lastUsed: new Date(),
+      tags: Array.isArray(proposedItem.tags) ? [...proposedItem.tags] : []
+    }
+    
+    const updatedContext = [...context]
+    updatedContext[itemIndex] = updatedItem
+    this.saveCategorizedContextDebounced(updatedContext)
     
     return updatedItem
   }
 
-  deleteContextItem(id: string): boolean {
+  /**
+   * Deletes a context item
+   */
+  deleteContextItem(id: ContextItemId | string): boolean {
     const context = this.getCategorizedContext()
-    const filteredContext = context.filter(item => item.id !== id)
+    const contextId = typeof id === 'string' ? createContextItemId(id) : id
+    const initialLength = context.length
+    const filteredContext = context.filter(item => item.id !== contextId)
     
-    if (filteredContext.length === context.length) return false
+    if (filteredContext.length === initialLength) {
+      return false // Item not found
+    }
     
     this.saveCategorizedContext(filteredContext)
     return true
@@ -92,17 +227,102 @@ class ContextStorage {
     return this.getCategorizedContext().filter(item => item.category === category)
   }
 
-  toggleContextItemActive(id: string): CategorizedContextItem | null {
+  /**
+   * Toggles the active state of a context item
+   */
+  toggleContextItemActive(id: ContextItemId | string): CategorizedContextItem | null {
     const context = this.getCategorizedContext()
-    const item = context.find(item => item.id === id)
+    const contextId = typeof id === 'string' ? createContextItemId(id) : id
+    const item = context.find(item => item.id === contextId)
     
     if (!item) return null
     
     return this.updateContextItem(id, { isActive: !item.isActive })
   }
 
-  updateContextItemCategory(id: string, newCategory: ContextCategory): CategorizedContextItem | null {
+  /**
+   * Updates the category of a context item
+   */
+  updateContextItemCategory(id: ContextItemId | string, newCategory: ContextCategory): CategorizedContextItem | null {
     return this.updateContextItem(id, { category: newCategory })
+  }
+
+  /**
+   * Utility methods for caching, retry logic, and debouncing
+   */
+  private getCachedOrFetch<T>(key: string, fetcher: () => T): T {
+    const cached = this.cache.get(key)
+    const now = Date.now()
+    
+    if (cached && (now - cached.timestamp) < this.CACHE_TTL) {
+      return cached.data
+    }
+    
+    const data = fetcher()
+    this.cache.set(key, { data, timestamp: now })
+    return data
+  }
+
+  private invalidateCache(key: string): void {
+    this.cache.delete(key)
+  }
+
+  private saveWithRetry(key: string, data: any, operation: string): void {
+    let attempts = 0
+    
+    while (attempts < this.MAX_RETRY_ATTEMPTS) {
+      try {
+        localStorage.setItem(key, JSON.stringify(data))
+        return
+      } catch (error) {
+        attempts++
+        
+        if (this.isQuotaExceededError(error)) {
+          throw new StorageQuotaExceededError(operation, error as Error)
+        }
+        
+        if (attempts >= this.MAX_RETRY_ATTEMPTS) {
+          throw new ContextStorageError(
+            `Failed to ${operation} after ${attempts} attempts`,
+            operation,
+            error as Error
+          )
+        }
+        
+        // Brief delay before retry
+        const delay = Math.pow(2, attempts) * 100
+        this.sleep(delay)
+      }
+    }
+  }
+
+  private debouncedSave(key: string, data: any, saveFunction: () => void): void {
+    const state = debounceState.get(key) || {}
+    
+    if (state.timer) {
+      clearTimeout(state.timer)
+    }
+    
+    state.pendingData = data
+    state.timer = setTimeout(() => {
+      saveFunction()
+      debounceState.delete(key)
+    }, this.DEBOUNCE_DELAY)
+    
+    debounceState.set(key, state)
+  }
+
+  private isQuotaExceededError(error: unknown): boolean {
+    return error instanceof DOMException && 
+           (error.code === 22 || error.name === 'QuotaExceededError')
+  }
+
+  private sleep(ms: number): void {
+    // Simple synchronous sleep for retry delays
+    const start = Date.now()
+    while (Date.now() - start < ms) {
+      // Busy wait
+    }
   }
 
   // Context Settings
@@ -158,9 +378,10 @@ class ContextStorage {
     }
   }
 
-  toggleMessageSelection(messageId: string): boolean {
+  toggleMessageSelection(messageId: MessageId | string): boolean {
     const selectedMessages = this.getSelectedMessages()
-    const messageIndex = selectedMessages.findIndex(msg => msg.id === messageId)
+    const id = typeof messageId === 'string' ? createMessageId(messageId) : messageId
+    const messageIndex = selectedMessages.findIndex(msg => msg.id === id)
     
     if (messageIndex === -1) return false
     
@@ -170,23 +391,32 @@ class ContextStorage {
     return selectedMessages[messageIndex].isSelected
   }
 
-  addSelectableMessage(message: Omit<SelectedMessage, 'isSelected'>): SelectedMessage {
+  addSelectableMessage(message: Omit<SelectedMessage, 'isSelected'> | { id: string; content: string; role: 'user' | 'assistant'; timestamp: Date }): SelectedMessage {
     const selectedMessages = this.getSelectedMessages()
-    const existingIndex = selectedMessages.findIndex(msg => msg.id === message.id)
+    const messageId = createMessageId(message.id as string)
+    const existingIndex = selectedMessages.findIndex(msg => msg.id === messageId)
     
     const selectableMessage: SelectedMessage = {
       ...message,
+      id: messageId,
       isSelected: false
     }
     
     if (existingIndex === -1) {
       selectedMessages.push(selectableMessage)
+      this.saveSelectedMessages(selectedMessages)
+      return selectableMessage
     } else {
-      selectedMessages[existingIndex] = { ...selectedMessages[existingIndex], ...selectableMessage }
+      // Preserve the existing isSelected state when updating
+      const updatedMessage = { 
+        ...selectedMessages[existingIndex], 
+        ...selectableMessage, 
+        isSelected: selectedMessages[existingIndex].isSelected 
+      }
+      selectedMessages[existingIndex] = updatedMessage
+      this.saveSelectedMessages(selectedMessages)
+      return updatedMessage
     }
-    
-    this.saveSelectedMessages(selectedMessages)
-    return selectableMessage
   }
 
   getSelectedMessagesForContext(): SelectedMessage[] {

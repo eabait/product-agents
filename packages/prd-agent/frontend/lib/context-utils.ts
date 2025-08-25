@@ -1,6 +1,6 @@
 'use client'
 
-import { Message } from 'ai'
+// Import removed - Message type not needed for current functionality
 import { 
   EnhancedContextPayload, 
   ContextUsage, 
@@ -9,52 +9,142 @@ import {
   ContextSettings,
   ContextCategory,
   CONTEXT_CATEGORY_LABELS,
-  CATEGORY_KEYWORDS 
+  CATEGORY_KEYWORDS,
+  CONTEXT_CONSTRAINTS,
+  createContextItemId
 } from './context-types'
 import { contextStorage } from './context-storage'
 
-// Approximate token counting (rough estimation: 1 token ≈ 4 characters)
-export function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 4)
+/**
+ * Token counting cache to avoid recalculation
+ */
+const tokenCache = new Map<string, number>()
+
+/**
+ * Model-specific token estimation ratios
+ */
+const MODEL_TOKEN_RATIOS = {
+  'anthropic/claude-3-5-sonnet': 3.8,
+  'anthropic/claude-3-haiku': 4.2,
+  'openai/gpt-4': 3.5,
+  'openai/gpt-3.5-turbo': 4.0,
+  default: 4.0
+} as const
+
+/**
+ * Enhanced token estimation with caching and model-specific ratios
+ */
+export function estimateTokens(
+  text: string, 
+  model?: string, 
+  useCache: boolean = true
+): number {
+  if (!text) return 0
+  
+  const cacheKey = `${text.length}-${model || 'default'}`
+  
+  if (useCache && tokenCache.has(cacheKey)) {
+    return tokenCache.get(cacheKey)!
+  }
+  
+  // Get model-specific ratio
+  const ratio = model && model in MODEL_TOKEN_RATIOS 
+    ? MODEL_TOKEN_RATIOS[model as keyof typeof MODEL_TOKEN_RATIOS]
+    : MODEL_TOKEN_RATIOS.default
+  
+  // Enhanced estimation considering:
+  // - Basic character to token ratio
+  // - Word boundaries (spaces typically don't count as separate tokens)
+  // - Common patterns (numbers, punctuation)
+  const words = text.trim().split(/\s+/).length
+  const basicEstimate = Math.ceil(text.length / ratio)
+  const wordAdjustment = Math.max(0, words * 0.1) // Slight boost for word boundaries
+  
+  const estimate = Math.max(1, Math.floor(basicEstimate + wordAdjustment))
+  
+  if (useCache) {
+    // Limit cache size to prevent memory leaks
+    if (tokenCache.size > 1000) {
+      const oldestKey = tokenCache.keys().next().value
+      tokenCache.delete(oldestKey)
+    }
+    tokenCache.set(cacheKey, estimate)
+  }
+  
+  return estimate
 }
 
-// Build enhanced context payload for API requests
+/**
+ * Clear token estimation cache
+ */
+export function clearTokenCache(): void {
+  tokenCache.clear()
+}
+
+/**
+ * Build enhanced context payload for API requests with validation
+ */
 export function buildEnhancedContextPayload(
   messages: any[],
-  currentPRD?: string
+  currentPRD?: string,
+  model?: string
 ): EnhancedContextPayload {
-  const categorizedContext = contextStorage.getActiveContextItems()
-  const selectedMessages = contextStorage.getSelectedMessagesForContext()
-  const contextSettings = contextStorage.getContextSettings()
+  try {
+    const categorizedContext = contextStorage.getActiveContextItems()
+    const selectedMessages = contextStorage.getSelectedMessagesForContext()
+    const contextSettings = contextStorage.getContextSettings()
 
-  // Add current PRD if enabled and available
-  const prdToInclude = contextSettings.autoIncludeCurrentPRD ? currentPRD : undefined
+    // Add current PRD if enabled and available
+    const prdToInclude = contextSettings.autoIncludeCurrentPRD ? currentPRD : undefined
 
-  return {
-    categorizedContext,
-    selectedMessages,
-    currentPRD: prdToInclude,
-    contextSettings
+    const payload: EnhancedContextPayload = {
+      categorizedContext: categorizedContext as readonly CategorizedContextItem[],
+      selectedMessages: selectedMessages as readonly SelectedMessage[],
+      currentPRD: prdToInclude,
+      contextSettings
+    }
+
+    // Validate token limits
+    const usage = calculateContextUsage(payload, undefined, model)
+    if (usage.percentageUsed > 100) {
+      console.warn(`Context payload exceeds token limit: ${usage.percentageUsed}%`)
+    }
+
+    return payload
+  } catch (error) {
+    console.error('Error building context payload:', error)
+    // Return minimal valid payload on error
+    return {
+      categorizedContext: [],
+      selectedMessages: [],
+      contextSettings: contextStorage.getContextSettings()
+    }
   }
 }
 
-// Calculate context token usage
+/**
+ * Calculate context token usage with model-specific estimation
+ */
 export function calculateContextUsage(
   payload: EnhancedContextPayload,
-  modelContextWindow: number = 128000 // Default for Claude 3.5 Sonnet
+  modelContextWindow?: number,
+  model?: string
 ): ContextUsage {
   const { categorizedContext, selectedMessages, currentPRD, contextSettings } = payload
+  
+  // Use provided window size or default from constants
+  const contextWindow = modelContextWindow || CONTEXT_CONSTRAINTS.DEFAULT_MODEL_CONTEXT_WINDOW
 
-  // Calculate tokens for each component
+  // Calculate tokens for each component with model-specific estimation
   const categorizedTokens = categorizedContext.reduce((total, item) => {
-    return total + estimateTokens(item.title + ' ' + item.content)
+    return total + estimateTokens(`${item.title} ${item.content}`, model)
   }, 0)
 
   const messagesTokens = selectedMessages.reduce((total, msg) => {
-    return total + estimateTokens(msg.content)
+    return total + estimateTokens(msg.content, model)
   }, 0)
 
-  const prdTokens = currentPRD ? estimateTokens(currentPRD) : 0
+  const prdTokens = currentPRD ? estimateTokens(currentPRD, model) : 0
 
   const totalTokens = categorizedTokens + messagesTokens + prdTokens
   const limitTokens = Math.floor(modelContextWindow * (contextSettings.tokenLimitPercentage / 100))
@@ -82,7 +172,7 @@ export function buildEnhancedConversationContext(
 
   // Add categorized context by priority
   if (categorizedContext.length > 0) {
-    const contextByPriority = categorizedContext.sort((a, b) => {
+    const contextByPriority = [...categorizedContext].sort((a, b) => {
       const priorityOrder = { high: 3, medium: 2, low: 1 }
       return priorityOrder[b.priority] - priorityOrder[a.priority]
     })
@@ -168,36 +258,62 @@ export function syncConversationMessages(messages: any[]): void {
   })
 }
 
-// Extract context from PRD content (for future enhancement)
-export function extractContextFromPRD(prdContent: string, category: string = 'requirement'): CategorizedContextItem[] {
-  // This is a basic implementation - could be enhanced with AI parsing
-  const sections = prdContent.split(/#{1,3}\s+/).filter(section => section.trim())
+/**
+ * Enhanced PRD content extraction with automatic categorization
+ */
+export function extractContextFromPRD(
+  prdContent: string, 
+  defaultCategory: ContextCategory = 'requirement'
+): CategorizedContextItem[] {
+  if (isRateLimited('extractFromPRD', 5)) {
+    console.warn('PRD extraction rate limited')
+    return []
+  }
   
-  const extractedItems: CategorizedContextItem[] = []
-  
-  sections.forEach((section, index) => {
-    const lines = section.split('\n').filter(line => line.trim())
-    if (lines.length < 2) return
+  try {
+    const sections = prdContent.split(/#{1,3}\s+/).filter(section => section.trim())
+    const extractedItems: CategorizedContextItem[] = []
     
-    const title = lines[0].trim()
-    const content = lines.slice(1).join('\n').trim()
+    sections.forEach((section, index) => {
+      const lines = section.split('\n').filter(line => line.trim())
+      if (lines.length < 2) return
+      
+      const title = lines[0].trim().replace(/^#+\s*/, '') // Remove any remaining markdown headers
+      const content = lines.slice(1).join('\n').trim()
+      
+      // Enhanced content filtering
+      if (title && 
+          content && 
+          content.length >= CONTEXT_CONSTRAINTS.MIN_CONTENT_LENGTH &&
+          content.length <= CONTEXT_CONSTRAINTS.MAX_CONTENT_LENGTH) {
+        
+        // Auto-suggest category based on content
+        const suggestion = suggestCategory(title, content)
+        const category = suggestion.confidence > 40 ? suggestion.suggested : defaultCategory
+        
+        extractedItems.push({
+          id: createContextItemId(crypto.randomUUID()),
+          title: `Extracted: ${title}`,
+          content,
+          category,
+          priority: suggestion.confidence > 70 ? 'high' : 'medium',
+          tags: [
+            'extracted', 
+            'prd', 
+            ...(suggestion.confidence > 60 ? ['auto-categorized'] : ['needs-review'])
+          ] as readonly string[],
+          isActive: false,
+          createdAt: new Date(),
+          lastUsed: new Date()
+        })
+      }
+    })
     
-    if (title && content && content.length > 50) { // Only meaningful content
-      extractedItems.push({
-        id: crypto.randomUUID(),
-        title: `Extracted: ${title}`,
-        content,
-        category: category as any,
-        priority: 'medium',
-        tags: ['extracted', 'prd'],
-        isActive: false,
-        createdAt: new Date(),
-        lastUsed: new Date()
-      })
-    }
-  })
-  
-  return extractedItems
+    return extractedItems
+  } catch (error) {
+    console.error('Error extracting context from PRD:', error)
+    return []
+  }
 }
 
 // Get context summary for display
@@ -221,52 +337,100 @@ export function getContextSummary(payload: EnhancedContextPayload): string {
   return parts.length > 0 ? parts.join(', ') : 'No active context'
 }
 
-// Suggest category based on content analysis
+/**
+ * Enhanced category suggestion with improved algorithm
+ */
 export function suggestCategory(title: string, content: string): {
   suggested: ContextCategory
   confidence: number
   reasons: string[]
 } {
-  const text = (title + ' ' + content).toLowerCase()
-  const categoryScores: Record<ContextCategory, { score: number; matches: string[] }> = {
-    requirement: { score: 0, matches: [] },
-    constraint: { score: 0, matches: [] },
-    assumption: { score: 0, matches: [] },
-    stakeholder: { score: 0, matches: [] },
-    custom: { score: 0, matches: [] }
+  if (!title || !content) {
+    return { suggested: 'custom', confidence: 0, reasons: [] }
   }
 
-  // Score each category based on keyword matches
+  const text = `${title} ${content}`.toLowerCase()
+  const words = text.split(/\b/).filter(word => word.trim().length > 2)
+  const totalWords = words.length
+  
+  const categoryScores: Record<ContextCategory, { score: number; matches: string[]; weightedScore: number }> = {
+    requirement: { score: 0, matches: [], weightedScore: 0 },
+    constraint: { score: 0, matches: [], weightedScore: 0 },
+    assumption: { score: 0, matches: [], weightedScore: 0 },
+    stakeholder: { score: 0, matches: [], weightedScore: 0 },
+    custom: { score: 0, matches: [], weightedScore: 0 }
+  }
+
+  // Enhanced keyword matching with word boundaries and context awareness
   Object.entries(CATEGORY_KEYWORDS).forEach(([category, keywords]) => {
+    const categoryKey = category as ContextCategory
+    
     keywords.forEach(keyword => {
-      if (text.includes(keyword.toLowerCase())) {
-        categoryScores[category as ContextCategory].score++
-        categoryScores[category as ContextCategory].matches.push(keyword)
+      const keywordLower = keyword.toLowerCase()
+      
+      // Check for exact word boundary matches (higher weight)
+      const wordBoundaryRegex = new RegExp(`\\b${keywordLower}\\b`, 'gi')
+      const exactMatches = (text.match(wordBoundaryRegex) || []).length
+      
+      // Check for partial matches (lower weight)
+      const partialMatches = text.includes(keywordLower) ? 1 : 0
+      
+      if (exactMatches > 0) {
+        categoryScores[categoryKey].score += exactMatches * 2 // Higher weight for exact matches
+        categoryScores[categoryKey].matches.push(keyword)
+        
+        // Additional weight for matches in title vs content
+        if (title.toLowerCase().includes(keywordLower)) {
+          categoryScores[categoryKey].weightedScore += exactMatches * 1.5 // Title matches are more important
+        } else {
+          categoryScores[categoryKey].weightedScore += exactMatches
+        }
+      } else if (partialMatches > 0 && !exactMatches) {
+        categoryScores[categoryKey].score += 0.5 // Lower weight for partial matches
+        categoryScores[categoryKey].matches.push(keyword)
+        categoryScores[categoryKey].weightedScore += 0.3
       }
     })
   })
 
-  // Find category with highest score
+  // Find category with highest weighted score
   const sortedCategories = Object.entries(categoryScores)
-    .sort(([,a], [,b]) => b.score - a.score)
+    .sort(([,a], [,b]) => b.weightedScore - a.weightedScore)
 
   const topCategory = sortedCategories[0]
   const suggested = topCategory[0] as ContextCategory
-  const topScore = topCategory[1].score
-  const matches = topCategory[1].matches
+  const topScore = topCategory[1].weightedScore
+  const matches = Array.from(new Set(topCategory[1].matches)) // Remove duplicates
 
-  // Calculate confidence (0-100)
-  const totalWords = text.split(/\s+/).length
-  const confidence = Math.min(Math.round((topScore / Math.max(totalWords * 0.1, 1)) * 100), 100)
+  // Improved confidence calculation
+  let confidence = 0
+  if (topScore > 0) {
+    // Base confidence on score relative to text length and keyword density
+    const keywordDensity = matches.length / Math.max(totalWords * 0.1, 1)
+    const scoreRatio = topScore / Math.max(totalWords * 0.05, 1)
+    confidence = Math.min(Math.round((keywordDensity + scoreRatio) * 30), 100)
+    
+    // Boost confidence for strong title matches
+    if (title.toLowerCase().split(/\s+/).some(word => 
+      matches.some(match => word.includes(match.toLowerCase()))
+    )) {
+      confidence = Math.min(confidence + 20, 100)
+    }
+    
+    // Ensure minimum confidence for any matches
+    confidence = Math.max(confidence, 15)
+  }
 
   return {
     suggested: topScore > 0 ? suggested : 'custom',
-    confidence: topScore > 0 ? confidence : 0,
+    confidence,
     reasons: matches.slice(0, 3) // Top 3 matching keywords
   }
 }
 
-// Check if context item might be miscategorized
+/**
+ * Check if context item might be miscategorized with enhanced logic
+ */
 export function checkCategoryMismatch(item: CategorizedContextItem): {
   isMismatch: boolean
   suggestedCategory: ContextCategory
@@ -274,11 +438,16 @@ export function checkCategoryMismatch(item: CategorizedContextItem): {
   explanation: string
 } {
   const suggestion = suggestCategory(item.title, item.content)
-  const isMismatch = suggestion.confidence > 60 && suggestion.suggested !== item.category
+  const confidenceThreshold = 50 // Lower threshold for better sensitivity
+  const isMismatch = suggestion.confidence > confidenceThreshold && 
+                     suggestion.suggested !== item.category &&
+                     suggestion.suggested !== 'custom'
 
   let explanation = ''
   if (isMismatch) {
-    explanation = `Contains ${suggestion.suggested} keywords: ${suggestion.reasons.join(', ')}`
+    const categoryLabel = CONTEXT_CATEGORY_LABELS[suggestion.suggested]
+    const currentLabel = CONTEXT_CATEGORY_LABELS[item.category]
+    explanation = `Contains ${categoryLabel.toLowerCase()} keywords (${suggestion.reasons.join(', ')}) but categorized as ${currentLabel.toLowerCase()}`
   }
 
   return {
@@ -289,8 +458,13 @@ export function checkCategoryMismatch(item: CategorizedContextItem): {
   }
 }
 
-// Validate context payload
-export function validateContextPayload(payload: EnhancedContextPayload): {
+/**
+ * Enhanced payload validation with comprehensive checks
+ */
+export function validateContextPayload(
+  payload: EnhancedContextPayload, 
+  model?: string
+): {
   isValid: boolean
   errors: string[]
   warnings: string[]
@@ -299,7 +473,12 @@ export function validateContextPayload(payload: EnhancedContextPayload): {
     suggestedCategory: ContextCategory
     explanation: string
   }>
+  performance: {
+    validationTime: number
+    itemsProcessed: number
+  }
 } {
+  const startTime = performance.now()
   const errors: string[] = []
   const warnings: string[] = []
   const misclassifications: Array<{
@@ -308,47 +487,106 @@ export function validateContextPayload(payload: EnhancedContextPayload): {
     explanation: string
   }> = []
   
-  // Check token limits
-  const usage = calculateContextUsage(payload)
-  
-  if (usage.percentageUsed > 100) {
-    errors.push(`Context exceeds token limit: ${usage.totalTokens} / ${usage.limitTokens} tokens`)
-  } else if (usage.percentageUsed > 80) {
-    warnings.push(`Context is approaching token limit: ${Math.round(usage.percentageUsed)}% used`)
+  try {
+    // Check token limits with model-specific calculation
+    const usage = calculateContextUsage(payload, undefined, model)
+    
+    if (usage.percentageUsed > 100) {
+      errors.push(`Context exceeds token limit: ${usage.totalTokens} / ${usage.limitTokens} tokens (${Math.round(usage.percentageUsed)}%)`)
+    } else if (usage.percentageUsed > 90) {
+      errors.push(`Context is critically close to token limit: ${Math.round(usage.percentageUsed)}% used`)
+    } else if (usage.percentageUsed > 80) {
+      warnings.push(`Context is approaching token limit: ${Math.round(usage.percentageUsed)}% used`)
+    }
+    
+    // Check for empty context
+    if (payload.categorizedContext.length === 0 && 
+        payload.selectedMessages.length === 0 && 
+        !payload.currentPRD) {
+      warnings.push('No context items are currently active')
+    }
+    
+    // Enhanced validation for individual items
+    payload.categorizedContext.forEach((item, index) => {
+      // Token size check
+      const tokens = estimateTokens(item.content, model)
+      if (tokens > 2000) {
+        errors.push(`Context item "${item.title}" is extremely large (${tokens} tokens) and may cause issues`)
+      } else if (tokens > 1000) {
+        warnings.push(`Context item "${item.title}" is very large (${tokens} tokens)`)
+      }
+      
+      // Content quality checks
+      if (item.content.trim().length < CONTEXT_CONSTRAINTS.MIN_CONTENT_LENGTH) {
+        warnings.push(`Context item "${item.title}" has very short content`)
+      }
+      
+      if (item.title.length > CONTEXT_CONSTRAINTS.MAX_TITLE_LENGTH) {
+        warnings.push(`Context item "${item.title}" has a very long title`)
+      }
+      
+      // Check for potential misclassifications
+      const mismatch = checkCategoryMismatch(item)
+      if (mismatch.isMismatch) {
+        misclassifications.push({
+          item,
+          suggestedCategory: mismatch.suggestedCategory,
+          explanation: mismatch.explanation
+        })
+        
+        if (mismatch.confidence > 80) {
+          warnings.push(`"${item.title}" is likely miscategorized - ${mismatch.explanation}`)
+        } else {
+          warnings.push(`"${item.title}" may be miscategorized - ${mismatch.explanation}`)
+        }
+      }
+    })
+    
+    // Check for duplicate content
+    const contentHashes = new Set<string>()
+    payload.categorizedContext.forEach(item => {
+      const contentHash = `${item.title.toLowerCase()}-${item.content.substring(0, 100).toLowerCase()}`
+      if (contentHashes.has(contentHash)) {
+        warnings.push(`Possible duplicate context item: "${item.title}"`)
+      }
+      contentHashes.add(contentHash)
+    })
+    
+  } catch (error) {
+    errors.push(`Validation error: ${error instanceof Error ? error.message : 'Unknown error'}`)
   }
   
-  // Check for empty context
-  if (payload.categorizedContext.length === 0 && 
-      payload.selectedMessages.length === 0 && 
-      !payload.currentPRD) {
-    warnings.push('No context items are currently active')
-  }
-  
-  // Check for very large individual items
-  payload.categorizedContext.forEach(item => {
-    const tokens = estimateTokens(item.content)
-    if (tokens > 1000) {
-      warnings.push(`Context item "${item.title}" is very large (${tokens} tokens)`)
-    }
-  })
-
-  // Check for potential misclassifications
-  payload.categorizedContext.forEach(item => {
-    const mismatch = checkCategoryMismatch(item)
-    if (mismatch.isMismatch) {
-      misclassifications.push({
-        item,
-        suggestedCategory: mismatch.suggestedCategory,
-        explanation: mismatch.explanation
-      })
-      warnings.push(`"${item.title}" may be miscategorized - ${mismatch.explanation}`)
-    }
-  })
+  const endTime = performance.now()
   
   return {
     isValid: errors.length === 0,
     errors,
     warnings,
-    misclassifications
+    misclassifications,
+    performance: {
+      validationTime: endTime - startTime,
+      itemsProcessed: payload.categorizedContext.length + payload.selectedMessages.length + (payload.currentPRD ? 1 : 0)
+    }
   }
+}
+
+/**
+ * Rate limiting for expensive operations
+ */
+const rateLimiter = new Map<string, { count: number; resetTime: number }>()
+
+export function isRateLimited(operation: string, limit: number = 10, windowMs: number = 60000): boolean {
+  const now = Date.now()
+  const key = operation
+  
+  let record = rateLimiter.get(key)
+  
+  if (!record || now > record.resetTime) {
+    record = { count: 0, resetTime: now + windowMs }
+    rateLimiter.set(key, record)
+  }
+  
+  record.count++
+  
+  return record.count > limit
 }

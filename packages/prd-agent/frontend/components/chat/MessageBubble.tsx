@@ -1,11 +1,11 @@
 import { User, Bot, Copy, Check, Database } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { SmartMessageRenderer } from './SmartMessageRenderer';
 import { PRD } from './PRDEditor';
 import { Message } from '../../types';
 import { contextStorage } from '@/lib/context-storage';
+import { createMessageId } from '@/lib/context-types';
 import { useState, useEffect } from 'react';
 
 interface MessageBubbleProps {
@@ -22,22 +22,42 @@ export function MessageBubble({ message, onCopy, copied, onPRDUpdate }: MessageB
   // Check if this message is selected for context
   useEffect(() => {
     const selectedMessages = contextStorage.getSelectedMessages();
-    const selectedMessage = selectedMessages.find(m => m.id === message.id);
+    const messageId = createMessageId(message.id);
+    const selectedMessage = selectedMessages.find(m => m.id === messageId);
     setIsSelectedForContext(!!selectedMessage?.isSelected);
   }, [message.id]);
 
   const handleContextToggle = () => {
-    // Add message to selectable messages if not already there
-    contextStorage.addSelectableMessage({
-      id: message.id,
-      content: message.content,
-      role: message.role,
-      timestamp: message.timestamp || new Date()
-    });
-    
-    // Toggle selection
-    const newState = contextStorage.toggleMessageSelection(message.id);
-    setIsSelectedForContext(newState);
+    // Only handle user messages for context selection
+    if (message.role === 'user') {
+      try {
+        // Add message to selectable messages if not already there
+        contextStorage.addSelectableMessage({
+          id: message.id,
+          content: message.content,
+          role: message.role,
+          timestamp: message.timestamp || new Date()
+        });
+        
+        // Toggle selection
+        const newState = contextStorage.toggleMessageSelection(message.id);
+        setIsSelectedForContext(newState);
+        
+        // Force refresh of selection state to ensure UI stays in sync
+        setTimeout(() => {
+          const selectedMessages = contextStorage.getSelectedMessages();
+          const messageId = createMessageId(message.id);
+          const selectedMessage = selectedMessages.find(m => m.id === messageId);
+          const finalState = !!selectedMessage?.isSelected;
+          setIsSelectedForContext(finalState);
+        }, 0);
+        
+      } catch (error) {
+        console.error('Error toggling message selection:', error);
+        // Revert to previous state on error
+        setIsSelectedForContext(!isSelectedForContext);
+      }
+    }
   };
 
   return (
@@ -55,51 +75,38 @@ export function MessageBubble({ message, onCopy, copied, onPRDUpdate }: MessageB
         )}
       </div>
 
-      {/* Bubble */}
-      <div
-        className={`relative max-w-[80%] p-4 rounded-2xl text-base leading-7 ${
-          isUser
-            ? 'bg-primary text-white'
-            : 'bg-muted text-foreground'
-        } ${isSelectedForContext ? 'ring-2 ring-blue-500 ring-opacity-50' : ''}`}
-      >
-        {/* Context selection checkbox */}
-        <div className={`absolute ${isUser ? '-right-12' : '-left-12'} top-0 flex flex-col items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity`}>
+      {/* Context Checkbox - positioned to the right of avatar for user messages */}
+      {isUser && (
+        <div className="flex items-start pt-2 opacity-0 group-hover:opacity-100 transition-opacity">
           <Tooltip>
             <TooltipTrigger asChild>
-              <div className="flex items-center">
+              <div className="flex flex-col items-center gap-1">
                 <Checkbox
                   checked={isSelectedForContext}
                   onCheckedChange={handleContextToggle}
                   className="h-4 w-4"
                 />
+                <Database className="w-3 h-3 text-muted-foreground" />
               </div>
             </TooltipTrigger>
             <TooltipContent>
               <p>{isSelectedForContext ? 'Remove from context' : 'Add to context'}</p>
             </TooltipContent>
           </Tooltip>
-          <Database className="w-3 h-3 text-muted-foreground" />
         </div>
+      )}
 
-        {!isUser && (
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => onCopy(message.content, message.id)}
-            className={`absolute -left-12 ${isSelectedForContext ? 'top-8' : 'top-0'} opacity-0 group-hover:opacity-100 transition-opacity h-8 w-8`}
-          >
-            {copied ? (
-              <Check className="w-4 h-4 text-green-600" />
-            ) : (
-              <Copy className="w-4 h-4" />
-            )}
-          </Button>
-        )}
-
+      {/* Bubble */}
+      <div
+        className={`max-w-[80%] p-4 rounded-2xl text-base leading-7 ${
+          isUser
+            ? 'bg-primary text-white'
+            : 'bg-muted text-foreground'
+        } ${isSelectedForContext ? 'ring-2 ring-blue-500 ring-opacity-50' : ''}`}
+      >
         {isUser ? (
           <div className="whitespace-pre-wrap break-words">{message.content}</div>
-        ) : (
+        ) : (         
           <SmartMessageRenderer 
             content={message.content} 
             messageId={message.id}
