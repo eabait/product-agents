@@ -13,9 +13,11 @@ interface MessageBubbleProps {
   onCopy: (content: string, messageId: string) => void;
   copied: boolean;
   onPRDUpdate?: (messageId: string, updatedPRD: PRD) => void;
+  isExpanded?: boolean;
+  onToggleExpanded?: (messageId: string) => void;
 }
 
-export function MessageBubble({ message, onCopy, copied, onPRDUpdate }: MessageBubbleProps) {
+export function MessageBubble({ message, onCopy, copied, onPRDUpdate, isExpanded, onToggleExpanded }: MessageBubbleProps) {
   const isUser = message.role === 'user';
   const [isSelectedForContext, setIsSelectedForContext] = useState(false);
 
@@ -111,6 +113,8 @@ export function MessageBubble({ message, onCopy, copied, onPRDUpdate }: MessageB
             content={message.content} 
             messageId={message.id}
             onPRDUpdate={onPRDUpdate}
+            isExpanded={isExpanded}
+            onToggleExpanded={onToggleExpanded}
           />
         )}
       </div>

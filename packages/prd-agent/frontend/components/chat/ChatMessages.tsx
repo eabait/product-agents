@@ -3,6 +3,7 @@ import { MessageBubble } from './MessageBubble';
 import { TypingIndicator } from './TypingIndicator';
 import { PRD } from './PRDEditor';
 import { Message } from '../../types';
+import { useState, useEffect, useMemo } from 'react';
 
 interface ChatMessagesProps {
   messages: Message[];
@@ -19,6 +20,51 @@ export function ChatMessages({
   onCopy,
   onPRDUpdate,
 }: ChatMessagesProps) {
+  const [expandedPRDs, setExpandedPRDs] = useState<Set<string>>(new Set());
+
+  // Helper function to check if a message contains a PRD
+  const isPRDMessage = (message: Message) => {
+    if (message.role === 'user') return false;
+    try {
+      const parsed = JSON.parse(message.content);
+      return parsed && typeof parsed === 'object' && typeof parsed.problemStatement === 'string';
+    } catch {
+      return false;
+    }
+  };
+
+  // Find the last PRD message ID
+  const lastPRDMessageId = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (isPRDMessage(messages[i])) {
+        return messages[i].id;
+      }
+    }
+    return null;
+  }, [messages]);
+
+  // Auto-expand the last PRD message when it changes
+  useEffect(() => {
+    if (lastPRDMessageId) {
+      setExpandedPRDs(prev => {
+        const newSet = new Set<string>();
+        newSet.add(lastPRDMessageId);
+        return newSet;
+      });
+    }
+  }, [lastPRDMessageId]);
+
+  const handleToggleExpanded = (messageId: string) => {
+    setExpandedPRDs(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(messageId)) {
+        newSet.delete(messageId);
+      } else {
+        newSet.add(messageId);
+      }
+      return newSet;
+    });
+  };
   return (
     <div className="max-w-3xl mx-auto px-6 py-4 space-y-6">
       {messages.map((message) => (
@@ -33,6 +79,8 @@ export function ChatMessages({
             onCopy={onCopy}
             copied={copied === message.id}
             onPRDUpdate={onPRDUpdate}
+            isExpanded={expandedPRDs.has(message.id)}
+            onToggleExpanded={handleToggleExpanded}
           />
         </motion.div>
       ))}

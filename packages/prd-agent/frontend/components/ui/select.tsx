@@ -59,8 +59,8 @@ const Select = React.forwardRef<
         // Traverse SelectContent children to find SelectItems
         React.Children.forEach(child.props.children, (item) => {
           if (React.isValidElement(item) && item.type === SelectItem) {
-            const itemValue = item.props.value
-            const itemLabel = extractTextFromChildren(item.props.children)
+            const itemValue = (item.props as any).value
+            const itemLabel = extractTextFromChildren((item.props as any).children)
             if (itemValue && itemLabel) {
               labels.set(itemValue, itemLabel)
               console.log(`[Select] Extracted label: "${itemValue}" -> "${itemLabel}"`)

@@ -3,14 +3,19 @@
 import { useState, useCallback } from 'react';
 import { MarkdownMessage } from './MarkdownMessage';
 import { PRDEditor, PRD } from './PRDEditor';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { ChevronDown, ChevronUp, FileText } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 
 interface SmartMessageRendererProps {
   content: string;
   messageId: string;
   onPRDUpdate?: (messageId: string, updatedPRD: PRD) => void;
+  isExpanded?: boolean;
+  onToggleExpanded?: (messageId: string) => void;
 }
 
-export function SmartMessageRenderer({ content, messageId, onPRDUpdate }: SmartMessageRendererProps) {
+export function SmartMessageRenderer({ content, messageId, onPRDUpdate, isExpanded = false, onToggleExpanded }: SmartMessageRendererProps) {
   const [localPRD, setLocalPRD] = useState<PRD | null>(() => {
     // Try to parse the content as PRD
     try {
@@ -31,13 +36,50 @@ export function SmartMessageRenderer({ content, messageId, onPRDUpdate }: SmartM
     onPRDUpdate?.(messageId, updatedPRD);
   }, [messageId, onPRDUpdate]);
 
-  // If we have a valid PRD, render the editor
+  // If we have a valid PRD, render the collapsible editor
   if (localPRD) {
+    const handleToggle = () => {
+      onToggleExpanded?.(messageId);
+    };
+
     return (
-      <PRDEditor 
-        prd={localPRD} 
-        onChange={handlePRDChange}
-      />
+      <Collapsible open={isExpanded} onOpenChange={handleToggle}>
+        <div className="border rounded-lg bg-card">
+          <CollapsibleTrigger asChild>
+            <Button
+              variant="ghost"
+              className="flex w-full justify-between items-center p-4 hover:bg-muted/50"
+            >
+              <div className="flex items-center gap-2">
+                <FileText className="w-4 h-4" />
+                <span className="font-medium">Product Requirements Document</span>
+              </div>
+              {isExpanded ? (
+                <ChevronUp className="w-4 h-4" />
+              ) : (
+                <ChevronDown className="w-4 h-4" />
+              )}
+            </Button>
+          </CollapsibleTrigger>
+          
+          {!isExpanded && (
+            <div className="px-4 pb-4">
+              <p className="text-sm text-muted-foreground line-clamp-2">
+                {localPRD.problemStatement}
+              </p>
+            </div>
+          )}
+          
+          <CollapsibleContent className="border-t">
+            <div className="p-4">
+              <PRDEditor 
+                prd={localPRD} 
+                onChange={handlePRDChange}
+              />
+            </div>
+          </CollapsibleContent>
+        </div>
+      </Collapsible>
     );
   }
 
