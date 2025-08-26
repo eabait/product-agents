@@ -23,11 +23,16 @@ function extractTextFromChildren(children: React.ReactNode): string {
   if (typeof children === 'number') {
     return children.toString()
   }
-  if (React.isValidElement(children) && children.props.children) {
-    return extractTextFromChildren(children.props.children)
+  if (React.isValidElement(children)) {
+    // Handle div elements with nested content by extracting from their children
+    if (children.props.children) {
+      return extractTextFromChildren(children.props.children)
+    }
   }
   if (Array.isArray(children)) {
-    return children.map(extractTextFromChildren).join('')
+    // Join array elements, but prioritize the first meaningful text found
+    const texts = children.map(extractTextFromChildren).filter(text => text.trim())
+    return texts.length > 0 ? texts[0] : texts.join(' ')
   }
   return ''
 }
@@ -58,12 +63,16 @@ const Select = React.forwardRef<
             const itemLabel = extractTextFromChildren(item.props.children)
             if (itemValue && itemLabel) {
               labels.set(itemValue, itemLabel)
+              console.log(`[Select] Extracted label: "${itemValue}" -> "${itemLabel}"`)
+            } else {
+              console.warn(`[Select] Failed to extract label for item:`, { itemValue, itemLabel, item })
             }
           }
         })
       }
     })
     
+    console.log(`[Select] Final itemLabels Map:`, labels)
     return labels
   }, [children])
 
@@ -95,9 +104,21 @@ const SelectValue = React.forwardRef<
   if (!context) throw new Error("SelectValue must be used within Select")
 
   // Get the display text from the labels map, fallback to value or placeholder
-  const displayText = context.value 
+  let displayText = context.value 
     ? (context.itemLabels.get(context.value) || context.value)
     : (placeholder || "")
+  
+  // If we have a value but no proper display text, try to provide a better fallback
+  if (context.value && displayText === context.value) {
+    // For category values, try to provide a readable fallback
+    if (context.value === 'requirement') displayText = 'Business Requirements'
+    else if (context.value === 'constraint') displayText = 'Technical Constraints'
+    else if (context.value === 'assumption') displayText = 'Business Assumptions'
+    else if (context.value === 'stakeholder') displayText = 'Stakeholder Needs'
+    else if (context.value === 'custom') displayText = 'Custom Context'
+  }
+  
+  console.log(`[SelectValue] Displaying: value="${context.value}", displayText="${displayText}", availableLabels:`, Array.from(context.itemLabels.entries()))
 
   return (
     <span ref={ref} className={cn("block", className)} title={displayText} {...props}>

@@ -164,17 +164,14 @@ export function ContextForm({ isOpen, onClose, onSubmit, editingItem }: ContextF
             
             <Select value={category} onValueChange={(value: ContextCategory) => setCategory(value)}>
               <SelectTrigger>
-                <SelectValue />
+                <SelectValue placeholder="Select category">
+                  {CONTEXT_CATEGORY_LABELS[category]}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {Object.entries(CONTEXT_CATEGORY_LABELS).map(([key, label]) => (
                   <SelectItem key={key} value={key}>
-                    <div>
-                      <div className="font-medium">{label}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {CONTEXT_CATEGORY_DESCRIPTIONS[key as ContextCategory]}
-                      </div>
-                    </div>
+                    {label}
                   </SelectItem>
                 ))}
               </SelectContent>

@@ -258,63 +258,6 @@ export function syncConversationMessages(messages: any[]): void {
   })
 }
 
-/**
- * Enhanced PRD content extraction with automatic categorization
- */
-export function extractContextFromPRD(
-  prdContent: string, 
-  defaultCategory: ContextCategory = 'requirement'
-): CategorizedContextItem[] {
-  if (isRateLimited('extractFromPRD', 5)) {
-    console.warn('PRD extraction rate limited')
-    return []
-  }
-  
-  try {
-    const sections = prdContent.split(/#{1,3}\s+/).filter(section => section.trim())
-    const extractedItems: CategorizedContextItem[] = []
-    
-    sections.forEach((section, index) => {
-      const lines = section.split('\n').filter(line => line.trim())
-      if (lines.length < 2) return
-      
-      const title = lines[0].trim().replace(/^#+\s*/, '') // Remove any remaining markdown headers
-      const content = lines.slice(1).join('\n').trim()
-      
-      // Enhanced content filtering
-      if (title && 
-          content && 
-          content.length >= CONTEXT_CONSTRAINTS.MIN_CONTENT_LENGTH &&
-          content.length <= CONTEXT_CONSTRAINTS.MAX_CONTENT_LENGTH) {
-        
-        // Auto-suggest category based on content
-        const suggestion = suggestCategory(title, content)
-        const category = suggestion.confidence > 40 ? suggestion.suggested : defaultCategory
-        
-        extractedItems.push({
-          id: createContextItemId(crypto.randomUUID()),
-          title: `Extracted: ${title}`,
-          content,
-          category,
-          priority: suggestion.confidence > 70 ? 'high' : 'medium',
-          tags: [
-            'extracted', 
-            'prd', 
-            ...(suggestion.confidence > 60 ? ['auto-categorized'] : ['needs-review'])
-          ] as readonly string[],
-          isActive: false,
-          createdAt: new Date(),
-          lastUsed: new Date()
-        })
-      }
-    })
-    
-    return extractedItems
-  } catch (error) {
-    console.error('Error extracting context from PRD:', error)
-    return []
-  }
-}
 
 // Get context summary for display
 export function getContextSummary(payload: EnhancedContextPayload): string {

@@ -10,8 +10,6 @@ import {
   Plus, 
   Search, 
   Filter, 
-  Upload, 
-  Download, 
   FileText,
   AlertCircle,
   CheckSquare,
@@ -40,9 +38,6 @@ export function ContextPanel({ isOpen, onClose }: ContextPanelProps) {
   const [selectedPriority, setSelectedPriority] = useState<ContextPriority | 'all'>('all')
   const [showForm, setShowForm] = useState(false)
   const [editingItem, setEditingItem] = useState<CategorizedContextItem | null>(null)
-  const [showUpload, setShowUpload] = useState(false)
-  const [uploadCategory, setUploadCategory] = useState<ContextCategory>('requirement')
-  const [uploadText, setUploadText] = useState('')
 
   // Load context items on mount and when panel opens
   useEffect(() => {
@@ -106,46 +101,6 @@ export function ContextPanel({ isOpen, onClose }: ContextPanelProps) {
     setEditingItem(null)
   }
 
-  const handleUploadText = () => {
-    if (!uploadText.trim()) return
-
-    const lines = uploadText.split('\n').filter(line => line.trim())
-    let imported = 0
-
-    lines.forEach(line => {
-      const trimmedLine = line.trim()
-      if (trimmedLine.length > 10) { // Only meaningful content
-        contextStorage.addContextItem({
-          title: `Uploaded: ${trimmedLine.substring(0, 50)}${trimmedLine.length > 50 ? '...' : ''}`,
-          content: trimmedLine,
-          category: uploadCategory,
-          priority: 'medium',
-          tags: ['uploaded'],
-          isActive: false
-        })
-        imported++
-      }
-    })
-
-    if (imported > 0) {
-      loadContextItems()
-      setUploadText('')
-      setShowUpload(false)
-    }
-  }
-
-  const handleExport = () => {
-    const exportData = contextStorage.exportContextItems()
-    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `prd-context-${new Date().toISOString().split('T')[0]}.json`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
-  }
 
   const handleSelectAll = () => {
     filteredItems.forEach(item => {
@@ -229,12 +184,6 @@ export function ContextPanel({ isOpen, onClose }: ContextPanelProps) {
                 <Plus className="h-4 w-4 mr-2" />
                 Add Context
               </Button>
-              <Button onClick={() => setShowUpload(true)} variant="outline" size="sm">
-                <Upload className="h-4 w-4" />
-              </Button>
-              <Button onClick={handleExport} variant="outline" size="sm">
-                <Download className="h-4 w-4" />
-              </Button>
             </div>
 
             {/* Bulk operations */}
@@ -300,58 +249,6 @@ export function ContextPanel({ isOpen, onClose }: ContextPanelProps) {
           editingItem={editingItem}
         />
 
-        {/* Upload Text Modal */}
-        <Sheet open={showUpload} onOpenChange={setShowUpload}>
-          <SheetContent side="right" className="w-96">
-            <SheetHeader>
-              <SheetTitle>Upload Text Content</SheetTitle>
-            </SheetHeader>
-            
-            <div className="space-y-4 mt-4">
-              <div>
-                <label className="block text-sm font-medium mb-2">Category</label>
-                <Select value={uploadCategory} onValueChange={(value: ContextCategory) => setUploadCategory(value)}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(CONTEXT_CATEGORY_LABELS).map(([key, label]) => (
-                      <SelectItem key={key} value={key}>
-                        {label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {CONTEXT_CATEGORY_DESCRIPTIONS[uploadCategory]}
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-2">Text Content</label>
-                <Textarea
-                  value={uploadText}
-                  onChange={(e) => setUploadText(e.target.value)}
-                  placeholder="Paste your text content here. Each line will become a separate context item."
-                  className="min-h-[200px]"
-                />
-                <p className="text-xs text-muted-foreground mt-1">
-                  Each line will be converted to a separate context item with the selected category.
-                </p>
-              </div>
-
-              <div className="flex gap-2">
-                <Button onClick={handleUploadText} disabled={!uploadText.trim()} className="flex-1">
-                  <Upload className="h-4 w-4 mr-2" />
-                  Upload Content
-                </Button>
-                <Button onClick={() => setShowUpload(false)} variant="outline">
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          </SheetContent>
-        </Sheet>
       </SheetContent>
     </Sheet>
   )
