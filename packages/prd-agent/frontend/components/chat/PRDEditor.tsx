@@ -5,7 +5,8 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Plus, X, Edit3 } from 'lucide-react';
+import { Plus, X, Edit3, Copy, Download, Check } from 'lucide-react';
+import { convertPRDToText, convertPRDToMarkdown, downloadMarkdown, copyToClipboard } from '@/lib/prd-export-utils';
 
 export interface PRD {
   problemStatement: string;
@@ -29,6 +30,8 @@ interface PRDEditorProps {
 
 export function PRDEditor({ prd, onChange, readOnly = false }: PRDEditorProps) {
   const [editingField, setEditingField] = useState<string | null>(null);
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'copying' | 'copied'>('idle');
+  const [exportStatus, setExportStatus] = useState<'idle' | 'exporting' | 'exported'>('idle');
 
   const updateField = useCallback((field: keyof PRD, value: any) => {
     const updatedPRD = { ...prd, [field]: value };
@@ -70,6 +73,42 @@ export function PRDEditor({ prd, onChange, readOnly = false }: PRDEditorProps) {
     const updated = prd.successMetrics.filter((_, i) => i !== index);
     updateField('successMetrics', updated);
   }, [prd.successMetrics, updateField]);
+
+  const handleCopyPRD = useCallback(async () => {
+    if (copyStatus !== 'idle') return;
+    
+    setCopyStatus('copying');
+    try {
+      const textContent = convertPRDToText(prd);
+      const success = await copyToClipboard(textContent);
+      
+      if (success) {
+        setCopyStatus('copied');
+        setTimeout(() => setCopyStatus('idle'), 2000);
+      } else {
+        setCopyStatus('idle');
+      }
+    } catch (error) {
+      console.error('Failed to copy PRD:', error);
+      setCopyStatus('idle');
+    }
+  }, [prd, copyStatus]);
+
+  const handleExportMarkdown = useCallback(async () => {
+    if (exportStatus !== 'idle') return;
+    
+    setExportStatus('exporting');
+    try {
+      const markdownContent = convertPRDToMarkdown(prd);
+      downloadMarkdown(markdownContent);
+      
+      setExportStatus('exported');
+      setTimeout(() => setExportStatus('idle'), 2000);
+    } catch (error) {
+      console.error('Failed to export PRD:', error);
+      setExportStatus('idle');
+    }
+  }, [prd, exportStatus]);
 
   const renderSection = (
     title: string,
@@ -153,6 +192,52 @@ export function PRDEditor({ prd, onChange, readOnly = false }: PRDEditorProps) {
       )}
     </div>
   );
+
+  // Check if PRD has any meaningful content to show the footer
+  const hasContent = prd.problemStatement || prd.solutionOverview || 
+                    prd.targetUsers.length > 0 || prd.goals.length > 0 || 
+                    prd.successMetrics.length > 0 || prd.constraints.length > 0 || 
+                    prd.assumptions.length > 0;
+
+  const renderFooter = () => {
+    if (!hasContent) return null;
+
+    return (
+      <div className="mt-8 p-4 bg-background border-t border-border">
+        <div className="flex items-center justify-end gap-3 max-w-4xl">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleCopyPRD}
+            disabled={copyStatus !== 'idle'}
+            className="flex items-center gap-2"
+          >
+            {copyStatus === 'copied' ? (
+              <Check className="h-4 w-4 text-green-600" />
+            ) : (
+              <Copy className="h-4 w-4" />
+            )}
+            {copyStatus === 'copying' ? 'Copying...' : copyStatus === 'copied' ? 'Copied!' : 'Copy PRD'}
+          </Button>
+          
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleExportMarkdown}
+            disabled={exportStatus !== 'idle'}
+            className="flex items-center gap-2"
+          >
+            {exportStatus === 'exported' ? (
+              <Check className="h-4 w-4 text-green-600" />
+            ) : (
+              <Download className="h-4 w-4" />
+            )}
+            {exportStatus === 'exporting' ? 'Exporting...' : exportStatus === 'exported' ? 'Exported!' : 'Export as Markdown'}
+          </Button>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-6 max-w-4xl">
@@ -258,6 +343,9 @@ export function PRDEditor({ prd, onChange, readOnly = false }: PRDEditorProps) {
         'Assumptions',
         renderStringArraySection('assumptions', 'Assumption', 'Assumption', 'Add Assumption')
       )}
+
+      {/* Footer with copy and export actions */}
+      {renderFooter()}
     </div>
   );
 }
