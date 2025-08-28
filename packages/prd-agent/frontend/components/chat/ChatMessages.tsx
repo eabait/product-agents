@@ -66,7 +66,7 @@ export function ChatMessages({
     });
   };
   return (
-    <div className="max-w-3xl mx-auto px-6 py-4 space-y-6">
+    <div className="max-w-4xl mx-auto px-6 py-4 space-y-6">
       {messages.map((message) => (
         <motion.div
           key={message.id}

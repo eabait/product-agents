@@ -838,9 +838,9 @@ export default function PRDAgentPage() {
 
           {/* Input area */}
           <div className="border-t p-4 bg-card">
-            <div className="mx-auto max-w-3xl">
+            <div className="mx-auto max-w-4xl">
               <form onSubmit={handleCustomSubmit}>
-                <div className="flex gap-2">
+                <div className="flex gap-2 items-center">
                   <Textarea
                     ref={textareaRef}
                     value={input}
