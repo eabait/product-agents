@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { AppStateProvider, useModelContext, useContextSettings } from "@/contexts/AppStateProvider";
 import { ChatMessages } from "@/components/chat/ChatMessages";
 import {
   Menu,
@@ -23,9 +24,15 @@ import {
 import { Conversation, Message } from "@/types";
 import { PRD } from "@/lib/prd-schema";
 import { ContextPanel } from "@/components/context";
+import { ContextUsageIndicator } from "@/components/context/ContextUsageIndicator";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { contextStorage } from "@/lib/context-storage";
 import { buildEnhancedContextPayload, getContextSummary } from "@/lib/context-utils";
+import { 
+  UI_DIMENSIONS, 
+  VALIDATION_LIMITS, 
+  TimingSettings
+} from "@/lib/ui-constants";
 // AgentSettings interface
 interface AgentSettings {
   model: string;
@@ -37,11 +44,15 @@ interface AgentSettings {
 // Enhanced model interface from OpenRouter
 
 
-export default function PRDAgentPage() {
+function PRDAgentPageContent() {
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+
+  // Use reactive contexts
+  const { setModels, updateModelFromId } = useModelContext();
+  const { contextSettings } = useContextSettings();
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -60,6 +71,9 @@ export default function PRDAgentPage() {
   // Context panel state
   const [contextOpen, setContextOpen] = useState(false);
   const [contextSummary, setContextSummary] = useState<string>('');
+
+  // Models state (now managed by context)
+  const [localModels, setLocalModels] = useState<any[]>([]);
 
   // Note: Context summary useEffect will be defined after computed values
   
@@ -98,13 +112,13 @@ export default function PRDAgentPage() {
   // Generate smart title from first message
   const generateTitleFromMessage = (content: string): string => {
     const cleaned = content.trim();
-    if (cleaned.length <= 50) return cleaned;
+    if (cleaned.length <= VALIDATION_LIMITS.TITLE_CHAR_LIMIT) return cleaned;
     
     // Extract first sentence or first 50 chars
     const firstSentence = cleaned.split('.')[0];
-    if (firstSentence.length <= 50) return firstSentence;
+    if (firstSentence.length <= VALIDATION_LIMITS.TITLE_CHAR_LIMIT) return firstSentence;
     
-    return cleaned.substring(0, 47) + "...";
+    return cleaned.substring(0, VALIDATION_LIMITS.TITLE_TRUNCATE_POINT) + "...";
   };
 
   // Helper function to extract PRD from messages (same as server-side)
@@ -130,7 +144,7 @@ export default function PRDAgentPage() {
       return false; // Invalid title
     }
     
-    if (trimmedTitle.length > 100) {
+    if (trimmedTitle.length > VALIDATION_LIMITS.MAX_TITLE_LENGTH) {
       return false; // Too long
     }
 
@@ -240,6 +254,39 @@ export default function PRDAgentPage() {
     }
   }, []);
 
+  // Fetch available models from API
+  const fetchModels = useCallback(async (apiKey?: string) => {
+    try {
+      const params = new URLSearchParams();
+      if (apiKey) params.append('apiKey', apiKey);
+      
+      const response = await fetch(`/api/models?${params}`);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch models: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      if (data.models && Array.isArray(data.models)) {
+        setLocalModels(data.models);
+        setModels(data.models); // Update context
+        return data.models;
+      } else {
+        throw new Error('Invalid models data format');
+      }
+    } catch (error) {
+      console.error('Error fetching models:', error);
+      setLocalModels([]);
+      setModels([]); // Update context
+      return [];
+    }
+  }, [setModels]);
+
+  // Update model context when settings model changes
+  useEffect(() => {
+    if (settings.model) {
+      updateModelFromId(settings.model);
+    }
+  }, [settings.model, updateModelFromId]);
 
   // Update context summary whenever context changes
   useEffect(() => {
@@ -402,7 +449,16 @@ export default function PRDAgentPage() {
         }
         // If only agentDefaults available, settings and provider are already updated by fetchAgentDefaults
         
-      }, 100);
+        // Fetch models after settings are resolved
+        setTimeout(async () => {
+          try {
+            await fetchModels(finalApiKey);
+          } catch (error) {
+            console.error('Failed to fetch models during initialization:', error);
+          }
+        }, TimingSettings.MODEL_FETCH_DELAY);
+        
+      }, TimingSettings.SETTINGS_FETCH_DELAY);
     }
   }, []);
 
@@ -467,7 +523,7 @@ export default function PRDAgentPage() {
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
-      textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 160) + "px";
+      textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, UI_DIMENSIONS.TEXTAREA_MAX_HEIGHT) + "px";
     }
   }, [input]);
 
@@ -491,7 +547,7 @@ export default function PRDAgentPage() {
   const handleCopy = async (content: string, messageId: string) => {
     await navigator.clipboard.writeText(content);
     setCopied(messageId);
-    setTimeout(() => setCopied(null), 2000);
+    setTimeout(() => setCopied(null), TimingSettings.COPY_FEEDBACK_TIMEOUT);
   };
 
   function createConversation() {
@@ -614,6 +670,11 @@ export default function PRDAgentPage() {
               {contextSummary}
             </div>
           )}
+          <ContextUsageIndicator
+            currentMessages={activeMessages}
+            currentPRD={getPRDFromMessages(activeMessages)}
+            className="hidden sm:flex"
+          />
           <Tooltip>
             <TooltipTrigger asChild>
               <Button 
@@ -642,7 +703,7 @@ export default function PRDAgentPage() {
         {/* Left collapsible sidebar */}
         <aside
           className={`${
-            leftSidebarOpen ? "w-80" : "w-16"
+            leftSidebarOpen ? UI_DIMENSIONS.SIDEBAR_EXPANDED_WIDTH : UI_DIMENSIONS.SIDEBAR_COLLAPSED_WIDTH
           } transition-all duration-200 border-l bg-sidebar overflow-hidden flex flex-col`}
         >
           <div className="flex items-center justify-between p-3">
@@ -692,7 +753,7 @@ export default function PRDAgentPage() {
                           }}
                           onBlur={() => {
                             // Save on blur unless user clicked cancel
-                            setTimeout(() => saveTitle(), 100);
+                            setTimeout(() => saveTitle(), TimingSettings.SAVE_TITLE_BLUR_DELAY);
                           }}
                         />
                         <Button
@@ -883,5 +944,13 @@ export default function PRDAgentPage() {
 
       </div>
     </TooltipProvider>
+  );
+}
+
+export default function PRDAgentPage() {
+  return (
+    <AppStateProvider>
+      <PRDAgentPageContent />
+    </AppStateProvider>
   );
 }

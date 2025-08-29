@@ -124,6 +124,10 @@ export interface ContextUsage {
   readonly limitTokens: number
   /** Percentage of limit being used (0-100+) */
   readonly percentageUsed: number
+  /** Actual model context window size */
+  readonly modelContextWindow?: number
+  /** Percentage of actual model window being used */
+  readonly modelWindowPercentage?: number
 }
 
 /**

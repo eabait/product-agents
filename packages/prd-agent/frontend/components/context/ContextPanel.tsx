@@ -23,8 +23,23 @@ import {
   CONTEXT_CATEGORY_DESCRIPTIONS 
 } from '@/lib/context-types'
 import { contextStorage } from '@/lib/context-storage'
+import { buildEnhancedContextPayload, calculateContextUsage } from '@/lib/context-utils'
+import { ContextUsage } from '@/lib/context-types'
 import { ContextItem } from './ContextItem'
 import { ContextForm } from './ContextForm'
+
+// UI Layout Constants
+const CONTEXT_PANEL_WIDTH = 'w-96'
+const EMPTY_STATE_ICON_SIZE = 'h-8 w-8'
+
+// Token Usage Thresholds
+const TOKEN_USAGE_WARNING_THRESHOLD = 70
+const TOKEN_USAGE_CRITICAL_THRESHOLD = 90
+
+// Display Constants
+const MAX_PERCENTAGE = 100
+const CONTEXT_WINDOW_DIVISOR = 1000
+const SINGULAR_ITEM_COUNT = 1
 
 interface ContextPanelProps {
   isOpen: boolean
@@ -38,6 +53,7 @@ export function ContextPanel({ isOpen, onClose }: ContextPanelProps) {
   const [selectedPriority, setSelectedPriority] = useState<ContextPriority | 'all'>('all')
   const [showForm, setShowForm] = useState(false)
   const [editingItem, setEditingItem] = useState<CategorizedContextItem | null>(null)
+  const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null)
 
   // Load context items on mount and when panel opens
   useEffect(() => {
@@ -49,6 +65,19 @@ export function ContextPanel({ isOpen, onClose }: ContextPanelProps) {
   const loadContextItems = () => {
     const items = contextStorage.getCategorizedContext()
     setContextItems(items)
+    updateContextUsage()
+  }
+
+  const updateContextUsage = () => {
+    try {
+      // Build context payload to calculate current usage
+      const contextPayload = buildEnhancedContextPayload([], undefined)
+      const usage = calculateContextUsage(contextPayload, undefined, undefined)
+      setContextUsage(usage)
+    } catch (error) {
+      console.error('Error calculating context usage:', error)
+      setContextUsage(null)
+    }
   }
 
   const filteredItems = contextItems.filter(item => {
@@ -122,7 +151,7 @@ export function ContextPanel({ isOpen, onClose }: ContextPanelProps) {
 
   return (
     <Sheet open={isOpen} onOpenChange={onClose}>
-      <SheetContent side="right" className="w-96 p-0 overflow-hidden">
+      <SheetContent side="right" className={`${CONTEXT_PANEL_WIDTH} p-0 overflow-hidden`}>
         <div className="flex flex-col h-full">
           <SheetHeader className="p-4 border-b">
             <SheetTitle>Context Management</SheetTitle>
@@ -131,7 +160,39 @@ export function ContextPanel({ isOpen, onClose }: ContextPanelProps) {
             {activeItems.length > 0 && (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <AlertCircle className="h-4 w-4" />
-                <span>{activeItems.length} context item{activeItems.length !== 1 ? 's' : ''} active</span>
+                <span>{activeItems.length} context item{activeItems.length !== SINGULAR_ITEM_COUNT ? 's' : ''} active</span>
+              </div>
+            )}
+            
+            {/* Context usage visualization */}
+            {contextUsage && contextUsage.totalTokens > 0 && (
+              <div className="mt-3 p-3 bg-muted/30 rounded-lg">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium">Token Usage</span>
+                  <span className={`text-sm font-medium ${
+                    contextUsage.percentageUsed > TOKEN_USAGE_CRITICAL_THRESHOLD ? 'text-red-600' : 
+                    contextUsage.percentageUsed > TOKEN_USAGE_WARNING_THRESHOLD ? 'text-yellow-600' : 'text-green-600'
+                  }`}>
+                    {Math.round(contextUsage.percentageUsed)}%
+                  </span>
+                </div>
+                <div className="w-full bg-muted rounded-full h-2 mb-2">
+                  <div 
+                    className={`h-2 rounded-full transition-all duration-300 ${
+                      contextUsage.percentageUsed > TOKEN_USAGE_CRITICAL_THRESHOLD ? 'bg-red-500' : 
+                      contextUsage.percentageUsed > TOKEN_USAGE_WARNING_THRESHOLD ? 'bg-yellow-500' : 'bg-green-500'
+                    }`}
+                    style={{ width: `${Math.min(contextUsage.percentageUsed, MAX_PERCENTAGE)}%` }}
+                  />
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {contextUsage.totalTokens.toLocaleString()} / {contextUsage.limitTokens.toLocaleString()} tokens
+                  {contextUsage.modelContextWindow && (
+                    <span className="ml-1">
+                      ({((contextUsage.modelContextWindow / CONTEXT_WINDOW_DIVISOR)).toFixed(0)}K window)
+                    </span>
+                  )}
+                </div>
               </div>
             )}
           </SheetHeader>
@@ -207,12 +268,12 @@ export function ContextPanel({ isOpen, onClose }: ContextPanelProps) {
               <div className="text-center py-8 text-muted-foreground">
                 {searchQuery || selectedCategory !== 'all' || selectedPriority !== 'all' ? (
                   <div>
-                    <Filter className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                    <Filter className={`${EMPTY_STATE_ICON_SIZE} mx-auto mb-2 opacity-50`} />
                     <p>No context items match your filters</p>
                   </div>
                 ) : (
                   <div>
-                    <FileText className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                    <FileText className={`${EMPTY_STATE_ICON_SIZE} mx-auto mb-2 opacity-50`} />
                     <p>No context items yet</p>
                     <Button onClick={handleCreateItem} variant="outline" size="sm" className="mt-2">
                       <Plus className="h-4 w-4 mr-2" />

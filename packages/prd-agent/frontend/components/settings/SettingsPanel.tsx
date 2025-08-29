@@ -7,7 +7,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Slider } from '@/components/ui/slider'
 import { Settings } from 'lucide-react'
-import { contextStorage } from '@/lib/context-storage'
+import { formatContextWindow } from '@/lib/context-utils'
+import { useModelContext, useContextSettings } from '@/contexts/AppStateProvider'
+import {
+  UI_DIMENSIONS,
+  VALIDATION_LIMITS,
+  SLIDER_CONFIGS,
+  ICON_SIZES
+} from '@/lib/ui-constants'
 
 interface Model {
   id: string
@@ -49,6 +56,10 @@ export function SettingsPanel({ isOpen, onClose, settings, onSettingsChange }: S
     return settings.model ? settings.model.split('/')[0] : ''
   })
 
+  // Use reactive contexts
+  const { setModels: setModelContextModels, updateModelFromId } = useModelContext()
+  const { contextSettings, updateContextSettings } = useContextSettings()
+
   const availableProviders = models.reduce<Provider[]>((acc, model) => {
     const existing = acc.find(p => p.name === model.provider)
     if (existing) {
@@ -87,6 +98,8 @@ export function SettingsPanel({ isOpen, onClose, settings, onSettingsChange }: S
       const data = await response.json()
       if (data.models && Array.isArray(data.models)) {
         setModels(data.models)
+        // Update the model context as well
+        setModelContextModels(data.models)
       } else {
         throw new Error('Invalid models data format')
       }
@@ -115,13 +128,14 @@ export function SettingsPanel({ isOpen, onClose, settings, onSettingsChange }: S
     }
   }, [settings.model])
 
+
   return (
     <Sheet open={isOpen} onOpenChange={onClose}>
-      <SheetContent side="right" className="w-96 p-0 overflow-hidden">
+      <SheetContent side="right" className={`${UI_DIMENSIONS.SETTINGS_PANEL_WIDTH} p-0 overflow-hidden`}>
         <div className="flex flex-col h-full">
           <SheetHeader className="p-4 border-b">
             <div className="flex items-center gap-2">
-              <Settings className="h-5 w-5" />
+              <Settings className={ICON_SIZES.MEDIUM} />
               <SheetTitle>Settings</SheetTitle>
             </div>
           </SheetHeader>
@@ -142,7 +156,7 @@ export function SettingsPanel({ isOpen, onClose, settings, onSettingsChange }: S
                       <div className="flex items-center gap-2">
                         {modelsLoading && (
                           <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                            <div className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" />
+                            <div className={`${UI_DIMENSIONS.LOADING_INDICATOR_SIZE} border border-current border-t-transparent rounded-full animate-spin`} />
                             Loading...
                           </div>
                         )}
@@ -199,7 +213,7 @@ export function SettingsPanel({ isOpen, onClose, settings, onSettingsChange }: S
                                   </span>
                                 )}
                                 <span className="text-xs text-muted-foreground">
-                                  ({provider.count} model{provider.count !== 1 ? 's' : ''})
+                                  ({provider.count} model{provider.count !== VALIDATION_LIMITS.SINGULAR_ITEM_COUNT ? 's' : ''})
                                 </span>
                               </div>
                             </SelectItem>
@@ -214,7 +228,11 @@ export function SettingsPanel({ isOpen, onClose, settings, onSettingsChange }: S
                     <label className="block text-sm font-medium mb-2">Model</label>
                     <Select
                       value={settings.model}
-                      onValueChange={(value: string) => setSettings(prev => ({ ...prev, model: value }))}
+                      onValueChange={(value: string) => {
+                        setSettings(prev => ({ ...prev, model: value }))
+                        // Update the model context
+                        updateModelFromId(value)
+                      }}
                       disabled={modelsLoading || !selectedProvider}
                     >
                       <SelectTrigger className="w-full">
@@ -249,7 +267,7 @@ export function SettingsPanel({ isOpen, onClose, settings, onSettingsChange }: S
                                   </div>
                                   <div className="text-xs text-muted-foreground mt-0.5 space-y-0.5">
                                     <div className="flex items-center gap-3">
-                                      <span>{(model.contextLength / 1000).toFixed(0)}K context</span>
+                                      <span className="font-medium">{formatContextWindow(model.contextLength)} context</span>
                                       <span>{model.pricing.promptFormatted}/{model.pricing.completionFormatted} per 1M</span>
                                     </div>
                                   </div>
@@ -267,11 +285,45 @@ export function SettingsPanel({ isOpen, onClose, settings, onSettingsChange }: S
                     )}
                     <p className="text-xs text-muted-foreground mt-1">
                       {selectedProvider ? 
-                        `${modelsForProvider.length} model${modelsForProvider.length !== 1 ? 's' : ''} available` :
-                        `${availableProviders.length} provider${availableProviders.length !== 1 ? 's' : ''} available`
+                        `${modelsForProvider.length} model${modelsForProvider.length !== VALIDATION_LIMITS.SINGULAR_ITEM_COUNT ? 's' : ''} available` :
+                        `${availableProviders.length} provider${availableProviders.length !== VALIDATION_LIMITS.SINGULAR_ITEM_COUNT ? 's' : ''} available`
                       }
                       {modelsLoading && ' (loading...)'}
                     </p>
+                    
+                    {/* Current Model Information */}
+                    {settings.model && models.length > 0 && (() => {
+                      const currentModel = models.find(m => m.id === settings.model);
+                      if (currentModel) {
+                        const contextWindowSize = currentModel.contextLength;
+                        const tokenLimit = Math.floor(contextWindowSize * (contextSettings.tokenLimitPercentage / 100));
+                        
+                        return (
+                          <div className="mt-3 p-3 bg-muted/50 rounded-lg">
+                            <div className="text-xs font-medium text-muted-foreground mb-2">Selected Model Details</div>
+                            <div className="space-y-1 text-xs">
+                              <div className="flex justify-between">
+                                <span>Total Context Window:</span>
+                                <span className="font-medium font-mono">{formatContextWindow(contextWindowSize)} tokens</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span>Your Context Limit:</span>
+                                <span className="font-medium font-mono">{formatContextWindow(tokenLimit)} tokens</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span>Limit Percentage:</span>
+                                <span className="font-medium">{contextSettings.tokenLimitPercentage}% of model window</span>
+                              </div>
+                              <div className="flex justify-between text-muted-foreground">
+                                <span>Pricing (per 1M):</span>
+                                <span>{currentModel.pricing.promptFormatted} / {currentModel.pricing.completionFormatted}</span>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      }
+                      return null;
+                    })()}
                   </div>
                   
                   {/* Temperature */}
@@ -282,9 +334,9 @@ export function SettingsPanel({ isOpen, onClose, settings, onSettingsChange }: S
                     <Slider
                       value={[settings.temperature]}
                       onValueChange={([value]) => setSettings(prev => ({ ...prev, temperature: value }))}
-                      max={2}
-                      min={0}
-                      step={0.1}
+                      max={SLIDER_CONFIGS.TEMPERATURE.MAX}
+                      min={SLIDER_CONFIGS.TEMPERATURE.MIN}
+                      step={SLIDER_CONFIGS.TEMPERATURE.STEP}
                       className="w-full"
                     />
                     <div className="flex justify-between text-xs text-muted-foreground mt-1">
@@ -333,16 +385,16 @@ export function SettingsPanel({ isOpen, onClose, settings, onSettingsChange }: S
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium mb-2">
-                      Context Token Limit: {contextStorage.getContextSettings().tokenLimitPercentage}%
+                      Context Token Limit: {contextSettings.tokenLimitPercentage}%
                     </label>
                     <Slider
-                      value={[contextStorage.getContextSettings().tokenLimitPercentage]}
+                      value={[contextSettings.tokenLimitPercentage]}
                       onValueChange={([value]) => {
-                        contextStorage.updateContextSettings({ tokenLimitPercentage: value });
+                        updateContextSettings({ tokenLimitPercentage: value });
                       }}
-                      max={50}
-                      min={10}
-                      step={5}
+                      max={SLIDER_CONFIGS.CONTEXT_TOKEN_LIMIT.MAX}
+                      min={SLIDER_CONFIGS.CONTEXT_TOKEN_LIMIT.MIN}
+                      step={SLIDER_CONFIGS.CONTEXT_TOKEN_LIMIT.STEP}
                       className="w-full"
                     />
                     <div className="flex justify-between text-xs text-muted-foreground mt-1">
@@ -359,8 +411,8 @@ export function SettingsPanel({ isOpen, onClose, settings, onSettingsChange }: S
                     <input
                       type="checkbox"
                       id="autoIncludePRD"
-                      checked={contextStorage.getContextSettings().autoIncludeCurrentPRD}
-                      onChange={(e) => contextStorage.updateContextSettings({ 
+                      checked={contextSettings.autoIncludeCurrentPRD}
+                      onChange={(e) => updateContextSettings({ 
                         autoIncludeCurrentPRD: e.target.checked 
                       })}
                       className="rounded"

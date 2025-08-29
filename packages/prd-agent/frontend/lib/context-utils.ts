@@ -14,6 +14,18 @@ import {
   createContextItemId
 } from './context-types'
 import { contextStorage } from './context-storage'
+import {
+  CacheSettings,
+  UsageThreshold,
+  ConfidenceThreshold,
+  TokenSizeLimits,
+  PROVIDER_TOKEN_RATIOS,
+  TEXT_TYPE_MULTIPLIERS,
+  LEGACY_MODEL_TOKEN_RATIOS,
+  CALCULATION_WEIGHTS,
+  CATEGORY_SUGGESTION_WEIGHTS,
+  VALIDATION_LIMITS
+} from './ui-constants'
 
 /**
  * Token counting cache to avoid recalculation
@@ -21,50 +33,112 @@ import { contextStorage } from './context-storage'
 const tokenCache = new Map<string, number>()
 
 /**
- * Model-specific token estimation ratios
+ * Extract provider name from model ID (e.g., "anthropic/claude-3-5-sonnet" → "anthropic")
  */
-const MODEL_TOKEN_RATIOS = {
-  'anthropic/claude-3-5-sonnet': 3.8,
-  'anthropic/claude-3-haiku': 4.2,
-  'openai/gpt-4': 3.5,
-  'openai/gpt-3.5-turbo': 4.0,
-  default: 4.0
-} as const
+function extractProviderFromModelId(modelId?: string): string {
+  if (!modelId) return 'default'
+  
+  const parts = modelId.split('/')
+  return parts.length > 1 ? parts[0] : 'default'
+}
 
 /**
- * Enhanced token estimation with caching and model-specific ratios
+ * Detect text type for more accurate token estimation
+ */
+function detectTextType(text: unknown): keyof typeof TEXT_TYPE_MULTIPLIERS {
+  // Type guard - ensure we have a valid string
+  if (!text || typeof text !== 'string') {
+    return 'natural' // Safe fallback for non-string inputs
+  }
+  
+  // Simple heuristics to detect text type
+  const codePatterns = /^\s*(?:function|class|import|export|const|let|var|if|for|while|\{|\})/m
+  const jsonPattern = /^\s*[{\[].*[}\]]\s*$/s
+  const markdownPattern = /(?:^#{1,6}\s|\*\*|__|\_|\_|\[.*\]\(.*\)|```)/m
+  
+  try {
+    const trimmedText = text.trim()
+    
+    if (jsonPattern.test(trimmedText)) {
+      return 'json'
+    } else if (codePatterns.test(text)) {
+      return 'code'
+    } else if (markdownPattern.test(text)) {
+      return 'markdown'
+    } else {
+      return 'natural'
+    }
+  } catch (error) {
+    // If any regex operation fails, fall back to natural
+    console.warn('Error detecting text type:', error)
+    return 'natural'
+  }
+}
+
+/**
+ * Enhanced token estimation with provider-based ratios, text type detection, and caching
+ * 
+ * @param text - The text to estimate tokens for (accepts any type, safely handles non-strings)
+ * @param model - Full model ID (e.g., "anthropic/claude-3-5-sonnet-20241022")
+ * @param textType - Optional text type override for more accurate estimation
+ * @param useCache - Whether to use caching (default: true)
  */
 export function estimateTokens(
-  text: string, 
+  text: unknown, 
   model?: string, 
+  textType?: keyof typeof TEXT_TYPE_MULTIPLIERS,
   useCache: boolean = true
 ): number {
-  if (!text) return 0
+  // Type guard - handle non-string inputs safely
+  if (!text || typeof text !== 'string') {
+    return 0
+  }
   
-  const cacheKey = `${text.length}-${model || 'default'}`
+  // Ensure we have actual text content
+  const textString = text.trim()
+  if (textString.length === 0) {
+    return 0
+  }
+  
+  // Create cache key that includes text type for better accuracy
+  const detectedTextType = textType || detectTextType(textString)
+  const cacheKey = `${textString.length}-${model || 'default'}-${detectedTextType}`
   
   if (useCache && tokenCache.has(cacheKey)) {
     return tokenCache.get(cacheKey)!
   }
   
-  // Get model-specific ratio
-  const ratio = model && model in MODEL_TOKEN_RATIOS 
-    ? MODEL_TOKEN_RATIOS[model as keyof typeof MODEL_TOKEN_RATIOS]
-    : MODEL_TOKEN_RATIOS.default
+  // Get provider-based ratio with fallbacks
+  let ratio: number
+  
+  // 1. Try legacy model-specific ratios first (backwards compatibility)
+  if (model && model in LEGACY_MODEL_TOKEN_RATIOS) {
+    ratio = LEGACY_MODEL_TOKEN_RATIOS[model as keyof typeof LEGACY_MODEL_TOKEN_RATIOS]
+  } else {
+    // 2. Use provider-based ratio
+    const provider = extractProviderFromModelId(model)
+    ratio = provider in PROVIDER_TOKEN_RATIOS 
+      ? PROVIDER_TOKEN_RATIOS[provider as keyof typeof PROVIDER_TOKEN_RATIOS]
+      : PROVIDER_TOKEN_RATIOS.default
+  }
+  
+  // 3. Apply text type multiplier for better accuracy
+  const textTypeMultiplier = TEXT_TYPE_MULTIPLIERS[detectedTextType]
+  const adjustedRatio = ratio * textTypeMultiplier
   
   // Enhanced estimation considering:
   // - Basic character to token ratio
   // - Word boundaries (spaces typically don't count as separate tokens)
   // - Common patterns (numbers, punctuation)
-  const words = text.trim().split(/\s+/).length
-  const basicEstimate = Math.ceil(text.length / ratio)
-  const wordAdjustment = Math.max(0, words * 0.1) // Slight boost for word boundaries
+  const words = textString.split(/\s+/).length
+  const basicEstimate = Math.ceil(textString.length / adjustedRatio)
+  const wordAdjustment = Math.max(0, words * CALCULATION_WEIGHTS.WORD_BOUNDARY_ADJUSTMENT)
   
   const estimate = Math.max(1, Math.floor(basicEstimate + wordAdjustment))
   
   if (useCache) {
     // Limit cache size to prevent memory leaks
-    if (tokenCache.size > 1000) {
+    if (tokenCache.size > CacheSettings.TOKEN_CACHE_MAX_SIZE) {
       const oldestKey = tokenCache.keys().next().value
       tokenCache.delete(oldestKey)
     }
@@ -106,7 +180,7 @@ export function buildEnhancedContextPayload(
 
     // Validate token limits
     const usage = calculateContextUsage(payload, undefined, model)
-    if (usage.percentageUsed > 100) {
+    if (usage.percentageUsed > UsageThreshold.MAXIMUM) {
       console.warn(`Context payload exceeds token limit: ${usage.percentageUsed}%`)
     }
 
@@ -137,18 +211,26 @@ export function calculateContextUsage(
 
   // Calculate tokens for each component with model-specific estimation
   const categorizedTokens = categorizedContext.reduce((total, item) => {
-    return total + estimateTokens(`${item.title} ${item.content}`, model)
+    // Safely handle potentially undefined/null title and content
+    const title = item.title || ''
+    const content = item.content || ''
+    const textToAnalyze = `${title} ${content}`.trim()
+    return total + estimateTokens(textToAnalyze, model)
   }, 0)
 
   const messagesTokens = selectedMessages.reduce((total, msg) => {
-    return total + estimateTokens(msg.content, model)
+    // Safely handle potentially undefined/null message content
+    return total + estimateTokens(msg.content || '', model)
   }, 0)
 
   const prdTokens = currentPRD ? estimateTokens(currentPRD, model) : 0
 
   const totalTokens = categorizedTokens + messagesTokens + prdTokens
-  const limitTokens = Math.floor(modelContextWindow * (contextSettings.tokenLimitPercentage / 100))
-  const percentageUsed = (totalTokens / limitTokens) * 100
+  const limitTokens = Math.floor(contextWindow * (contextSettings.tokenLimitPercentage / UsageThreshold.MAXIMUM))
+  const percentageUsed = (totalTokens / limitTokens) * UsageThreshold.MAXIMUM
+  
+  // Also calculate percentage against actual model window (useful for warnings)
+  const modelWindowPercentage = (totalTokens / contextWindow) * UsageThreshold.MAXIMUM
 
   return {
     categorizedTokens,
@@ -156,7 +238,9 @@ export function calculateContextUsage(
     prdTokens,
     totalTokens,
     limitTokens,
-    percentageUsed
+    percentageUsed,
+    modelContextWindow: contextWindow,
+    modelWindowPercentage
   }
 }
 
@@ -319,19 +403,19 @@ export function suggestCategory(title: string, content: string): {
       const partialMatches = text.includes(keywordLower) ? 1 : 0
       
       if (exactMatches > 0) {
-        categoryScores[categoryKey].score += exactMatches * 2 // Higher weight for exact matches
+        categoryScores[categoryKey].score += exactMatches * CALCULATION_WEIGHTS.EXACT_MATCH_MULTIPLIER
         categoryScores[categoryKey].matches.push(keyword)
         
         // Additional weight for matches in title vs content
         if (title.toLowerCase().includes(keywordLower)) {
-          categoryScores[categoryKey].weightedScore += exactMatches * 1.5 // Title matches are more important
+          categoryScores[categoryKey].weightedScore += exactMatches * CALCULATION_WEIGHTS.TITLE_MATCH_BONUS
         } else {
           categoryScores[categoryKey].weightedScore += exactMatches
         }
       } else if (partialMatches > 0 && !exactMatches) {
-        categoryScores[categoryKey].score += 0.5 // Lower weight for partial matches
+        categoryScores[categoryKey].score += CALCULATION_WEIGHTS.PARTIAL_MATCH_WEIGHT
         categoryScores[categoryKey].matches.push(keyword)
-        categoryScores[categoryKey].weightedScore += 0.3
+        categoryScores[categoryKey].weightedScore += CALCULATION_WEIGHTS.PARTIAL_WEIGHTED_SCORE
       }
     })
   })
@@ -351,23 +435,23 @@ export function suggestCategory(title: string, content: string): {
     // Base confidence on score relative to text length and keyword density
     const keywordDensity = matches.length / Math.max(totalWords * 0.1, 1)
     const scoreRatio = topScore / Math.max(totalWords * 0.05, 1)
-    confidence = Math.min(Math.round((keywordDensity + scoreRatio) * 30), 100)
+    confidence = Math.min(Math.round((keywordDensity + scoreRatio) * CATEGORY_SUGGESTION_WEIGHTS.CONFIDENCE_BASE_MULTIPLIER), UsageThreshold.MAXIMUM)
     
     // Boost confidence for strong title matches
     if (title.toLowerCase().split(/\s+/).some(word => 
       matches.some(match => word.includes(match.toLowerCase()))
     )) {
-      confidence = Math.min(confidence + 20, 100)
+      confidence = Math.min(confidence + CATEGORY_SUGGESTION_WEIGHTS.TITLE_MATCH_CONFIDENCE_BONUS, UsageThreshold.MAXIMUM)
     }
     
     // Ensure minimum confidence for any matches
-    confidence = Math.max(confidence, 15)
+    confidence = Math.max(confidence, ConfidenceThreshold.MINIMUM)
   }
 
   return {
     suggested: topScore > 0 ? suggested : 'custom',
     confidence,
-    reasons: matches.slice(0, 3) // Top 3 matching keywords
+    reasons: matches.slice(0, CATEGORY_SUGGESTION_WEIGHTS.MAX_KEYWORD_REASONS)
   }
 }
 
@@ -381,8 +465,7 @@ export function checkCategoryMismatch(item: CategorizedContextItem): {
   explanation: string
 } {
   const suggestion = suggestCategory(item.title, item.content)
-  const confidenceThreshold = 50 // Lower threshold for better sensitivity
-  const isMismatch = suggestion.confidence > confidenceThreshold && 
+  const isMismatch = suggestion.confidence > ConfidenceThreshold.MISMATCH_DETECTION && 
                      suggestion.suggested !== item.category &&
                      suggestion.suggested !== 'custom'
 
@@ -434,11 +517,11 @@ export function validateContextPayload(
     // Check token limits with model-specific calculation
     const usage = calculateContextUsage(payload, undefined, model)
     
-    if (usage.percentageUsed > 100) {
+    if (usage.percentageUsed > UsageThreshold.MAXIMUM) {
       errors.push(`Context exceeds token limit: ${usage.totalTokens} / ${usage.limitTokens} tokens (${Math.round(usage.percentageUsed)}%)`)
-    } else if (usage.percentageUsed > 90) {
+    } else if (usage.percentageUsed > UsageThreshold.CRITICAL) {
       errors.push(`Context is critically close to token limit: ${Math.round(usage.percentageUsed)}% used`)
-    } else if (usage.percentageUsed > 80) {
+    } else if (usage.percentageUsed > UsageThreshold.APPROACHING) {
       warnings.push(`Context is approaching token limit: ${Math.round(usage.percentageUsed)}% used`)
     }
     
@@ -453,9 +536,9 @@ export function validateContextPayload(
     payload.categorizedContext.forEach((item, index) => {
       // Token size check
       const tokens = estimateTokens(item.content, model)
-      if (tokens > 2000) {
+      if (tokens > TokenSizeLimits.ERROR) {
         errors.push(`Context item "${item.title}" is extremely large (${tokens} tokens) and may cause issues`)
-      } else if (tokens > 1000) {
+      } else if (tokens > TokenSizeLimits.WARNING) {
         warnings.push(`Context item "${item.title}" is very large (${tokens} tokens)`)
       }
       
@@ -477,7 +560,7 @@ export function validateContextPayload(
           explanation: mismatch.explanation
         })
         
-        if (mismatch.confidence > 80) {
+        if (mismatch.confidence > ConfidenceThreshold.HIGH) {
           warnings.push(`"${item.title}" is likely miscategorized - ${mismatch.explanation}`)
         } else {
           warnings.push(`"${item.title}" may be miscategorized - ${mismatch.explanation}`)
@@ -510,6 +593,23 @@ export function validateContextPayload(
       validationTime: endTime - startTime,
       itemsProcessed: payload.categorizedContext.length + payload.selectedMessages.length + (payload.currentPRD ? 1 : 0)
     }
+  }
+}
+
+/**
+ * Format context window size for display (e.g., "200K", "1M", "128K")
+ */
+export function formatContextWindow(tokens: number): string {
+  if (!tokens || tokens === 0) return 'Unknown'
+  
+  if (tokens >= VALIDATION_LIMITS.CONTEXT_WINDOW_DIVISOR * VALIDATION_LIMITS.CONTEXT_WINDOW_DIVISOR) {
+    const millions = tokens / (VALIDATION_LIMITS.CONTEXT_WINDOW_DIVISOR * VALIDATION_LIMITS.CONTEXT_WINDOW_DIVISOR)
+    return `${millions >= 10 ? Math.round(millions) : millions.toFixed(1)}M`
+  } else if (tokens >= VALIDATION_LIMITS.CONTEXT_WINDOW_DIVISOR) {
+    const thousands = tokens / VALIDATION_LIMITS.CONTEXT_WINDOW_DIVISOR
+    return `${thousands >= 10 ? Math.round(thousands) : thousands.toFixed(0)}K`
+  } else {
+    return tokens.toString()
   }
 }
 

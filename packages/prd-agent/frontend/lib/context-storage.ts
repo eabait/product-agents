@@ -12,6 +12,11 @@ import {
   createMessageId,
   validateContextItem
 } from './context-types'
+import {
+  CacheSettings,
+  RetrySettings,
+  ErrorCodes
+} from './ui-constants'
 
 /**
  * Storage keys for localStorage
@@ -54,9 +59,9 @@ const debounceState = new Map<string, DebounceState>()
  */
 class ContextStorage {
   private cache = new Map<string, { data: any; timestamp: number }>()
-  private readonly CACHE_TTL = 30000 // 30 seconds
-  private readonly MAX_RETRY_ATTEMPTS = 3
-  private readonly DEBOUNCE_DELAY = 500 // milliseconds
+  private readonly CACHE_TTL = CacheSettings.TTL_MS
+  private readonly MAX_RETRY_ATTEMPTS = RetrySettings.MAX_ATTEMPTS  
+  private readonly DEBOUNCE_DELAY = RetrySettings.DEBOUNCE_DELAY_MS
 
   /**
    * Retrieves categorized context items with caching
@@ -328,7 +333,7 @@ class ContextStorage {
 
   private isQuotaExceededError(error: unknown): boolean {
     return error instanceof DOMException && 
-           (error.code === 22 || error.name === 'QuotaExceededError')
+           (error.code === ErrorCodes.QUOTA_EXCEEDED || error.name === 'QuotaExceededError')
   }
 
   private sleep(ms: number): void {
@@ -355,6 +360,12 @@ class ContextStorage {
   saveContextSettings(settings: ContextSettings): void {
     try {
       localStorage.setItem(STORAGE_KEYS.CONTEXT_SETTINGS, JSON.stringify(settings))
+      // Emit event for reactive updates
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('contextSettingsChanged', { 
+          detail: settings 
+        }))
+      }
     } catch (error) {
       console.error('Error saving context settings:', error)
     }
