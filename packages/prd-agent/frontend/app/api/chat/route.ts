@@ -9,12 +9,13 @@ export async function POST(request: NextRequest) {
   
   try {
     const body = await request.json();
-    const { messages, settings, contextPayload } = body;
+    const { messages, settings, contextPayload, targetSections } = body;
     
     console.log(`[${requestId}] Request body structure:`, {
       messagesCount: messages?.length || 0,
       hasSettings: !!settings,
       hasContextPayload: !!contextPayload,
+      targetSections: targetSections,
       settingsKeys: settings ? Object.keys(settings) : [],
       contextPayloadKeys: contextPayload ? Object.keys(contextPayload) : []
     });
@@ -68,22 +69,49 @@ export async function POST(request: NextRequest) {
       console.log(`[${requestId}] No context payload provided`);
     }
     
-    // Call the appropriate PRD agent endpoint
-    const endpoint = isEdit ? '/prd/edit' : '/prd';
-    
-    // Send both conversation and context - clarification regression is now fixed
-    const payload = {
-      message: buildConversationContext(messages), // Send full conversation for proper clarification flow
-      ...(isEdit && { existingPRD }),
-      settings,
-      ...(contextPayload && { contextPayload }) // Re-enable context payload now that clarifications work
-    };
+    // Use section-aware endpoints for all operations
+    let endpoint: string;
+    let payload: any;
+
+    if (targetSections && targetSections.length === 1) {
+      // Single section update
+      endpoint = `/prd/section/${targetSections[0]}`;
+      payload = {
+        message: buildConversationContext(messages),
+        settings,
+        contextPayload,
+        ...(existingPRD && { existingPRD }),
+        conversationHistory: messages
+      };
+    } else if (targetSections && targetSections.length > 1) {
+      // Multiple sections update
+      endpoint = '/prd/sections';
+      payload = {
+        message: buildConversationContext(messages),
+        settings,
+        contextPayload,
+        ...(existingPRD && { existingPRD }),
+        targetSections,
+        conversationHistory: messages
+      };
+    } else {
+      // Full PRD generation or edit (use main endpoint)
+      endpoint = isEdit ? '/prd/edit' : '/prd';
+      payload = {
+        message: buildConversationContext(messages),
+        settings,
+        contextPayload,
+        ...(existingPRD && { existingPRD }),
+        conversationHistory: messages
+      };
+    }
     
     const fullUrl = `${PRD_AGENT_URL}${endpoint}`;
     console.log(`[${requestId}] Backend request:`, {
       url: fullUrl,
       endpoint: endpoint,
       isEdit: isEdit,
+      targetSections: targetSections,
       messageLength: payload.message.length,
       hasExistingPRD: !!payload.existingPRD,
       settings: payload.settings
@@ -144,19 +172,52 @@ export async function POST(request: NextRequest) {
       
       return NextResponse.json({ content, clarificationQuestions: data.questions });
     }
+
+    // Handle section-specific responses
+    if (data.sections) {
+      console.log(`[${requestId}] Section response received:`, {
+        sectionsUpdated: data.metadata?.sections_updated || Object.keys(data.sections),
+        totalConfidence: data.metadata?.total_confidence,
+        isValid: data.validation?.is_valid
+      });
+
+      // Return structured data directly instead of stringifying
+      return NextResponse.json({ 
+        content: data.sections, // Return structured sections directly
+        sections: data.sections,
+        metadata: data.metadata,
+        validation: data.validation,
+        isStructured: true // Flag to indicate this is structured data
+      });
+    }
     
-    // Return the response in a simple JSON format
-    const content = data.prd ? JSON.stringify(data.prd, null, 2) : data.message || JSON.stringify(data);
+    // Return the response with structured data when available
+    let content: any;
+    let isStructured = false;
+    
+    if (data.prd) {
+      content = data.prd; // Return structured PRD directly
+      isStructured = true;
+    } else if (data.message) {
+      content = data.message; // Keep message as string
+    } else {
+      content = data; // Return raw structured data
+      isStructured = true;
+    }
     
     console.log(`[${requestId}] Final response:`, {
       contentType: data.prd ? 'PRD' : (data.message ? 'message' : 'raw'),
-      contentLength: content.length,
-      hasPRD: !!data.prd
+      contentLength: typeof content === 'string' ? content.length : JSON.stringify(content).length,
+      hasPRD: !!data.prd,
+      isStructured
     });
     
     console.log(`[${requestId}] === REQUEST COMPLETE ===`);
     
-    return NextResponse.json({ content });
+    return NextResponse.json({ 
+      content,
+      isStructured // Include flag so frontend can handle properly
+    });
     
   } catch (error) {
     console.error(`[${requestId}] API route error:`, error);

@@ -611,10 +611,20 @@ function PRDAgentPageContent() {
       const data = await response.json();
       if (data.error) throw new Error(data.error);
 
+      // Handle both structured data and string content
+      let messageContent: string;
+      if (data.isStructured && typeof data.content === 'object') {
+        // Convert structured data to formatted JSON for display
+        messageContent = JSON.stringify(data.content, null, 2);
+      } else {
+        // Use content directly if it's a string or fallback
+        messageContent = data.content || "No response";
+      }
+
       const assistantMessage: Message = {
         id: uuidv4(),
         role: "assistant",
-        content: data.content || "No response",
+        content: messageContent,
         timestamp: new Date(),
       };
 
