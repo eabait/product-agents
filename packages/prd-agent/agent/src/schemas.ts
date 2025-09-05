@@ -1,19 +1,27 @@
 import { z } from 'zod'
 import { 
+  // Legacy section types (complex structure)
   ContextSection, 
   ProblemStatementSection, 
   AssumptionsSection, 
-  MetricsSection 
+  MetricsSection,
+  // New simplified section types (flat structure)
+  TargetUsersSection,
+  SolutionSection,
+  KeyFeaturesSection,
+  SuccessMetricsSection,
+  ConstraintsSection
 } from './section-writers'
 
 // Modern PRD Schema focused on section-based structure
 export const PRDSchema = z.object({
-  // Core sections
+  // Core sections (simplified 5-section structure)
   sections: z.object({
-    context: z.any().optional(), // ContextSection (includes requirements)
-    problemStatement: z.any().optional(), // ProblemStatementSection
-    assumptions: z.any().optional(), // AssumptionsSection
-    metrics: z.any().optional(), // MetricsSection
+    targetUsers: z.any().optional(), // TargetUsersSection
+    solution: z.any().optional(), // SolutionSection  
+    keyFeatures: z.any().optional(), // KeyFeaturesSection
+    successMetrics: z.any().optional(), // SuccessMetricsSection
+    constraints: z.any().optional(), // ConstraintsSection
   }),
   
   // Metadata
@@ -22,8 +30,17 @@ export const PRDSchema = z.object({
     lastUpdated: z.string(),
     generatedBy: z.string().default('PRD Orchestrator Agent'),
     sections_generated: z.array(z.string()),
-    confidence_scores: z.record(z.number()).optional()
+    confidence_scores: z.record(z.number()).optional(),
+    total_confidence: z.number().optional(),
+    processing_time_ms: z.number().optional()
   }),
+
+  // Validation
+  validation: z.object({
+    is_valid: z.boolean(),
+    issues: z.array(z.string()),
+    warnings: z.array(z.string())
+  }).optional(),
 
   // Flattened fields for frontend compatibility (auto-generated from sections)
   problemStatement: z.string().optional(),
@@ -44,7 +61,7 @@ export type PRD = z.infer<typeof PRDSchema>
 // Section-specific operation schemas
 export const SectionOperationSchema = z.object({
   operation: z.enum(['generate', 'update', 'regenerate']),
-  section: z.enum(['context', 'problemStatement', 'assumptions', 'metrics']),
+  section: z.enum(['targetUsers', 'solution', 'keyFeatures', 'successMetrics', 'constraints']),
   input: z.object({
     message: z.string(),
     context: z.object({

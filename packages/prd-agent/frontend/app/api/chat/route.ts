@@ -194,20 +194,35 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ content, clarificationQuestions: data.questions });
     }
 
-    // Handle section-specific responses
-    if (data.sections) {
-      console.log(`[${requestId}] Section response received:`, {
-        sectionsUpdated: data.metadata?.sections_updated || Object.keys(data.sections),
+    // Handle PRD edit responses (which return the PRD object directly)
+    if (data.sections && data.metadata) {
+      console.log(`[${requestId}] PRD/Section response received:`, {
+        sectionsUpdated: data.metadata?.sections_generated || Object.keys(data.sections),
         totalConfidence: data.metadata?.total_confidence,
-        isValid: data.validation?.is_valid
+        isValid: data.validation?.is_valid,
+        isDirectPRD: !data.prd // This is a direct PRD response, not wrapped
       });
 
-      // Return structured data directly instead of stringifying
+      // Return the full PRD object as structured content
+      return NextResponse.json({ 
+        content: data, // Return the entire PRD object
+        isStructured: true, // Flag to indicate this is structured data
+        isPRD: true // Additional flag for PRD identification
+      });
+    }
+
+    // Handle legacy section-only responses (if any)
+    if (data.sections && !data.metadata) {
+      console.log(`[${requestId}] Legacy section response received:`, {
+        sectionsUpdated: Object.keys(data.sections),
+        totalConfidence: undefined,
+        isValid: undefined
+      });
+
+      // Return structured data directly
       return NextResponse.json({ 
         content: data.sections, // Return structured sections directly
         sections: data.sections,
-        metadata: data.metadata,
-        validation: data.validation,
         isStructured: true // Flag to indicate this is structured data
       });
     }

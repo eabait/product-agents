@@ -8,15 +8,15 @@ import {
 } from './schemas'
 import { 
   ClarificationAnalyzer,
-  ContextAnalyzer,
-  RiskIdentifier,
-  ContentSummarizer
+  ContextAnalyzer
 } from './analyzers'
 import {
-  ContextSectionWriter,
-  ProblemStatementSectionWriter,
-  AssumptionsSectionWriter,
-  MetricsSectionWriter,
+  // New simplified section writers
+  TargetUsersSectionWriter,
+  SolutionSectionWriter,
+  KeyFeaturesSectionWriter,
+  SuccessMetricsSectionWriter,
+  ConstraintsSectionWriter,
   type SectionWriterInput
 } from './section-writers'
 
@@ -30,26 +30,23 @@ export class PRDOrchestratorAgent extends BaseAgent {
   private sectionWriters: Map<string, any>
   private clarificationAnalyzer: ClarificationAnalyzer
   
-  // Shared analyzers for centralized analysis
+  // Simplified analyzers for centralized analysis
   private contextAnalyzer: ContextAnalyzer
-  private riskIdentifier: RiskIdentifier
-  private contentSummarizer: ContentSummarizer
 
   constructor(settings?: any) {
     super(settings)
     
-    // Initialize shared analyzers for centralized analysis
+    // Initialize simplified analyzers for centralized analysis
     this.contextAnalyzer = new ContextAnalyzer(this.settings)
-    this.riskIdentifier = new RiskIdentifier(this.settings)
-    this.contentSummarizer = new ContentSummarizer(this.settings)
     this.clarificationAnalyzer = new ClarificationAnalyzer(this.settings)
     
-    // Initialize section writers (requirements extracted directly from ContextAnalyzer)
+    // Initialize simplified section writers for 5-section PRD
     this.sectionWriters = new Map()
-    this.sectionWriters.set('context', new ContextSectionWriter(this.settings))
-    this.sectionWriters.set('problemStatement', new ProblemStatementSectionWriter(this.settings))
-    this.sectionWriters.set('assumptions', new AssumptionsSectionWriter(this.settings))
-    this.sectionWriters.set('metrics', new MetricsSectionWriter(this.settings))
+    this.sectionWriters.set('targetUsers', new TargetUsersSectionWriter(this.settings))
+    this.sectionWriters.set('solution', new SolutionSectionWriter(this.settings))
+    this.sectionWriters.set('keyFeatures', new KeyFeaturesSectionWriter(this.settings))
+    this.sectionWriters.set('successMetrics', new SuccessMetricsSectionWriter(this.settings))
+    this.sectionWriters.set('constraints', new ConstraintsSectionWriter(this.settings))
   }
 
   async chat(message: string, context?: any): Promise<PRD | ClarificationResult> {
@@ -104,8 +101,8 @@ export class PRDOrchestratorAgent extends BaseAgent {
     // Determine which sections to generate/update
     const sectionsToProcess = this.determineSectionsToProcess(request)
     
-    // PHASE 1: Run centralized analysis once to avoid duplication
-    console.log('Running centralized analysis phase...')
+    // PHASE 1: Run simplified centralized analysis once
+    console.log('Running simplified analysis phase...')
     const sharedAnalysisResults = new Map<string, any>()
     
     // Prepare analyzer input
@@ -118,48 +115,30 @@ export class PRDOrchestratorAgent extends BaseAgent {
     }
     
     try {
-      // Run context analysis once (previously called 6 times!)
+      // Run context analysis once (only analyzer needed for simplified PRD)
       const contextResult = await this.contextAnalyzer.analyze(analyzerInput)
       sharedAnalysisResults.set('contextAnalysis', contextResult)
       console.log('✓ Context analysis completed')
       
-      // Run risk analysis once (previously called 2 times!)
-      const riskResult = await this.riskIdentifier.analyze({
-        ...analyzerInput,
-        context: {
-          ...analyzerInput.context,
-          previousResults: new Map([['contextAnalysis', contextResult]])
-        }
-      })
-      sharedAnalysisResults.set('riskAnalysis', riskResult)
-      console.log('✓ Risk analysis completed')
-      
-      // Run content summarization once (previously called 3 times!)  
-      const summaryResult = await this.contentSummarizer.analyze(analyzerInput, {
-        target_length: 'medium',
-        focus_area: 'balanced',
-        include_priorities: true
-      })
-      sharedAnalysisResults.set('contentSummary', summaryResult)
-      console.log('✓ Content summarization completed', summaryResult)
-      
     } catch (error) {
-      console.warn('Centralized analysis failed:', error)
+      console.warn('Context analysis failed:', error)
     }
     
-    // Process sections
+    // PHASE 2: Process sections in parallel (all sections are independent)
     const sectionResults = new Map<string, any>()
     const confidenceScores = new Map<string, number>()
     const allIssues: string[] = []
     const allWarnings: string[] = []
 
-    // Process sections in dependency order
-    const processingOrder = this.getSectionProcessingOrder(sectionsToProcess)
+    const sectionsToGenerate = this.getSectionProcessingOrder(sectionsToProcess)
+    console.log(`Processing ${sectionsToGenerate.length} sections in parallel:`, sectionsToGenerate)
     
-    for (const sectionName of processingOrder) {
-
+    // Create promises for all sections to run in parallel
+    const sectionPromises = sectionsToGenerate.map(async (sectionName) => {
       const writer = this.sectionWriters.get(sectionName)
-      if (!writer) continue
+      if (!writer) {
+        return { sectionName, error: 'Writer not found' }
+      }
 
       try {
         const sectionInput: SectionWriterInput = {
@@ -169,28 +148,47 @@ export class PRDOrchestratorAgent extends BaseAgent {
             existingPRD: request.context?.existingPRD,
             existingSection: request.context?.existingPRD?.sections?.[sectionName],
             targetSection: request.targetSections?.includes(sectionName) ? sectionName : undefined,
-            previousResults: this.createPreviousResultsMap(sectionResults),
-            // Pass shared analysis results to avoid duplicate LLM calls
+            // Pass shared analysis results to all sections
             sharedAnalysisResults: sharedAnalysisResults
           }
         }
 
-        console.log(`Processing section: ${sectionName} with input: {sectionInput}`)
+        console.log(`Starting parallel processing for section: ${sectionName}`)
         const result = await writer.writeSection(sectionInput)
+        console.log(`✓ Completed section: ${sectionName}`)
         
-        sectionResults.set(sectionName, result.content)
-        if (result.confidence) {
-          confidenceScores.set(sectionName, result.confidence)
-        }
-
-        // Collect validation issues
-        if (result.metadata?.validation_issues) {
-          allIssues.push(...result.metadata.validation_issues)
+        return {
+          sectionName,
+          result,
+          content: result.content,
+          confidence: result.confidence,
+          validationIssues: result.metadata?.validation_issues || []
         }
 
       } catch (error) {
-        console.error(`Error processing section ${sectionName}:`, error)
-        allIssues.push(`Failed to generate ${sectionName} section: ${error}`)
+        console.error(`✗ Error processing section ${sectionName}:`, error)
+        return {
+          sectionName,
+          error: `Failed to generate ${sectionName} section: ${error}`
+        }
+      }
+    })
+
+    // Wait for all sections to complete in parallel
+    const sectionOutcomes = await Promise.all(sectionPromises)
+    
+    // Process results and collect issues
+    for (const outcome of sectionOutcomes) {
+      if (outcome.error) {
+        allIssues.push(outcome.error)
+      } else {
+        sectionResults.set(outcome.sectionName, outcome.content)
+        if (outcome.confidence) {
+          confidenceScores.set(outcome.sectionName, outcome.confidence)
+        }
+        if (outcome.validationIssues && outcome.validationIssues.length > 0) {
+          allIssues.push(...outcome.validationIssues)
+        }
       }
     }
 
@@ -251,18 +249,14 @@ export class PRDOrchestratorAgent extends BaseAgent {
 
     // Assemble final PRD
     const prd: PRD = {
-      // Legacy fields for backward compatibility
-      problemStatement: sectionResponse.sections.problemStatement?.problemStatement,
-      solutionOverview: sectionResponse.sections.context?.businessContext,
-      targetUsers: sectionResponse.sections.problemStatement?.targetUsers?.map((u: any) => u.persona) || [],
-      goals: sectionResponse.sections.context?.requirements?.epics?.map((epic: any) => epic.title) || [],
-      successMetrics: sectionResponse.sections.metrics?.successMetrics?.map((m: any) => ({
-        metric: m.metric,
-        target: m.target,
-        timeline: m.timeline
-      })) || [],
-      constraints: sectionResponse.sections.context?.constraints || [],
-      assumptions: sectionResponse.sections.assumptions?.assumptions?.map((a: any) => a.assumption) || [],
+      // Legacy fields for backward compatibility - map from new section structure
+      problemStatement: undefined, // No longer generated as separate section
+      solutionOverview: sectionResponse.sections.solution?.solutionOverview || '',
+      targetUsers: sectionResponse.sections.targetUsers?.targetUsers || [],
+      goals: sectionResponse.sections.keyFeatures?.keyFeatures || [],
+      successMetrics: sectionResponse.sections.successMetrics?.successMetrics || [],
+      constraints: sectionResponse.sections.constraints?.constraints || [],
+      assumptions: sectionResponse.sections.constraints?.assumptions || [],
       
       // New detailed sections
       sections: sectionResponse.sections,
@@ -273,8 +267,13 @@ export class PRDOrchestratorAgent extends BaseAgent {
         lastUpdated: new Date().toISOString(),
         generatedBy: 'PRD Orchestrator Agent',
         sections_generated: sectionResponse.metadata.sections_updated,
-        confidence_scores: sectionResponse.metadata.confidence_scores
-      }
+        confidence_scores: sectionResponse.metadata.confidence_scores,
+        total_confidence: sectionResponse.metadata.total_confidence,
+        processing_time_ms: sectionResponse.metadata.processing_time_ms
+      },
+
+      // Validation
+      validation: sectionResponse.validation
     }
 
     return prd
@@ -286,42 +285,42 @@ export class PRDOrchestratorAgent extends BaseAgent {
       return request.targetSections
     }
 
-    // If no existing PRD, generate all sections (requirements extracted from context)
+    // If no existing PRD, generate all sections
     if (!request.context?.existingPRD) {
-      return ['context', 'problemStatement', 'assumptions', 'metrics']
+      return ['targetUsers', 'solution', 'keyFeatures', 'successMetrics', 'constraints']
     }
 
     // For updates, analyze the message to determine affected sections
     const messageWords = request.message.toLowerCase().split(' ')
     const affectedSections: string[] = []
 
-    // Simple keyword-based section detection
-    if (messageWords.some(word => ['context', 'business', 'background'].includes(word))) {
-      affectedSections.push('context')
+    // Simple keyword-based section detection for new structure
+    if (messageWords.some(word => ['user', 'persona', 'audience', 'customer', 'who'].includes(word))) {
+      affectedSections.push('targetUsers')
     }
-    if (messageWords.some(word => ['problem', 'issue', 'challenge'].includes(word))) {
-      affectedSections.push('problemStatement')
+    if (messageWords.some(word => ['solution', 'approach', 'how', 'what', 'build'].includes(word))) {
+      affectedSections.push('solution')
     }
-    if (messageWords.some(word => ['requirement', 'feature', 'function', 'scope', 'phase', 'mvp'].includes(word))) {
-      affectedSections.push('context')
+    if (messageWords.some(word => ['feature', 'function', 'capability', 'requirement'].includes(word))) {
+      affectedSections.push('keyFeatures')
     }
-    if (messageWords.some(word => ['assumption', 'dependency'].includes(word))) {
-      affectedSections.push('assumptions')
+    if (messageWords.some(word => ['metric', 'kpi', 'success', 'measure', 'goal'].includes(word))) {
+      affectedSections.push('successMetrics')
     }
-    if (messageWords.some(word => ['metric', 'kpi', 'success'].includes(word))) {
-      affectedSections.push('metrics')
+    if (messageWords.some(word => ['constraint', 'limitation', 'assumption', 'dependency'].includes(word))) {
+      affectedSections.push('constraints')
     }
 
     // Default to all sections if no specific matches
     return affectedSections.length > 0 
       ? affectedSections 
-      : ['context', 'problemStatement', 'assumptions', 'metrics']
+      : ['targetUsers', 'solution', 'keyFeatures', 'successMetrics', 'constraints']
   }
 
   private getSectionProcessingOrder(sections: string[]): string[] {
-    // Define dependency order for sections (requirements extracted from context)
-    const order = ['context', 'problemStatement', 'assumptions', 'metrics']
-    return order.filter(section => sections.includes(section))
+    // All sections are independent and can run in parallel (all use shared context analysis)
+    const allSections = ['targetUsers', 'solution', 'keyFeatures', 'successMetrics', 'constraints']
+    return allSections.filter(section => sections.includes(section))
   }
 
   private createPreviousResultsMap(sectionResults: Map<string, any>): Map<string, any> {

@@ -22,7 +22,7 @@ import {
   Database,
 } from "lucide-react";
 import { Conversation, Message } from "@/types";
-import { PRD } from "@/lib/prd-schema";
+import { NewPRD } from "@/lib/prd-schema";
 import { ContextPanel } from "@/components/context";
 import { ContextUsageIndicator } from "@/components/context/ContextUsageIndicator";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
@@ -535,7 +535,7 @@ function PRDAgentPageContent() {
     });
   }, [activeMessages]);
 
-  const handlePRDUpdate = (messageId: string, updatedPRD: PRD) => {
+  const handlePRDUpdate = (messageId: string, updatedPRD: NewPRD) => {
     updateActiveConversation(conv => ({
       ...conv,
       messages: conv.messages.map((msg: Message) =>

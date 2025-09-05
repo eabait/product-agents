@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion';
 import { MessageBubble } from './MessageBubble';
 import { TypingIndicator } from './TypingIndicator';
-import { PRD } from './PRDEditor';
+import { NewPRD } from '@/lib/prd-schema';
 import { Message } from '../../types';
 import { useState, useEffect, useMemo } from 'react';
 
@@ -10,7 +10,7 @@ interface ChatMessagesProps {
   isProcessing: boolean;
   copied: string | null;
   onCopy: (content: string, messageId: string) => void;
-  onPRDUpdate?: (messageId: string, updatedPRD: PRD) => void;
+  onPRDUpdate?: (messageId: string, updatedPRD: NewPRD) => void;
 }
 
 export function ChatMessages({

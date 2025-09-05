@@ -2,84 +2,119 @@
 
 import { useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
 import { Card } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Plus, X, Edit3, Copy, Download, Check } from 'lucide-react';
+import { Copy, Download, Check, Clock, Zap, AlertCircle } from 'lucide-react';
 import { convertPRDToText, convertPRDToMarkdown, downloadMarkdown, copyToClipboard } from '@/lib/prd-export-utils';
+import { NewPRD, FlattenedPRD, isNewPRD, isFlattenedPRD, convertToNewPRD } from '@/lib/prd-schema';
 
-export interface PRD {
-  problemStatement: string;
-  solutionOverview: string;
-  targetUsers: string[];
-  goals: string[];
-  successMetrics: Array<{
-    metric: string;
-    target: string;
-    timeline: string;
-  }>;
-  constraints: string[];
-  assumptions: string[];
-}
+// Import new section components
+import { 
+  TargetUsersSection,
+  SolutionSection,
+  KeyFeaturesSection,
+  SuccessMetricsSection,
+  ConstraintsSection
+} from '../prd-sections';
 
 interface PRDEditorProps {
-  prd: PRD;
-  onChange: (updatedPRD: PRD) => void;
+  prd: NewPRD | FlattenedPRD | any; // Accept any for backward compatibility during transition
+  onChange: (updatedPRD: NewPRD) => void;
+  onRegenerateSection?: (sectionName: string) => void;
   readOnly?: boolean;
+  isRegenerating?: { [sectionName: string]: boolean };
 }
 
-export function PRDEditor({ prd, onChange, readOnly = false }: PRDEditorProps) {
-  const [editingField, setEditingField] = useState<string | null>(null);
+export function PRDEditor({ 
+  prd, 
+  onChange, 
+  onRegenerateSection, 
+  readOnly = false,
+  isRegenerating = {}
+}: PRDEditorProps) {
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copying' | 'copied'>('idle');
   const [exportStatus, setExportStatus] = useState<'idle' | 'exporting' | 'exported'>('idle');
 
-  const updateField = useCallback((field: keyof PRD, value: any) => {
-    const updatedPRD = { ...prd, [field]: value };
-    onChange(updatedPRD);
-  }, [prd, onChange]);
+  // Convert input to NewPRD format
+  const normalizedPRD: NewPRD = isNewPRD(prd) ? prd : 
+    isFlattenedPRD(prd) ? convertToNewPRD(prd) : 
+    convertToNewPRD({
+      solutionOverview: prd?.solutionOverview || '',
+      targetUsers: prd?.targetUsers || [],
+      successMetrics: prd?.successMetrics || [],
+      constraints: prd?.constraints || [],
+      assumptions: prd?.assumptions || []
+    } as FlattenedPRD);
 
-  const addStringArrayItem = useCallback((field: 'targetUsers' | 'goals' | 'constraints' | 'assumptions') => {
-    const currentArray = prd[field] as string[];
-    updateField(field, [...currentArray, '']);
-    setEditingField(`${field}-${currentArray.length}`);
-  }, [prd, updateField]);
+  // Section update handlers
+  const updateTargetUsers = useCallback((updatedSection) => {
+    onChange({
+      ...normalizedPRD,
+      sections: {
+        ...normalizedPRD.sections,
+        targetUsers: updatedSection
+      }
+    });
+  }, [normalizedPRD, onChange]);
 
-  const updateStringArrayItem = useCallback((field: 'targetUsers' | 'goals' | 'constraints' | 'assumptions', index: number, value: string) => {
-    const currentArray = prd[field] as string[];
-    const updated = [...currentArray];
-    updated[index] = value;
-    updateField(field, updated);
-  }, [prd, updateField]);
+  const updateSolution = useCallback((updatedSection) => {
+    onChange({
+      ...normalizedPRD,
+      sections: {
+        ...normalizedPRD.sections,
+        solution: updatedSection
+      }
+    });
+  }, [normalizedPRD, onChange]);
 
-  const removeStringArrayItem = useCallback((field: 'targetUsers' | 'goals' | 'constraints' | 'assumptions', index: number) => {
-    const currentArray = prd[field] as string[];
-    const updated = currentArray.filter((_, i) => i !== index);
-    updateField(field, updated);
-  }, [prd, updateField]);
+  const updateKeyFeatures = useCallback((updatedSection) => {
+    onChange({
+      ...normalizedPRD,
+      sections: {
+        ...normalizedPRD.sections,
+        keyFeatures: updatedSection
+      }
+    });
+  }, [normalizedPRD, onChange]);
 
-  const addSuccessMetric = useCallback(() => {
-    const newMetric = { metric: '', target: '', timeline: '' };
-    updateField('successMetrics', [...prd.successMetrics, newMetric]);
-    setEditingField(`successMetrics-${prd.successMetrics.length}`);
-  }, [prd.successMetrics, updateField]);
+  const updateSuccessMetrics = useCallback((updatedSection) => {
+    onChange({
+      ...normalizedPRD,
+      sections: {
+        ...normalizedPRD.sections,
+        successMetrics: updatedSection
+      }
+    });
+  }, [normalizedPRD, onChange]);
 
-  const updateSuccessMetric = useCallback((index: number, field: 'metric' | 'target' | 'timeline', value: string) => {
-    const updated = [...prd.successMetrics];
-    updated[index] = { ...updated[index], [field]: value };
-    updateField('successMetrics', updated);
-  }, [prd.successMetrics, updateField]);
+  const updateConstraints = useCallback((updatedSection) => {
+    onChange({
+      ...normalizedPRD,
+      sections: {
+        ...normalizedPRD.sections,
+        constraints: updatedSection
+      }
+    });
+  }, [normalizedPRD, onChange]);
 
-  const removeSuccessMetric = useCallback((index: number) => {
-    const updated = prd.successMetrics.filter((_, i) => i !== index);
-    updateField('successMetrics', updated);
-  }, [prd.successMetrics, updateField]);
-
+  // Export handlers (using flattened format for compatibility)
   const handleCopyPRD = useCallback(async () => {
     if (copyStatus !== 'idle') return;
     
     setCopyStatus('copying');
     try {
-      const textContent = convertPRDToText(prd);
+      // Convert to flattened format for export
+      const flatPRD: FlattenedPRD = {
+        solutionOverview: normalizedPRD.sections.solution?.solutionOverview || '',
+        targetUsers: normalizedPRD.sections.targetUsers?.targetUsers || [],
+        goals: normalizedPRD.sections.keyFeatures?.keyFeatures || [],
+        successMetrics: normalizedPRD.sections.successMetrics?.successMetrics || [],
+        constraints: normalizedPRD.sections.constraints?.constraints || [],
+        assumptions: normalizedPRD.sections.constraints?.assumptions || [],
+        sections: normalizedPRD.sections,
+        metadata: normalizedPRD.metadata
+      };
+
+      const textContent = convertPRDToText(flatPRD);
       const success = await copyToClipboard(textContent);
       
       if (success) {
@@ -92,14 +127,26 @@ export function PRDEditor({ prd, onChange, readOnly = false }: PRDEditorProps) {
       console.error('Failed to copy PRD:', error);
       setCopyStatus('idle');
     }
-  }, [prd, copyStatus]);
+  }, [normalizedPRD, copyStatus]);
 
   const handleExportMarkdown = useCallback(async () => {
     if (exportStatus !== 'idle') return;
     
     setExportStatus('exporting');
     try {
-      const markdownContent = convertPRDToMarkdown(prd);
+      // Convert to flattened format for export
+      const flatPRD: FlattenedPRD = {
+        solutionOverview: normalizedPRD.sections.solution?.solutionOverview || '',
+        targetUsers: normalizedPRD.sections.targetUsers?.targetUsers || [],
+        goals: normalizedPRD.sections.keyFeatures?.keyFeatures || [],
+        successMetrics: normalizedPRD.sections.successMetrics?.successMetrics || [],
+        constraints: normalizedPRD.sections.constraints?.constraints || [],
+        assumptions: normalizedPRD.sections.constraints?.assumptions || [],
+        sections: normalizedPRD.sections,
+        metadata: normalizedPRD.metadata
+      };
+
+      const markdownContent = convertPRDToMarkdown(flatPRD);
       downloadMarkdown(markdownContent);
       
       setExportStatus('exported');
@@ -108,96 +155,113 @@ export function PRDEditor({ prd, onChange, readOnly = false }: PRDEditorProps) {
       console.error('Failed to export PRD:', error);
       setExportStatus('idle');
     }
-  }, [prd, exportStatus]);
+  }, [normalizedPRD, exportStatus]);
 
-  const renderSection = (
-    title: string,
-    children: React.ReactNode,
-    className?: string
-  ) => (
-    <Card className={`p-6 ${className || ''}`}>
-      <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-        <Edit3 className="h-5 w-5" />
-        {title}
-      </h3>
-      {children}
-    </Card>
-  );
+  // Check if PRD has any meaningful content
+  const hasContent = normalizedPRD.sections.solution?.solutionOverview ||
+                    normalizedPRD.sections.targetUsers?.targetUsers.length ||
+                    normalizedPRD.sections.keyFeatures?.keyFeatures.length ||
+                    normalizedPRD.sections.successMetrics?.successMetrics.length ||
+                    normalizedPRD.sections.constraints?.constraints.length ||
+                    normalizedPRD.sections.constraints?.assumptions.length;
 
-  const renderTextArea = (
-    field: 'problemStatement' | 'solutionOverview',
-    label: string,
-    placeholder: string
-  ) => (
-    <div className="space-y-2">
-      <label className="text-sm font-medium text-muted-foreground">{label}</label>
-      {readOnly ? (
-        <div className="text-sm whitespace-pre-wrap p-3 bg-muted rounded-md">
-          {prd[field] || placeholder}
+  const renderMetadata = () => {
+    if (!normalizedPRD.metadata || readOnly) return null;
+
+    const { confidence_scores, processing_time_ms, total_confidence, sections_generated } = normalizedPRD.metadata;
+    
+    if (!confidence_scores && !processing_time_ms && !total_confidence) return null;
+
+    return (
+      <Card className="p-4 mb-6 bg-gradient-to-r from-blue-50 to-purple-50 border-blue-200">
+        <div className="flex items-center gap-2 mb-3">
+          <Zap className="h-4 w-4 text-blue-600" />
+          <h4 className="text-sm font-semibold text-blue-900">Generation Analytics</h4>
         </div>
-      ) : (
-        <Textarea
-          value={prd[field]}
-          onChange={(e) => updateField(field, e.target.value)}
-          placeholder={placeholder}
-          className="min-h-[100px] resize-none"
-        />
-      )}
-    </div>
-  );
-
-  const renderStringArraySection = (
-    field: 'targetUsers' | 'goals' | 'constraints' | 'assumptions',
-    title: string,
-    placeholder: string,
-    addButtonText: string
-  ) => (
-    <div className="space-y-3">
-      {prd[field].map((item, index) => (
-        <div key={index} className="flex gap-2">
-          {readOnly ? (
-            <div className="flex-1 p-2 bg-muted rounded-md text-sm">
-              {item || `${title} ${index + 1}`}
+        
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+          {total_confidence && (
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+              <span className="text-gray-700">
+                Overall Confidence: <strong>{Math.round(total_confidence * 100)}%</strong>
+              </span>
             </div>
-          ) : (
-            <>
-              <Input
-                value={item}
-                onChange={(e) => updateStringArrayItem(field, index, e.target.value)}
-                placeholder={`${placeholder} ${index + 1}`}
-                className="flex-1"
-              />
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => removeStringArrayItem(field, index)}
-                className="px-2"
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            </>
+          )}
+          
+          {processing_time_ms && (
+            <div className="flex items-center gap-2">
+              <Clock className="h-3 w-3 text-blue-600" />
+              <span className="text-gray-700">
+                Generated in: <strong>{processing_time_ms}ms</strong>
+              </span>
+            </div>
+          )}
+          
+          {sections_generated && sections_generated.length > 0 && (
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 bg-purple-500 rounded-full"></div>
+              <span className="text-gray-700">
+                Sections: <strong>{sections_generated.length}</strong>
+              </span>
+            </div>
           )}
         </div>
-      ))}
-      {!readOnly && (
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => addStringArrayItem(field)}
-          className="w-full"
-        >
-          <Plus className="h-4 w-4 mr-2" />
-          {addButtonText}
-        </Button>
-      )}
-    </div>
-  );
 
-  // Check if PRD has any meaningful content to show the footer
-  const hasContent = prd.problemStatement || prd.solutionOverview || 
-                    prd.targetUsers.length > 0 || prd.goals.length > 0 || 
-                    prd.successMetrics.length > 0 || prd.constraints.length > 0 || 
-                    prd.assumptions.length > 0;
+        {confidence_scores && Object.keys(confidence_scores).length > 0 && (
+          <div className="mt-3 pt-3 border-t border-blue-200">
+            <div className="text-xs text-gray-600 mb-2">Section Confidence Scores:</div>
+            <div className="flex flex-wrap gap-2">
+              {Object.entries(confidence_scores).map(([section, confidence]) => (
+                <span key={section} className="px-2 py-1 bg-white/50 rounded text-xs">
+                  {section}: {Math.round(confidence * 100)}%
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </Card>
+    );
+  };
+
+  const renderValidationStatus = () => {
+    if (!normalizedPRD.validation || readOnly) return null;
+
+    const { is_valid, issues, warnings } = normalizedPRD.validation;
+    
+    if (is_valid && (!issues?.length) && (!warnings?.length)) return null;
+
+    return (
+      <Card className="p-4 mb-6 bg-yellow-50 border-yellow-200">
+        <div className="flex items-center gap-2 mb-2">
+          <AlertCircle className="h-4 w-4 text-yellow-600" />
+          <h4 className="text-sm font-semibold text-yellow-900">Validation Status</h4>
+        </div>
+        
+        {issues && issues.length > 0 && (
+          <div className="mb-2">
+            <div className="text-xs font-medium text-red-700 mb-1">Issues:</div>
+            <ul className="text-xs text-red-600 space-y-1">
+              {issues.map((issue, index) => (
+                <li key={index}>• {issue}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        
+        {warnings && warnings.length > 0 && (
+          <div>
+            <div className="text-xs font-medium text-yellow-700 mb-1">Warnings:</div>
+            <ul className="text-xs text-yellow-600 space-y-1">
+              {warnings.map((warning, index) => (
+                <li key={index}>• {warning}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </Card>
+    );
+  };
 
   const renderFooter = () => {
     if (!hasContent) return null;
@@ -241,108 +305,59 @@ export function PRDEditor({ prd, onChange, readOnly = false }: PRDEditorProps) {
 
   return (
     <div className="space-y-6 max-w-4xl">
-      {/* Problem Statement */}
-      {renderSection(
-        'Problem Statement',
-        renderTextArea('problemStatement', 'What problem are we solving?', 'Describe the core problem this product addresses...')
-      )}
+      {/* Analytics & Validation */}
+      {renderMetadata()}
+      {renderValidationStatus()}
 
-      {/* Solution Overview */}
-      {renderSection(
-        'Solution Overview',
-        renderTextArea('solutionOverview', 'How will we solve it?', 'Describe the high-level solution approach...')
-      )}
+      {/* Target Users Section */}
+      <TargetUsersSection
+        section={normalizedPRD.sections.targetUsers}
+        onChange={updateTargetUsers}
+        onRegenerate={onRegenerateSection ? () => onRegenerateSection('targetUsers') : undefined}
+        readOnly={readOnly}
+        confidence={normalizedPRD.metadata?.confidence_scores?.targetUsers}
+        isRegenerating={isRegenerating.targetUsers}
+      />
 
-      {/* Target Users */}
-      {renderSection(
-        'Target Users',
-        renderStringArraySection('targetUsers', 'User', 'User persona', 'Add User')
-      )}
+      {/* Solution Section */}
+      <SolutionSection
+        section={normalizedPRD.sections.solution}
+        onChange={updateSolution}
+        onRegenerate={onRegenerateSection ? () => onRegenerateSection('solution') : undefined}
+        readOnly={readOnly}
+        confidence={normalizedPRD.metadata?.confidence_scores?.solution}
+        isRegenerating={isRegenerating.solution}
+      />
 
-      {/* Goals */}
-      {renderSection(
-        'Goals',
-        renderStringArraySection('goals', 'Goal', 'Goal', 'Add Goal')
-      )}
+      {/* Key Features Section */}
+      <KeyFeaturesSection
+        section={normalizedPRD.sections.keyFeatures}
+        onChange={updateKeyFeatures}
+        onRegenerate={onRegenerateSection ? () => onRegenerateSection('keyFeatures') : undefined}
+        readOnly={readOnly}
+        confidence={normalizedPRD.metadata?.confidence_scores?.keyFeatures}
+        isRegenerating={isRegenerating.keyFeatures}
+      />
 
-      {/* Success Metrics */}
-      {renderSection(
-        'Success Metrics',
-        <div className="space-y-3">
-          {prd.successMetrics.map((metric, index) => (
-            <div key={index} className="grid grid-cols-1 md:grid-cols-3 gap-3 p-3 border rounded-lg">
-              {readOnly ? (
-                <>
-                  <div className="space-y-1">
-                    <div className="text-xs font-medium text-muted-foreground">Metric</div>
-                    <div className="text-sm">{metric.metric || 'Untitled metric'}</div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-xs font-medium text-muted-foreground">Target</div>
-                    <div className="text-sm">{metric.target || 'No target set'}</div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-xs font-medium text-muted-foreground">Timeline</div>
-                    <div className="text-sm">{metric.timeline || 'No timeline set'}</div>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <Input
-                    value={metric.metric}
-                    onChange={(e) => updateSuccessMetric(index, 'metric', e.target.value)}
-                    placeholder="Metric name"
-                  />
-                  <Input
-                    value={metric.target}
-                    onChange={(e) => updateSuccessMetric(index, 'target', e.target.value)}
-                    placeholder="Target value"
-                  />
-                  <div className="flex gap-2">
-                    <Input
-                      value={metric.timeline}
-                      onChange={(e) => updateSuccessMetric(index, 'timeline', e.target.value)}
-                      placeholder="Timeline"
-                      className="flex-1"
-                    />
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => removeSuccessMetric(index)}
-                      className="px-2"
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </>
-              )}
-            </div>
-          ))}
-          {!readOnly && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={addSuccessMetric}
-              className="w-full"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Add Metric
-            </Button>
-          )}
-        </div>
-      )}
+      {/* Success Metrics Section */}
+      <SuccessMetricsSection
+        section={normalizedPRD.sections.successMetrics}
+        onChange={updateSuccessMetrics}
+        onRegenerate={onRegenerateSection ? () => onRegenerateSection('successMetrics') : undefined}
+        readOnly={readOnly}
+        confidence={normalizedPRD.metadata?.confidence_scores?.successMetrics}
+        isRegenerating={isRegenerating.successMetrics}
+      />
 
-      {/* Constraints */}
-      {renderSection(
-        'Constraints',
-        renderStringArraySection('constraints', 'Constraint', 'Constraint', 'Add Constraint')
-      )}
-
-      {/* Assumptions */}
-      {renderSection(
-        'Assumptions',
-        renderStringArraySection('assumptions', 'Assumption', 'Assumption', 'Add Assumption')
-      )}
+      {/* Constraints Section */}
+      <ConstraintsSection
+        section={normalizedPRD.sections.constraints}
+        onChange={updateConstraints}
+        onRegenerate={onRegenerateSection ? () => onRegenerateSection('constraints') : undefined}
+        readOnly={readOnly}
+        confidence={normalizedPRD.metadata?.confidence_scores?.constraints}
+        isRegenerating={isRegenerating.constraints}
+      />
 
       {/* Footer with copy and export actions */}
       {renderFooter()}

@@ -2,7 +2,7 @@ import { User, Bot, Copy, Check, Database } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { SmartMessageRenderer } from './SmartMessageRenderer';
-import { PRD } from './PRDEditor';
+import { NewPRD } from '@/lib/prd-schema';
 import { Message } from '../../types';
 import { contextStorage } from '@/lib/context-storage';
 import { createMessageId } from '@/lib/context-types';
@@ -12,7 +12,7 @@ interface MessageBubbleProps {
   message: Message;
   onCopy: (content: string, messageId: string) => void;
   copied: boolean;
-  onPRDUpdate?: (messageId: string, updatedPRD: PRD) => void;
+  onPRDUpdate?: (messageId: string, updatedPRD: NewPRD) => void;
   isExpanded?: boolean;
   onToggleExpanded?: (messageId: string) => void;
 }

@@ -5,20 +5,30 @@ import { ensureArrayFields } from '../utils/post-process-structured-response'
 
 const ContextAnalysisSchema = z.object({
   themes: z.array(z.string()).optional(),
-  requirements: z.object({
-    functional: z.array(z.string()).optional(),
-    technical: z.array(z.string()).optional(),
-    user_experience: z.array(z.string()).optional(),
-    epics: z.array(z.object({
-      title: z.string(),
-      description: z.string()
-    })).optional(),
-    mvpFeatures: z.array(z.string()).optional()
-  }).optional(),
+  // Make requirements field flexible - can be object, string, or missing
+  requirements: z.union([
+    z.object({
+      functional: z.array(z.string()).optional(),
+      technical: z.array(z.string()).optional(),
+      user_experience: z.array(z.string()).optional(),
+      epics: z.array(z.object({
+        title: z.string(),
+        description: z.string()
+      })).optional(),
+      mvpFeatures: z.array(z.string()).optional()
+    }),
+    z.string() // Allow string format that AI sometimes returns
+  ]).optional(),
+  // Fallback flat fields for direct array responses
   functional: z.array(z.string()).optional(),
   technical: z.array(z.string()).optional(),
   user_experience: z.array(z.string()).optional(),
-  constraints: z.array(z.string()).optional()
+  constraints: z.array(z.string()).optional(),
+  mvpFeatures: z.array(z.string()).optional(),
+  epics: z.array(z.object({
+    title: z.string(),
+    description: z.string()
+  })).optional()
 })
 
 export interface ContextAnalysisResult {
@@ -61,19 +71,26 @@ export class ContextAnalyzer extends BaseAnalyzer {
     // Normalize the response so consumers always see the same shape
     const normalized: ContextAnalysisResult = {
       themes: processedAnalysis.themes || [],
-      requirements: processedAnalysis.requirements ? {
-        functional: processedAnalysis.requirements.functional || [],
-        technical: processedAnalysis.requirements.technical || [],
-        user_experience: processedAnalysis.requirements.user_experience || [],
-        epics: processedAnalysis.requirements.epics || [],
-        mvpFeatures: processedAnalysis.requirements.mvpFeatures || []
-      } : {
-        functional: processedAnalysis.functional || [],
-        technical: processedAnalysis.technical || [],
-        user_experience: processedAnalysis.user_experience || [],
-        epics: [],
-        mvpFeatures: []
-      },
+      requirements: (() => {
+        // Handle requirements field being object, string, or missing
+        if (processedAnalysis.requirements && typeof processedAnalysis.requirements === 'object') {
+          return {
+            functional: processedAnalysis.requirements.functional || [],
+            technical: processedAnalysis.requirements.technical || [],
+            user_experience: processedAnalysis.requirements.user_experience || [],
+            epics: processedAnalysis.requirements.epics || [],
+            mvpFeatures: processedAnalysis.requirements.mvpFeatures || []
+          }
+        }
+        // If requirements is string or missing, use fallback flat fields
+        return {
+          functional: processedAnalysis.functional || [],
+          technical: processedAnalysis.technical || [],
+          user_experience: processedAnalysis.user_experience || [],
+          epics: processedAnalysis.epics || [],
+          mvpFeatures: processedAnalysis.mvpFeatures || []
+        }
+      })(),
       constraints: processedAnalysis.constraints || []
     }
 

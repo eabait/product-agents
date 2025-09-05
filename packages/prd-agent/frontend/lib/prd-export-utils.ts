@@ -1,9 +1,9 @@
-import { PRD } from './prd-schema';
+import { FlattenedPRD } from './prd-schema';
 
 /**
  * Converts a PRD object to a formatted text string for copying
  */
-export function convertPRDToText(prd: PRD): string {
+export function convertPRDToText(prd: FlattenedPRD): string {
   const sections = [];
 
   // Problem Statement
@@ -50,7 +50,7 @@ export function convertPRDToText(prd: PRD): string {
 /**
  * Converts a PRD object to formatted markdown
  */
-export function convertPRDToMarkdown(prd: PRD): string {
+export function convertPRDToMarkdown(prd: FlattenedPRD): string {
   const sections = [];
 
   // Title

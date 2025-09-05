@@ -169,21 +169,17 @@ const server = http.createServer(async (req, res) => {
           questions: result.validation.warnings
         }))
       } else {
-        // Return assembled PRD
+        // Return assembled PRD with simplified structure
         const prd = {
-          // Legacy format for compatibility
-          problemStatement: result.sections.problemStatement?.problemStatement,
-          solutionOverview: result.sections.context?.businessContext,
-          targetUsers: result.sections.problemStatement?.targetUsers?.map((u: any) => u.persona) || [],
-          goals: result.sections.context?.requirements?.epics?.map((epic: any) => epic.title) || [],
-          successMetrics: result.sections.metrics?.successMetrics?.map((m: any) => ({
-            metric: m.metric,
-            target: m.target,
-            timeline: m.timeline
-          })) || [],
-          constraints: result.sections.context?.constraints || [],
-          assumptions: result.sections.assumptions?.assumptions?.map((a: any) => a.assumption) || [],
-          // New detailed sections
+          // Flattened format for frontend compatibility (simplified 5-section structure)
+          problemStatement: '', // Will be derived from solution section if needed
+          solutionOverview: result.sections.solution?.solutionOverview || '',
+          targetUsers: result.sections.targetUsers?.targetUsers || [],
+          goals: result.sections.keyFeatures?.keyFeatures || [],
+          successMetrics: result.sections.successMetrics?.successMetrics || [],
+          constraints: result.sections.constraints?.constraints || [],
+          assumptions: result.sections.constraints?.assumptions || [],
+          // New simplified sections
           sections: result.sections,
           metadata: {
             version: '2.0',
@@ -283,7 +279,7 @@ const server = http.createServer(async (req, res) => {
   // Update specific section
   if (method === 'POST' && url.startsWith('/prd/section/')) {
     const sectionName = url.split('/prd/section/')[1]
-    const validSections = ['context', 'problemStatement', 'assumptions', 'metrics']
+    const validSections = ['targetUsers', 'solution', 'keyFeatures', 'successMetrics', 'constraints']
     
     if (!validSections.includes(sectionName)) {
       res.statusCode = 400

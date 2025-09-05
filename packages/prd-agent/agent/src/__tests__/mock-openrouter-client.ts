@@ -116,12 +116,38 @@ export class MockOpenRouterClient {
   }
 
   private determineWorkerFromPrompt(prompt: string): string {
+    // Legacy analyzer patterns (still used)
     if (prompt.includes('Analyze this product request for PRD generation completeness')) {
       return 'clarification'
     }
-    if (prompt.includes('Analyze this product request and extract key themes')) {
+    if (prompt.includes('Analyze this product request and extract key themes') || 
+        prompt.includes('Analyze and extract:')) {
       return 'contextAnalysis'
     }
+    
+    // New simplified section writer patterns
+    if (prompt.includes('creating a concise Target Users section') ||
+        prompt.includes('Generate 2-4 specific target user personas')) {
+      return 'targetUsers'
+    }
+    if (prompt.includes('creating a Solution Overview section') ||
+        prompt.includes('explains WHAT we\'re building and HOW')) {
+      return 'solution'
+    }
+    if (prompt.includes('creating a Key Features section') ||
+        prompt.includes('Generate 3-7 key features')) {
+      return 'keyFeatures'
+    }
+    if (prompt.includes('creating a Success Metrics section') ||
+        prompt.includes('Generate 2-4 key success metrics')) {
+      return 'successMetrics'
+    }
+    if (prompt.includes('creating a Constraints section') ||
+        prompt.includes('Generate key constraints and assumptions')) {
+      return 'constraints'
+    }
+    
+    // Legacy patterns for backward compatibility
     if (prompt.includes('Extract functional and non-functional requirements')) {
       return 'requirementsExtraction'
     }

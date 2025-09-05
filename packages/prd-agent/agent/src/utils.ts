@@ -18,32 +18,27 @@ export function applyPatch(basePRD: PRD, sectionUpdates: any): PRD {
     }
   }
   
-  // Auto-generate flattened fields from sections for frontend compatibility
+  // Auto-generate flattened fields from simplified sections for frontend compatibility
   if (result.sections) {
-    if (result.sections.problemStatement) {
-      result.problemStatement = result.sections.problemStatement.problemStatement
-      result.targetUsers = result.sections.problemStatement.targetUsers?.map((u: any) => u.persona) || []
+    if (result.sections.targetUsers) {
+      result.targetUsers = result.sections.targetUsers.targetUsers || []
     }
     
-    if (result.sections.context) {
-      result.solutionOverview = result.sections.context.businessContext
-      result.constraints = result.sections.context.constraints || []
+    if (result.sections.solution) {
+      result.solutionOverview = result.sections.solution.solutionOverview || ''
     }
     
-    if (result.sections.context?.requirements) {
-      result.goals = result.sections.context.requirements.epics?.map((epic: any) => epic.title) || []
+    if (result.sections.keyFeatures) {
+      result.goals = result.sections.keyFeatures.keyFeatures || []
     }
     
-    if (result.sections.metrics) {
-      result.successMetrics = result.sections.metrics.successMetrics?.map((m: any) => ({
-        metric: m.metric,
-        target: m.target,
-        timeline: m.timeline
-      })) || []
+    if (result.sections.successMetrics) {
+      result.successMetrics = result.sections.successMetrics.successMetrics || []
     }
     
-    if (result.sections.assumptions) {
-      result.assumptions = result.sections.assumptions.assumptions?.map((a: any) => a.assumption) || []
+    if (result.sections.constraints) {
+      result.constraints = result.sections.constraints.constraints || []
+      result.assumptions = result.sections.constraints.assumptions || []
     }
   }
   

@@ -94,6 +94,10 @@ export class OpenRouterClient {
 
     let sanitized = responseText.trim()
     
+    // Remove backticks and markdown code block markers
+    sanitized = sanitized.replace(/^```json\s*/g, '').replace(/```\s*$/g, '')
+    sanitized = sanitized.replace(/^```\s*/g, '').replace(/```\s*$/g, '')
+    
     // Remove any text before the first { or [
     const jsonStart = sanitized.search(/^[\s]*[{\[]/)
     if (jsonStart > 0) {
