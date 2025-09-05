@@ -611,15 +611,43 @@ function PRDAgentPageContent() {
       const data = await response.json();
       if (data.error) throw new Error(data.error);
 
+      console.log("Frontend received API response:", {
+        hasError: !!data.error,
+        hasContent: !!data.content,
+        isStructured: data.isStructured,
+        contentType: typeof data.content,
+        contentKeys: typeof data.content === 'object' ? Object.keys(data.content) : null,
+        allResponseKeys: Object.keys(data),
+        contentPreview: typeof data.content === 'string' 
+          ? data.content.substring(0, 100) 
+          : JSON.stringify(data.content || {}).substring(0, 100)
+      });
+
       // Handle both structured data and string content
       let messageContent: string;
       if (data.isStructured && typeof data.content === 'object') {
         // Convert structured data to formatted JSON for display
         messageContent = JSON.stringify(data.content, null, 2);
+        console.log("Processing as structured data, length:", messageContent.length);
+      } else if (data.content && typeof data.content === 'string') {
+        // Use content directly if it's a string
+        messageContent = data.content;
+        console.log("Processing as string content, length:", messageContent.length);
       } else {
-        // Use content directly if it's a string or fallback
+        // Fallback - this might be where the issue is
+        console.warn("Falling back to 'No response' - this indicates a problem:", {
+          contentExists: !!data.content,
+          contentType: typeof data.content,
+          isStructured: data.isStructured
+        });
         messageContent = data.content || "No response";
       }
+
+      console.log("Final message content prepared:", {
+        contentLength: messageContent.length,
+        isJSONString: messageContent.startsWith('{') || messageContent.startsWith('['),
+        contentPreview: messageContent.substring(0, 200)
+      });
 
       const assistantMessage: Message = {
         id: uuidv4(),

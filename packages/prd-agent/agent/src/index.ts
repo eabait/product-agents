@@ -1,15 +1,18 @@
 // Re-export all types and schemas
-export type { PRD, PRDPatch } from './schemas'
-export { PRDSchema, PRDPatchSchema } from './schemas'
+export type { PRD, SectionRoutingRequest, SectionRoutingResponse } from './schemas'
+export { PRDSchema, SectionRoutingRequestSchema, SectionRoutingResponseSchema } from './schemas'
 
 // Re-export utility functions
-export { applyPatch, cleanPatchResponse } from './utils'
+export { applyPatch, cleanPatchResponse, ensureArrayFields, postProcessStructuredResponse } from './utils'
 
-// Re-export all workers
-export * from './workers'
+// Re-export analyzers
+export * from './analyzers'
+
+// Re-export section writers
+export * from './section-writers'
 
 // Re-export main agent
-export { PRDGeneratorAgent } from './prd-generator-agent'
+export { PRDOrchestratorAgent } from './prd-orchestrator-agent'
 
-// Re-export WorkerResult type from agent-core for backward compatibility
+// Re-export base types from agent-core
 export type { WorkerResult } from '@product-agents/agent-core'

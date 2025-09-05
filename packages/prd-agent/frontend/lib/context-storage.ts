@@ -78,6 +78,11 @@ class ContextStorage {
    */
   private loadCategorizedContextFromStorage(): CategorizedContextItem[] {
     try {
+      // Return empty array during SSR or when localStorage is unavailable
+      if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
+        return []
+      }
+      
       const stored = localStorage.getItem(STORAGE_KEYS.CATEGORIZED_CONTEXT)
       if (!stored) return []
       
@@ -287,6 +292,11 @@ class ContextStorage {
   }
 
   private saveWithRetry(key: string, data: any, operation: string): void {
+    // Skip saving during SSR or when localStorage is unavailable
+    if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
+      return
+    }
+    
     let attempts = 0
     
     while (attempts < this.MAX_RETRY_ATTEMPTS) {
@@ -347,6 +357,11 @@ class ContextStorage {
   // Context Settings
   getContextSettings(): ContextSettings {
     try {
+      // Return defaults during SSR or when localStorage is unavailable
+      if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
+        return DEFAULT_CONTEXT_SETTINGS
+      }
+      
       const stored = localStorage.getItem(STORAGE_KEYS.CONTEXT_SETTINGS)
       if (!stored) return DEFAULT_CONTEXT_SETTINGS
       
@@ -359,13 +374,16 @@ class ContextStorage {
 
   saveContextSettings(settings: ContextSettings): void {
     try {
+      // Skip saving during SSR or when localStorage is unavailable
+      if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
+        return
+      }
+      
       localStorage.setItem(STORAGE_KEYS.CONTEXT_SETTINGS, JSON.stringify(settings))
       // Emit event for reactive updates
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('contextSettingsChanged', { 
-          detail: settings 
-        }))
-      }
+      window.dispatchEvent(new CustomEvent('contextSettingsChanged', { 
+        detail: settings 
+      }))
     } catch (error) {
       console.error('Error saving context settings:', error)
     }
@@ -381,6 +399,11 @@ class ContextStorage {
   // Selected Messages
   getSelectedMessages(): SelectedMessage[] {
     try {
+      // Return empty array during SSR or when localStorage is unavailable
+      if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
+        return []
+      }
+      
       const stored = localStorage.getItem(STORAGE_KEYS.SELECTED_MESSAGES)
       if (!stored) return []
       
@@ -397,6 +420,11 @@ class ContextStorage {
 
   saveSelectedMessages(messages: SelectedMessage[]): void {
     try {
+      // Skip saving during SSR or when localStorage is unavailable
+      if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
+        return
+      }
+      
       localStorage.setItem(STORAGE_KEYS.SELECTED_MESSAGES, JSON.stringify(messages))
     } catch (error) {
       console.error('Error saving selected messages:', error)
@@ -475,6 +503,11 @@ class ContextStorage {
   }
 
   clearAllContext(): void {
+    // Skip clearing during SSR or when localStorage is unavailable
+    if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
+      return
+    }
+    
     localStorage.removeItem(STORAGE_KEYS.CATEGORIZED_CONTEXT)
     localStorage.removeItem(STORAGE_KEYS.SELECTED_MESSAGES)
   }

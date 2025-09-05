@@ -6,7 +6,7 @@
  * and the overall PRD generation process.
  */
 
-import { PRDGeneratorAgent } from '../prd-generator-agent'
+import { PRDOrchestratorAgent } from '../prd-orchestrator-agent'
 import { MockOpenRouterClient } from './mock-openrouter-client'
 
 // Mock the OpenRouter client at the module level
@@ -19,7 +19,7 @@ jest.mock('@product-agents/openrouter-client', () => {
 // Create a global mock client instance
 const mockClient = new MockOpenRouterClient()
 
-describe('PRDGeneratorAgent Clarification Integration', () => {
+describe('PRDOrchestratorAgent Clarification Integration', () => {
   const testSettings = {
     model: 'anthropic/claude-3-5-sonnet',
     temperature: 0.3,
@@ -32,7 +32,7 @@ describe('PRDGeneratorAgent Clarification Integration', () => {
   })
 
   it('should request clarification for vague user input', async () => {
-    const agent = new PRDGeneratorAgent(testSettings)
+    const agent = new PRDOrchestratorAgent(testSettings)
     
     // Mock clarification worker to return questions
     mockClient.setMockResponse('clarification', {
@@ -66,7 +66,7 @@ describe('PRDGeneratorAgent Clarification Integration', () => {
   })
 
   it('should bypass clarification and generate PRD for detailed input', async () => {
-    const agent = new PRDGeneratorAgent(testSettings)
+    const agent = new PRDOrchestratorAgent(testSettings)
     
     // Mock clarification worker to indicate sufficient context
     mockClient.setMockResponse('clarification', {
@@ -147,7 +147,7 @@ Constraints: $500K development budget, 12-month initial launch timeline, team of
   })
 
   it('should handle context in clarification appropriately', async () => {
-    const agent = new PRDGeneratorAgent(testSettings)
+    const agent = new PRDOrchestratorAgent(testSettings)
     
     // Mock clarification to not need clarification
     mockClient.setMockResponse('clarification', {
@@ -191,7 +191,7 @@ Constraints: $500K development budget, 12-month initial launch timeline, team of
 
   describe('Enhanced Clarification Logic', () => {
     it('should proceed with reasonable assumptions for common app types', async () => {
-      const agent = new PRDGeneratorAgent(testSettings)
+      const agent = new PRDOrchestratorAgent(testSettings)
       
       // Mock clarification to proceed with reasonable assumptions
       mockClient.setMockResponse('clarification', {
@@ -254,7 +254,7 @@ Constraints: $500K development budget, 12-month initial launch timeline, team of
     })
 
     it('should ask targeted questions only for critical gaps', async () => {
-      const agent = new PRDGeneratorAgent(testSettings)
+      const agent = new PRDOrchestratorAgent(testSettings)
       
       // Mock clarification to identify only critical gaps
       mockClient.setMockResponse('clarification', {
@@ -282,7 +282,7 @@ Constraints: $500K development budget, 12-month initial launch timeline, team of
     })
 
     it('should demonstrate confidence-based decision making', async () => {
-      const agent = new PRDGeneratorAgent(testSettings)
+      const agent = new PRDOrchestratorAgent(testSettings)
       
       // Test medium confidence scenario - should proceed but with lower confidence
       mockClient.setMockResponse('clarification', {

@@ -5,7 +5,7 @@
  * Demonstrates the flow of prompts through the agent pipeline.
  */
 
-import { PRDGeneratorAgent } from '../prd-generator-agent'
+import { PRDOrchestratorAgent } from '../prd-orchestrator-agent'
 import { MockOpenRouterClient } from './mock-openrouter-client'
 
 // Create global mock instance
@@ -90,7 +90,7 @@ async function runPromptTracingDemo() {
   })
 
   // Create agent
-  const agent = new PRDGeneratorAgent({
+  const agent = new PRDOrchestratorAgent({
     model: 'anthropic/claude-3-5-sonnet',
     temperature: 0.3,
     maxTokens: 4000,

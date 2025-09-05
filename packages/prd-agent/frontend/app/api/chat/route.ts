@@ -139,15 +139,36 @@ export async function POST(request: NextRequest) {
     }
     
     const data = await response.json();
-    console.log(`[${requestId}] Backend response data:`, {
+    console.log(`[${requestId}] Backend response data DETAILED:`, {
       hasContent: !!data.content,
       contentLength: data.content?.length || 0,
       contentPreview: data.content?.substring(0, 200) + (data.content?.length > 200 ? '...' : ''),
       needsClarification: !!data.needsClarification,
       questionsCount: data.questions?.length || 0,
       confidence: data.confidence,
-      otherKeys: Object.keys(data).filter(k => !['content', 'needsClarification', 'questions', 'confidence'].includes(k))
+      hasPRD: !!data.prd,
+      hasSections: !!data.sections,
+      hasMessage: !!data.message,
+      allKeys: Object.keys(data),
+      otherKeys: Object.keys(data).filter(k => !['content', 'needsClarification', 'questions', 'confidence', 'prd', 'sections', 'message'].includes(k))
     });
+    
+    // Log the actual structure of key fields
+    if (data.prd) {
+      console.log(`[${requestId}] PRD structure:`, {
+        prdKeys: Object.keys(data.prd),
+        hasSections: !!data.prd.sections,
+        hasMetadata: !!data.prd.metadata,
+        problemStatement: !!data.prd.problemStatement
+      });
+    }
+    
+    if (data.sections) {
+      console.log(`[${requestId}] Sections structure:`, {
+        sectionKeys: Object.keys(data.sections),
+        sectionCount: Object.keys(data.sections).length
+      });
+    }
     
     // Handle clarification questions
     if (data.needsClarification) {
@@ -205,19 +226,31 @@ export async function POST(request: NextRequest) {
       isStructured = true;
     }
     
-    console.log(`[${requestId}] Final response:`, {
+    console.log(`[${requestId}] Final response preparation:`, {
       contentType: data.prd ? 'PRD' : (data.message ? 'message' : 'raw'),
       contentLength: typeof content === 'string' ? content.length : JSON.stringify(content).length,
       hasPRD: !!data.prd,
-      isStructured
+      isStructured,
+      contentIsObject: typeof content === 'object',
+      contentKeys: typeof content === 'object' ? Object.keys(content) : null,
+      contentPreview: typeof content === 'string' ? content.substring(0, 100) : JSON.stringify(content).substring(0, 100)
+    });
+    
+    const finalResponse = { 
+      content,
+      isStructured // Include flag so frontend can handle properly
+    };
+    
+    console.log(`[${requestId}] Final API response being sent to frontend:`, {
+      responseKeys: Object.keys(finalResponse),
+      hasContent: !!finalResponse.content,
+      contentType: typeof finalResponse.content,
+      isStructured: finalResponse.isStructured
     });
     
     console.log(`[${requestId}] === REQUEST COMPLETE ===`);
     
-    return NextResponse.json({ 
-      content,
-      isStructured // Include flag so frontend can handle properly
-    });
+    return NextResponse.json(finalResponse);
     
   } catch (error) {
     console.error(`[${requestId}] API route error:`, error);

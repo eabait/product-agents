@@ -19,8 +19,8 @@ Context analysis: ${JSON.stringify(contextAnalysis)}`
     const requirements = contextPayload.categorizedContext
       .filter((item: any) => item.category === 'requirement' && item.isActive)
       .sort((a: any, b: any) => {
-        const priorityOrder = { high: 3, medium: 2, low: 1 }
-        return priorityOrder[b.priority] - priorityOrder[a.priority]
+        const priorityOrder: Record<string, number> = { high: 3, medium: 2, low: 1 }
+        return (priorityOrder[b.priority] || 1) - (priorityOrder[a.priority] || 1)
       })
     
     if (requirements.length > 0) {

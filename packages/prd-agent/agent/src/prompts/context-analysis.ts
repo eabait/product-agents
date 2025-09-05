@@ -16,8 +16,8 @@ export function createContextAnalysisPrompt(message: string, contextPayload?: an
     const constraints = contextPayload.categorizedContext
       .filter((item: any) => item.category === 'constraint' && item.isActive)
       .sort((a: any, b: any) => {
-        const priorityOrder = { high: 3, medium: 2, low: 1 }
-        return priorityOrder[b.priority] - priorityOrder[a.priority]
+        const priorityOrder: Record<string, number> = { high: 3, medium: 2, low: 1 }
+        return (priorityOrder[b.priority] || 1) - (priorityOrder[a.priority] || 1)
       })
     
     if (constraints.length > 0) {
@@ -31,8 +31,8 @@ export function createContextAnalysisPrompt(message: string, contextPayload?: an
     const requirements = contextPayload.categorizedContext
       .filter((item: any) => item.category === 'requirement' && item.isActive)
       .sort((a: any, b: any) => {
-        const priorityOrder = { high: 3, medium: 2, low: 1 }
-        return priorityOrder[b.priority] - priorityOrder[a.priority]
+        const priorityOrder: Record<string, number> = { high: 3, medium: 2, low: 1 }
+        return (priorityOrder[b.priority] || 1) - (priorityOrder[a.priority] || 1)
       })
     
     if (requirements.length > 0) {
@@ -43,7 +43,22 @@ export function createContextAnalysisPrompt(message: string, contextPayload?: an
     }
   }
   
-  prompt += '\n\nPlease analyze and extract themes, requirements (functional, technical, user_experience), and constraints from both the message and the provided context.'
+  prompt += `\n\nAnalyze and extract:
+
+1. **Themes**: Key product themes and focus areas
+2. **Requirements**: Core requirements including:
+   - Functional requirements (what the system should do)
+   - Technical requirements (performance, platform, integration needs)
+   - User experience requirements (usability, accessibility)
+   - Epic user stories (3-8 high-level user stories)
+   - MVP features (essential features for validation)
+3. **Constraints**: Technical, business, timeline, and resource constraints
+
+**Epic Story Guidelines:**
+- Title: Concise epic name (under 100 characters)
+- Description: 1-2 sentences describing user goal and value
+
+Generate a focused analysis that captures core product requirements.`
   
   return prompt
 }

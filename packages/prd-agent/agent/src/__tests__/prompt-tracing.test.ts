@@ -5,7 +5,7 @@
  * with mocked LLM responses to trace execution flow.
  */
 
-import { PRDGeneratorAgent } from '../prd-generator-agent'
+import { PRDOrchestratorAgent } from '../prd-orchestrator-agent'
 import { MockOpenRouterClient } from './mock-openrouter-client'
 
 // Mock the OpenRouter client at the module level
@@ -19,7 +19,7 @@ jest.mock('@product-agents/openrouter-client', () => {
 const mockClient = new MockOpenRouterClient()
 
 describe('PRD Agent Prompt Tracing', () => {
-  let agent: PRDGeneratorAgent
+  let agent: PRDOrchestratorAgent
 
   beforeEach(() => {
     // Clear traces before each test
@@ -106,7 +106,7 @@ describe('PRD Agent Prompt Tracing', () => {
     })
 
     // Create agent with test settings
-    agent = new PRDGeneratorAgent({
+    agent = new PRDOrchestratorAgent({
       model: 'anthropic/claude-3-5-sonnet',
       temperature: 0.3,
       maxTokens: 4000,

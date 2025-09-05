@@ -2,7 +2,7 @@
 import * as http from 'http'
 import * as fs from 'fs'
 import * as path from 'path'
-import { PRDGeneratorAgent } from './index'
+import { PRDOrchestratorAgent } from './index'
 
 // Simple .env file loader
 try {
@@ -29,13 +29,10 @@ console.log('Default OpenRouter API Key configured:', defaultApiKey ? `${default
 // Default settings from environment variables
 const defaultSettings = {
   apiKey: defaultApiKey,
-  model: process.env.PRD_AGENT_MODEL || PRDGeneratorAgent.defaultModel,
+  model: process.env.PRD_AGENT_MODEL || PRDOrchestratorAgent.defaultModel,
   temperature: parseFloat(process.env.PRD_AGENT_TEMPERATURE || '0.3'),
   maxTokens: parseInt(process.env.PRD_AGENT_MAX_TOKENS || '8000')
 }
-
-// Fixed temperature for ChangeWorker (for consistent patch generation)
-const changeWorkerTemperature = parseFloat(process.env.PRD_AGENT_CHANGE_WORKER_TEMPERATURE || '0.2')
 
 // Helper function to create agent with merged settings
 const createAgent = async (requestSettings?: any) => {
@@ -66,20 +63,13 @@ const createAgent = async (requestSettings?: any) => {
     effectiveSettings.maxTokens = 4000
   }
   
-  console.log('Creating agent with validated settings:', {
+  console.log('Creating orchestrator agent with validated settings:', {
     model: effectiveSettings.model,
     temperature: effectiveSettings.temperature,
-    maxTokens: effectiveSettings.maxTokens,
-    changeWorkerTemperature: changeWorkerTemperature
+    maxTokens: effectiveSettings.maxTokens
   })
   
-  // Add changeWorkerTemperature to settings
-  const agentSettings = {
-    ...effectiveSettings,
-    changeWorkerTemperature
-  }
-  
-  return new PRDGeneratorAgent(agentSettings)
+  return new PRDOrchestratorAgent(effectiveSettings)
 }
 
 const parseJsonBody = (req: http.IncomingMessage): Promise<any> => {
@@ -131,21 +121,22 @@ const server = http.createServer(async (req, res) => {
         maxTokens: defaultSettings.maxTokens
       },
       agentInfo: {
-        name: PRDGeneratorAgent.agentName,
-        description: PRDGeneratorAgent.agentDescription,
-        requiredCapabilities: PRDGeneratorAgent.requiredCapabilities,
-        defaultModel: PRDGeneratorAgent.defaultModel
+        name: PRDOrchestratorAgent.agentName,
+        description: PRDOrchestratorAgent.agentDescription,
+        requiredCapabilities: PRDOrchestratorAgent.requiredCapabilities,
+        defaultModel: PRDOrchestratorAgent.defaultModel
       }
     }))
     return
   }
 
-  // Create PRD
+  // Create PRD (Using orchestrator architecture)
   if (method === 'POST' && url === '/prd') {
     const body = await parseJsonBody(req)
     const message = body?.message
     const settings = body?.settings
     const contextPayload = body?.contextPayload
+    const existingPRD = body?.existingPRD
     
     if (!message) {
       res.statusCode = 400
@@ -154,22 +145,56 @@ const server = http.createServer(async (req, res) => {
     }
     
     try {
-      // Create agent with request-specific settings
       const agent = await createAgent(settings)
       
-      // Build context object with contextPayload if provided
-      const context = contextPayload ? { contextPayload } : undefined
-      
-      const result = await (agent as any).chat(message, context)
+      // Use orchestrator's generateSections method
+      const result = await (agent as any).generateSections({
+        message,
+        context: {
+          contextPayload,
+          existingPRD,
+          conversationHistory: body?.conversationHistory
+        },
+        settings
+      })
       
       res.statusCode = 200
       res.setHeader('Content-Type', 'application/json')
       
-      // Check if result is clarification questions
-      if (result && typeof result === 'object' && 'needsClarification' in result) {
-        res.end(JSON.stringify(result))
+      // Check if clarification is needed
+      if (!result.validation.is_valid && result.validation.issues.includes('Clarification needed')) {
+        res.end(JSON.stringify({
+          needsClarification: true,
+          confidence: result.metadata.total_confidence * 100,
+          questions: result.validation.warnings
+        }))
       } else {
-        res.end(JSON.stringify({ prd: result }))
+        // Return assembled PRD
+        const prd = {
+          // Legacy format for compatibility
+          problemStatement: result.sections.problemStatement?.problemStatement,
+          solutionOverview: result.sections.context?.businessContext,
+          targetUsers: result.sections.problemStatement?.targetUsers?.map((u: any) => u.persona) || [],
+          goals: result.sections.context?.requirements?.epics?.map((epic: any) => epic.title) || [],
+          successMetrics: result.sections.metrics?.successMetrics?.map((m: any) => ({
+            metric: m.metric,
+            target: m.target,
+            timeline: m.timeline
+          })) || [],
+          constraints: result.sections.context?.constraints || [],
+          assumptions: result.sections.assumptions?.assumptions?.map((a: any) => a.assumption) || [],
+          // New detailed sections
+          sections: result.sections,
+          metadata: {
+            version: '2.0',
+            lastUpdated: new Date().toISOString(),
+            generatedBy: 'PRD Orchestrator Agent',
+            sections_generated: result.metadata.sections_updated,
+            confidence_scores: result.metadata.confidence_scores
+          }
+        }
+        
+        res.end(JSON.stringify({ prd }))
       }
     } catch (e: any) {
       console.error('PRD creation error:', e)
@@ -179,7 +204,7 @@ const server = http.createServer(async (req, res) => {
     return
   }
 
-  // Edit PRD
+  // Edit PRD (Using orchestrator architecture)
   if (method === 'POST' && url === '/prd/edit') {
     const body = await parseJsonBody(req)
     const message = body?.message
@@ -194,22 +219,115 @@ const server = http.createServer(async (req, res) => {
     }
     
     try {
-      // Create agent with request-specific settings
       const agent = await createAgent(settings)
       
-      // Build context object with both edit operation and contextPayload
-      const context = { 
-        operation: 'edit', 
+      // Use orchestrator's edit handling
+      const result = await (agent as any).chat(message, {
+        operation: 'edit',
         existingPRD,
-        ...(contextPayload && { contextPayload })
-      }
+        contextPayload
+      })
       
-      const result = await (agent as any).chat(message, context)
       res.statusCode = 200
       res.setHeader('Content-Type', 'application/json')
       res.end(JSON.stringify(result))
     } catch (e: any) {
       console.error('PRD edit error:', e)
+      res.statusCode = 500
+      res.end(JSON.stringify({ error: String(e?.message || e) }))
+    }
+    return
+  }
+
+  // Generate sections (New orchestrator endpoint)
+  if (method === 'POST' && url === '/prd/sections') {
+    const body = await parseJsonBody(req)
+    const message = body?.message
+    const settings = body?.settings
+    const contextPayload = body?.contextPayload
+    const existingPRD = body?.existingPRD
+    const targetSections = body?.targetSections
+    
+    if (!message) {
+      res.statusCode = 400
+      res.end(JSON.stringify({ error: 'Missing message' }))
+      return
+    }
+    
+    try {
+      const agent = await createAgent(settings)
+      
+      // Use the new section routing method
+      const result = await (agent as any).generateSections({
+        message,
+        context: {
+          contextPayload,
+          existingPRD,
+          conversationHistory: body?.conversationHistory
+        },
+        settings,
+        targetSections
+      })
+      
+      res.statusCode = 200
+      res.setHeader('Content-Type', 'application/json')
+      res.end(JSON.stringify(result))
+    } catch (e: any) {
+      console.error('Section generation error:', e)
+      res.statusCode = 500
+      res.end(JSON.stringify({ error: String(e?.message || e) }))
+    }
+    return
+  }
+
+  // Update specific section
+  if (method === 'POST' && url.startsWith('/prd/section/')) {
+    const sectionName = url.split('/prd/section/')[1]
+    const validSections = ['context', 'problemStatement', 'assumptions', 'metrics']
+    
+    if (!validSections.includes(sectionName)) {
+      res.statusCode = 400
+      res.end(JSON.stringify({ error: `Invalid section name. Valid sections: ${validSections.join(', ')}` }))
+      return
+    }
+    
+    const body = await parseJsonBody(req)
+    const message = body?.message
+    const settings = body?.settings
+    const contextPayload = body?.contextPayload
+    const existingPRD = body?.existingPRD
+    
+    if (!message) {
+      res.statusCode = 400
+      res.end(JSON.stringify({ error: 'Missing message' }))
+      return
+    }
+    
+    try {
+      const agent = await createAgent(settings)
+      
+      // Generate only the specified section
+      const result = await (agent as any).generateSections({
+        message,
+        context: {
+          contextPayload,
+          existingPRD,
+          conversationHistory: body?.conversationHistory
+        },
+        settings,
+        targetSections: [sectionName]
+      })
+      
+      res.statusCode = 200
+      res.setHeader('Content-Type', 'application/json')
+      res.end(JSON.stringify({
+        section: sectionName,
+        content: result.sections[sectionName],
+        metadata: result.metadata,
+        validation: result.validation
+      }))
+    } catch (e: any) {
+      console.error(`Section ${sectionName} generation error:`, e)
       res.statusCode = 500
       res.end(JSON.stringify({ error: String(e?.message || e) }))
     }

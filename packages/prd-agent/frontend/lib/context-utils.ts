@@ -53,7 +53,7 @@ function detectTextType(text: unknown): keyof typeof TEXT_TYPE_MULTIPLIERS {
   
   // Simple heuristics to detect text type
   const codePatterns = /^\s*(?:function|class|import|export|const|let|var|if|for|while|\{|\})/m
-  const jsonPattern = /^\s*[{\[].*[}\]]\s*$/s
+  const jsonPattern = /^\s*[{\[][\s\S]*[}\]]\s*$/
   const markdownPattern = /(?:^#{1,6}\s|\*\*|__|\_|\_|\[.*\]\(.*\)|```)/m
   
   try {
