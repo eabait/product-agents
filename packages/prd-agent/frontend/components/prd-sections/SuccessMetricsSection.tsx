@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
 import { Plus, X, Target, RefreshCw } from 'lucide-react';
 import { SuccessMetricsSection as SuccessMetricsSectionType, SuccessMetric } from '@/lib/prd-schema';
+import { getConfidenceBadgeText, getConfidenceBadgeClasses, type ConfidenceValue } from '@/lib/confidence-display';
 
 interface SuccessMetricsSectionProps {
   section?: SuccessMetricsSectionType;
@@ -52,8 +53,8 @@ export function SuccessMetricsSection({
         <Target className="h-5 w-5" />
         <h3 className="text-lg font-semibold">Success Metrics</h3>
         {confidence !== undefined && (
-          <span className="text-xs bg-muted px-2 py-1 rounded-full">
-            {Math.round(confidence * 100)}% confidence
+          <span className={getConfidenceBadgeClasses(confidence as ConfidenceValue)}>
+            {getConfidenceBadgeText(confidence as ConfidenceValue)}
           </span>
         )}
       </div>

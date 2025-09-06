@@ -2,6 +2,12 @@ import { z } from 'zod'
 import { BaseAnalyzer, AnalyzerResult, AnalyzerInput } from './base-analyzer'
 import { createContentSummarizerPrompt, type SummaryOptions } from '../prompts'
 import { ensureArrayFields } from '../utils/post-process-structured-response'
+import { 
+  assessConfidence, 
+  assessInputCompleteness, 
+  assessContextRichness, 
+  assessContentSpecificity 
+} from '../utils/confidence-assessment'
 
 const SummarySchema = z.object({
   executive_summary: z.string(),
@@ -73,10 +79,20 @@ export class ContentSummarizer extends BaseAnalyzer {
     if (summary.key_points.length >= 3) confidence += 0.05 // Sufficient key points
     if (summary.themes.length > 0) confidence += 0.05 // Themes identified
 
+    // Assess confidence based on actual factors
+    const confidenceAssessment = assessConfidence({
+      inputCompleteness: assessInputCompleteness(input.message, input.context?.contextPayload),
+      contextRichness: assessContextRichness(input.context?.contextPayload),
+      contentSpecificity: assessContentSpecificity(summary),
+      validationSuccess: true,
+      hasErrors: false,
+      contentLength: JSON.stringify(summary).length
+    })
+
     return {
       name: 'contentSummary',
       data: summary as SummaryResult,
-      confidence: Math.min(confidence, 1.0),
+      confidence: confidenceAssessment,
       metadata: {
         compression_ratio: compressionRatio,
         target_length,

@@ -2,6 +2,12 @@ import { z } from 'zod'
 import { OpenRouterClient } from '@product-agents/openrouter-client'
 import { BaseSectionWriter, SectionWriterInput, SectionWriterResult } from './base-section-writer'
 import { createKeyFeaturesSectionPrompt } from '../prompts'
+import { 
+  assessConfidence, 
+  assessInputCompleteness, 
+  assessContextRichness, 
+  assessContentSpecificity 
+} from '../utils/confidence-assessment'
 
 const KeyFeaturesSectionSchema = z.object({
   keyFeatures: z.array(z.string())
@@ -59,14 +65,20 @@ export class KeyFeaturesSectionWriter extends BaseSectionWriter {
 
     const validation = this.validateKeyFeaturesSection(rawSection)
     
-    let confidence = 0.85
-    if (contextAnalysis.confidence) confidence *= contextAnalysis.confidence
-    if (!validation.isValid) confidence *= 0.7
+    // Assess confidence based on actual factors
+    const confidenceAssessment = assessConfidence({
+      inputCompleteness: assessInputCompleteness(input.message, input.context?.contextPayload),
+      contextRichness: assessContextRichness(input.context?.contextPayload),
+      contentSpecificity: assessContentSpecificity(rawSection),
+      validationSuccess: validation.isValid,
+      hasErrors: false,
+      contentLength: JSON.stringify(rawSection).length
+    })
 
     return {
       name: this.getSectionName(),
       content: rawSection as KeyFeaturesSection,
-      confidence,
+      confidence: confidenceAssessment,
       metadata: {
         key_features_count: rawSection.keyFeatures.length,
         validation_issues: validation.issues,

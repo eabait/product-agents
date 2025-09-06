@@ -165,7 +165,7 @@ const server = http.createServer(async (req, res) => {
       if (!result.validation.is_valid && result.validation.issues.includes('Clarification needed')) {
         res.end(JSON.stringify({
           needsClarification: true,
-          confidence: result.metadata.total_confidence * 100,
+          confidence: result.metadata.overall_confidence,
           questions: result.validation.warnings
         }))
       } else {
@@ -186,7 +186,8 @@ const server = http.createServer(async (req, res) => {
             lastUpdated: new Date().toISOString(),
             generatedBy: 'PRD Orchestrator Agent',
             sections_generated: result.metadata.sections_updated,
-            confidence_scores: result.metadata.confidence_scores
+            confidence_assessments: result.metadata.confidence_assessments,
+            overall_confidence: result.metadata.overall_confidence
           }
         }
         

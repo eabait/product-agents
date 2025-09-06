@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
 import { Plus, X, Users, RefreshCw } from 'lucide-react';
 import { TargetUsersSection as TargetUsersSectionType } from '@/lib/prd-schema';
+import { getConfidenceBadgeText, getConfidenceBadgeClasses, type ConfidenceValue } from '@/lib/confidence-display';
 
 interface TargetUsersSectionProps {
   section?: TargetUsersSectionType;
@@ -51,8 +52,8 @@ export function TargetUsersSection({
         <Users className="h-5 w-5" />
         <h3 className="text-lg font-semibold">Target Users</h3>
         {confidence !== undefined && (
-          <span className="text-xs bg-muted px-2 py-1 rounded-full">
-            {Math.round(confidence * 100)}% confidence
+          <span className={getConfidenceBadgeClasses(confidence as ConfidenceValue)}>
+            {getConfidenceBadgeText(confidence as ConfidenceValue)}
           </span>
         )}
       </div>

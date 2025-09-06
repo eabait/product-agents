@@ -108,10 +108,16 @@ export class ContextSectionWriter extends BaseSectionWriter {
     if (contextResult.confidence) confidence *= contextResult.confidence
     if (!validation.isValid) confidence *= 0.7
 
+    const confidenceAssessment = {
+      level: 'medium' as const,
+      reasons: ['Legacy section writer using default confidence'],
+      factors: {}
+    }
+
     return {
       name: this.getSectionName(),
       content: contextSection as ContextSection,
-      confidence,
+      confidence: confidenceAssessment,
       metadata: {
         themes_analyzed: contextResult.data.themes?.length || 0,
         constraints_identified: contextSection.constraints.length,

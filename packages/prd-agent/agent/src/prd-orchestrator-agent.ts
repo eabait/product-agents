@@ -4,8 +4,10 @@ import {
   PRD, 
   ClarificationResult, 
   SectionRoutingRequest, 
-  SectionRoutingResponse 
+  SectionRoutingResponse,
+  ConfidenceAssessment 
 } from './schemas'
+import { combineConfidenceAssessments } from './utils/confidence-assessment'
 import { 
   ClarificationAnalyzer,
   ContextAnalyzer
@@ -85,8 +87,12 @@ export class PRDOrchestratorAgent extends BaseAgent {
         sections: {},
         metadata: {
           sections_updated: [],
-          confidence_scores: {},
-          total_confidence: clarificationResult.confidence || 0,
+          confidence_assessments: {},
+          overall_confidence: clarificationResult.confidence || {
+            level: 'low',
+            reasons: ['Clarification required before proceeding'],
+            factors: {}
+          },
           processing_time_ms: Date.now() - startTime,
           should_regenerate_prd: false
         },
@@ -161,7 +167,7 @@ export class PRDOrchestratorAgent extends BaseAgent {
           sectionName,
           result,
           content: result.content,
-          confidence: result.confidence,
+          confidenceAssessment: result.confidence,
           validationIssues: result.metadata?.validation_issues || []
         }
 
@@ -178,13 +184,15 @@ export class PRDOrchestratorAgent extends BaseAgent {
     const sectionOutcomes = await Promise.all(sectionPromises)
     
     // Process results and collect issues
+    const confidenceAssessments = new Map<string, ConfidenceAssessment>()
+    
     for (const outcome of sectionOutcomes) {
       if (outcome.error) {
         allIssues.push(outcome.error)
       } else {
         sectionResults.set(outcome.sectionName, outcome.content)
-        if (outcome.confidence) {
-          confidenceScores.set(outcome.sectionName, outcome.confidence)
+        if (outcome.confidenceAssessment) {
+          confidenceAssessments.set(outcome.sectionName, outcome.confidenceAssessment)
         }
         if (outcome.validationIssues && outcome.validationIssues.length > 0) {
           allIssues.push(...outcome.validationIssues)
@@ -192,17 +200,21 @@ export class PRDOrchestratorAgent extends BaseAgent {
       }
     }
 
-    // Calculate overall confidence
-    const totalConfidence = confidenceScores.size > 0 
-      ? Array.from(confidenceScores.values()).reduce((sum, score) => sum + score, 0) / confidenceScores.size
-      : 0
+    // Calculate overall confidence from assessments
+    const overallConfidence = confidenceAssessments.size > 0 
+      ? combineConfidenceAssessments(Object.fromEntries(confidenceAssessments))
+      : {
+          level: 'medium' as const,
+          reasons: ['No confidence assessments available'],
+          factors: {}
+        }
 
     return {
       sections: Object.fromEntries(sectionResults),
       metadata: {
         sections_updated: Array.from(sectionResults.keys()),
-        confidence_scores: Object.fromEntries(confidenceScores),
-        total_confidence: totalConfidence,
+        confidence_assessments: Object.fromEntries(confidenceAssessments),
+        overall_confidence: overallConfidence,
         processing_time_ms: Date.now() - startTime,
         should_regenerate_prd: sectionsToProcess.length > 0
       },
@@ -241,7 +253,7 @@ export class PRDOrchestratorAgent extends BaseAgent {
     if (!sectionResponse.validation.is_valid && sectionResponse.validation.issues.includes('Clarification needed')) {
       return {
         needsClarification: true,
-        confidence: sectionResponse.metadata.total_confidence * 100,
+        confidence: sectionResponse.metadata.overall_confidence,
         missingCritical: sectionResponse.validation.issues,
         questions: sectionResponse.validation.warnings
       } as ClarificationResult
@@ -267,8 +279,8 @@ export class PRDOrchestratorAgent extends BaseAgent {
         lastUpdated: new Date().toISOString(),
         generatedBy: 'PRD Orchestrator Agent',
         sections_generated: sectionResponse.metadata.sections_updated,
-        confidence_scores: sectionResponse.metadata.confidence_scores,
-        total_confidence: sectionResponse.metadata.total_confidence,
+        confidence_assessments: sectionResponse.metadata.confidence_assessments,
+        overall_confidence: sectionResponse.metadata.overall_confidence,
         processing_time_ms: sectionResponse.metadata.processing_time_ms
       },
 

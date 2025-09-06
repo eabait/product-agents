@@ -2,6 +2,12 @@ import { z } from 'zod'
 import { BaseAnalyzer, AnalyzerResult, AnalyzerInput } from './base-analyzer'
 import { createRiskAnalysisPrompt } from '../prompts'
 import { ensureArrayFields } from '../utils'
+import { 
+  assessConfidence, 
+  assessInputCompleteness, 
+  assessContextRichness, 
+  assessContentSpecificity 
+} from '../utils/confidence-assessment'
 
 const RiskAnalysisSchema = z.object({
   technical_risks: z.union([
@@ -123,10 +129,20 @@ export class RiskIdentifier extends BaseAnalyzer {
     if (riskAnalysis.dependencies.length > 0) confidence += 0.1
     if (criticalIssues === 0) confidence += 0.1
 
+    // Assess confidence based on actual factors
+    const confidenceAssessment = assessConfidence({
+      inputCompleteness: assessInputCompleteness(input.message, input.context?.contextPayload),
+      contextRichness: assessContextRichness(input.context?.contextPayload),
+      contentSpecificity: assessContentSpecificity(riskAnalysis),
+      validationSuccess: true,
+      hasErrors: false,
+      contentLength: JSON.stringify(riskAnalysis).length
+    })
+
     return {
       name: 'riskAnalysis',
       data: riskAnalysis as RiskAnalysisResult,
-      confidence: Math.min(confidence, 1.0),
+      confidence: confidenceAssessment,
       metadata: {
         total_risks: totalRisks,
         critical_gaps: riskAnalysis.gaps.filter(g => g.severity === 'high').length,

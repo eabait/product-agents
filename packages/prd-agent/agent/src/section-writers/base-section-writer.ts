@@ -8,11 +8,12 @@ import {
   RiskIdentifier,
   ContentSummarizer
 } from '../analyzers'
+import { ConfidenceAssessment } from '../schemas'
 
 export interface SectionWriterResult<T = any> {
   name: string
   content: T
-  confidence?: number
+  confidence?: ConfidenceAssessment
   metadata?: Record<string, any>
   shouldRegenerate?: boolean
 }

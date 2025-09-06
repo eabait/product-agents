@@ -1,11 +1,12 @@
 import { z } from 'zod'
 import { OpenRouterClient } from '@product-agents/openrouter-client'
 import { AgentSettings } from '@product-agents/agent-core'
+import { ConfidenceAssessment } from '../schemas'
 
 export interface AnalyzerResult<T = any> {
   name: string
   data: T
-  confidence?: number
+  confidence?: ConfidenceAssessment
   metadata?: Record<string, any>
 }
 

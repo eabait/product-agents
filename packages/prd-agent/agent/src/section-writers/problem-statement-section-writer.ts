@@ -118,7 +118,11 @@ export class ProblemStatementSectionWriter extends BaseSectionWriter {
     return {
       name: this.getSectionName(),
       content: problemStatementSection as ProblemStatementSection,
-      confidence,
+      confidence: {
+        level: 'medium' as const,
+        reasons: ['Legacy section writer using default confidence'],
+        factors: {}
+      },
       metadata: {
         target_users_count: problemStatementSection.targetUsers.length,
         root_causes_count: problemStatementSection.rootCauses.length,

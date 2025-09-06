@@ -13,6 +13,23 @@ import {
   ConstraintsSection
 } from './section-writers'
 
+// Categorical confidence levels
+export const ConfidenceLevelSchema = z.enum(['high', 'medium', 'low'])
+export type ConfidenceLevel = z.infer<typeof ConfidenceLevelSchema>
+
+// Confidence assessment with reasoning
+export const ConfidenceAssessmentSchema = z.object({
+  level: ConfidenceLevelSchema,
+  reasons: z.array(z.string()),
+  factors: z.object({
+    inputCompleteness: ConfidenceLevelSchema.optional(),
+    contextRichness: ConfidenceLevelSchema.optional(),
+    validationSuccess: z.boolean().optional(),
+    contentSpecificity: ConfidenceLevelSchema.optional()
+  }).optional()
+})
+export type ConfidenceAssessment = z.infer<typeof ConfidenceAssessmentSchema>
+
 // Modern PRD Schema focused on section-based structure
 export const PRDSchema = z.object({
   // Core sections (simplified 5-section structure)
@@ -30,8 +47,8 @@ export const PRDSchema = z.object({
     lastUpdated: z.string(),
     generatedBy: z.string().default('PRD Orchestrator Agent'),
     sections_generated: z.array(z.string()),
-    confidence_scores: z.record(z.number()).optional(),
-    total_confidence: z.number().optional(),
+    confidence_assessments: z.record(ConfidenceAssessmentSchema).optional(),
+    overall_confidence: ConfidenceAssessmentSchema.optional(),
     processing_time_ms: z.number().optional()
   }),
 
@@ -99,8 +116,8 @@ export const SectionRoutingResponseSchema = z.object({
   sections: z.record(z.any()), // Map of section name to section content
   metadata: z.object({
     sections_updated: z.array(z.string()),
-    confidence_scores: z.record(z.number()),
-    total_confidence: z.number(),
+    confidence_assessments: z.record(ConfidenceAssessmentSchema),
+    overall_confidence: ConfidenceAssessmentSchema,
     processing_time_ms: z.number(),
     should_regenerate_prd: z.boolean()
   }),
@@ -116,7 +133,7 @@ export type SectionRoutingResponse = z.infer<typeof SectionRoutingResponseSchema
 // Clarification schemas - for internal analyzer use
 export const ClarificationResultSchema = z.object({
   needsClarification: z.boolean(),
-  confidence: z.number().min(0).max(100),
+  confidence: ConfidenceAssessmentSchema,
   missingCritical: z.array(z.string()),
   questions: z.array(z.string())
 })

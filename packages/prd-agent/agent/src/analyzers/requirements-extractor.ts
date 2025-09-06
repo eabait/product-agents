@@ -1,6 +1,12 @@
 import { z } from 'zod'
 import { BaseAnalyzer, AnalyzerResult, AnalyzerInput } from './base-analyzer'
 import { createRequirementsExtractionPrompt } from '../prompts'
+import { 
+  assessConfidence, 
+  assessInputCompleteness, 
+  assessContextRichness, 
+  assessContentSpecificity 
+} from '../utils/confidence-assessment'
 import { ensureArrayFields } from '../utils/post-process-structured-response'
 
 const RequirementsExtractionSchema = z.object({
@@ -36,10 +42,20 @@ export class RequirementsExtractor extends BaseAnalyzer {
       nonFunctional: processedRequirements.nonFunctional || []
     }
 
+    // Assess confidence based on actual factors
+    const confidenceAssessment = assessConfidence({
+      inputCompleteness: assessInputCompleteness(input.message, input.context?.contextPayload),
+      contextRichness: assessContextRichness(input.context?.contextPayload),
+      contentSpecificity: assessContentSpecificity(validatedRequirements),
+      validationSuccess: true,
+      hasErrors: false,
+      contentLength: JSON.stringify(validatedRequirements).length
+    })
+
     return {
       name: 'requirementsExtraction',
       data: validatedRequirements,
-      confidence: 0.8,
+      confidence: confidenceAssessment,
       metadata: {
         functional_count: validatedRequirements.functional.length,
         non_functional_count: validatedRequirements.nonFunctional.length

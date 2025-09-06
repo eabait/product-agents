@@ -2,6 +2,12 @@ import { z } from 'zod'
 import { BaseAnalyzer, AnalyzerResult, AnalyzerInput } from './base-analyzer'
 import { createContextAnalysisPrompt } from '../prompts'
 import { ensureArrayFields } from '../utils/post-process-structured-response'
+import { 
+  assessConfidence, 
+  assessInputCompleteness, 
+  assessContextRichness, 
+  assessContentSpecificity 
+} from '../utils/confidence-assessment'
 
 const ContextAnalysisSchema = z.object({
   themes: z.array(z.string()).optional(),
@@ -94,10 +100,20 @@ export class ContextAnalyzer extends BaseAnalyzer {
       constraints: processedAnalysis.constraints || []
     }
 
+    // Assess confidence based on actual analysis results
+    const confidenceAssessment = assessConfidence({
+      inputCompleteness: assessInputCompleteness(input.message, input.context?.contextPayload),
+      contextRichness: assessContextRichness(input.context?.contextPayload),
+      contentSpecificity: assessContentSpecificity(normalized),
+      validationSuccess: true, // Context analysis doesn't typically fail validation
+      hasErrors: false,
+      contentLength: JSON.stringify(normalized).length
+    })
+
     return {
       name: 'contextAnalysis',
       data: normalized,
-      confidence: 0.85,
+      confidence: confidenceAssessment,
       metadata: {
         themes_count: normalized.themes.length,
         functional_requirements_count: normalized.requirements.functional.length,

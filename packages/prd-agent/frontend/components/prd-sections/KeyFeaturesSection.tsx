@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
 import { Plus, X, Zap, RefreshCw } from 'lucide-react';
 import { KeyFeaturesSection as KeyFeaturesSectionType } from '@/lib/prd-schema';
+import { getConfidenceBadgeText, getConfidenceBadgeClasses, type ConfidenceValue } from '@/lib/confidence-display';
 
 interface KeyFeaturesSectionProps {
   section?: KeyFeaturesSectionType;
@@ -51,8 +52,8 @@ export function KeyFeaturesSection({
         <Zap className="h-5 w-5" />
         <h3 className="text-lg font-semibold">Key Features</h3>
         {confidence !== undefined && (
-          <span className="text-xs bg-muted px-2 py-1 rounded-full">
-            {Math.round(confidence * 100)}% confidence
+          <span className={getConfidenceBadgeClasses(confidence as ConfidenceValue)}>
+            {getConfidenceBadgeText(confidence as ConfidenceValue)}
           </span>
         )}
       </div>

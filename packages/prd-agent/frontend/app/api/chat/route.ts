@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { formatConfidence, type ConfidenceValue } from '@/lib/confidence-display';
 
 const PRD_AGENT_URL = process.env.PRD_AGENT_URL;
 
@@ -182,7 +183,11 @@ export async function POST(request: NextRequest) {
       ).join('\n\n');
       
       const confidenceNote = data.confidence !== undefined ? 
-        `\n\n*Confidence: ${data.confidence}% - focusing on critical gaps only*` : '';
+        (() => {
+          const formatted = formatConfidence(data.confidence as ConfidenceValue);
+          const reasonText = formatted.reasons ? ` - ${formatted.reasons[0]}` : '';
+          return `\n\n*${formatted.displayText}${reasonText}*`;
+        })() : '';
       
       const content = `I need more information to create a comprehensive PRD. Please help me understand:\n\n${questionsText}${confidenceNote}\n\nPlease provide as much detail as possible for each area.`;
       

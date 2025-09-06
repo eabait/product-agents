@@ -92,7 +92,11 @@ export class AssumptionsSectionWriter extends BaseSectionWriter {
     return {
       name: this.getSectionName(),
       content: assumptionsSection as AssumptionsSection,
-      confidence,
+      confidence: {
+        level: 'medium' as const,
+        reasons: ['Legacy section writer using default confidence'],
+        factors: {}
+      },
       metadata: {
         assumptions_count: assumptionsSection.assumptions.length,
         validation_issues: validation.issues,

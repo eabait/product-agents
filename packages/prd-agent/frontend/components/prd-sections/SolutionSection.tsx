@@ -3,6 +3,7 @@
 import { useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { getConfidenceBadgeText, getConfidenceBadgeClasses, type ConfidenceValue } from '@/lib/confidence-display';
 import { Card } from '@/components/ui/card';
 import { Lightbulb, RefreshCw } from 'lucide-react';
 import { SolutionSection as SolutionSectionType } from '@/lib/prd-schema';
@@ -48,8 +49,8 @@ export function SolutionSection({
         <Lightbulb className="h-5 w-5" />
         <h3 className="text-lg font-semibold">Solution Overview</h3>
         {confidence !== undefined && (
-          <span className="text-xs bg-muted px-2 py-1 rounded-full">
-            {Math.round(confidence * 100)}% confidence
+          <span className={getConfidenceBadgeClasses(confidence as ConfidenceValue)}>
+            {getConfidenceBadgeText(confidence as ConfidenceValue)}
           </span>
         )}
       </div>

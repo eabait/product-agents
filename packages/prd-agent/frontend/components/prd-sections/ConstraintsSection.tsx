@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
 import { Plus, X, ShieldAlert, RefreshCw } from 'lucide-react';
 import { ConstraintsSection as ConstraintsSectionType } from '@/lib/prd-schema';
+import { getConfidenceBadgeText, getConfidenceBadgeClasses, type ConfidenceValue } from '@/lib/confidence-display';
 
 interface ConstraintsSectionProps {
   section?: ConstraintsSectionType;
@@ -70,8 +71,8 @@ export function ConstraintsSection({
         <ShieldAlert className="h-5 w-5" />
         <h3 className="text-lg font-semibold">Constraints & Assumptions</h3>
         {confidence !== undefined && (
-          <span className="text-xs bg-muted px-2 py-1 rounded-full">
-            {Math.round(confidence * 100)}% confidence
+          <span className={getConfidenceBadgeClasses(confidence as ConfidenceValue)}>
+            {getConfidenceBadgeText(confidence as ConfidenceValue)}
           </span>
         )}
       </div>

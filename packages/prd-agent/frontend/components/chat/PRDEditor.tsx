@@ -6,6 +6,7 @@ import { Card } from '@/components/ui/card';
 import { Copy, Download, Check, Clock, Zap, AlertCircle } from 'lucide-react';
 import { convertPRDToText, convertPRDToMarkdown, downloadMarkdown, copyToClipboard } from '@/lib/prd-export-utils';
 import { NewPRD, FlattenedPRD, isNewPRD, isFlattenedPRD, convertToNewPRD } from '@/lib/prd-schema';
+import { formatOverallConfidence, type ConfidenceValue } from '@/lib/confidence-display';
 
 // Import new section components
 import { 
@@ -168,9 +169,16 @@ export function PRDEditor({
   const renderMetadata = () => {
     if (!normalizedPRD.metadata || readOnly) return null;
 
-    const { confidence_scores, processing_time_ms, total_confidence, sections_generated } = normalizedPRD.metadata;
+    const { 
+      confidence_scores, 
+      confidence_assessments,
+      overall_confidence,
+      processing_time_ms, 
+      total_confidence, // Keep for backwards compatibility
+      sections_generated 
+    } = normalizedPRD.metadata;
     
-    if (!confidence_scores && !processing_time_ms && !total_confidence) return null;
+    if (!confidence_scores && !confidence_assessments && !processing_time_ms && !total_confidence && !overall_confidence) return null;
 
     return (
       <Card className="p-4 mb-6 bg-gradient-to-r from-blue-50 to-purple-50 border-blue-200">
@@ -180,12 +188,26 @@ export function PRDEditor({
         </div>
         
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-          {total_confidence && (
+          {(total_confidence || overall_confidence || confidence_assessments) && (
             <div className="flex items-center gap-2">
-              <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-              <span className="text-gray-700">
-                Overall Confidence: <strong>{Math.round(total_confidence * 100)}%</strong>
-              </span>
+              {(() => {
+                const overallConfidence = formatOverallConfidence(
+                  confidence_assessments as Record<string, ConfidenceValue> | undefined,
+                  (overall_confidence || total_confidence) as ConfidenceValue | undefined
+                );
+                return (
+                  <>
+                    <div className={`w-2 h-2 rounded-full ${
+                      overallConfidence.level === 'high' ? 'bg-green-500' :
+                      overallConfidence.level === 'medium' ? 'bg-yellow-500' : 'bg-red-500'
+                    }`}></div>
+                    <span className="text-gray-700">
+                      <strong>{overallConfidence.displayText}</strong>
+                      <div className="text-xs text-gray-500 mt-1">{overallConfidence.summary}</div>
+                    </span>
+                  </>
+                );
+              })()}
             </div>
           )}
           

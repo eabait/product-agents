@@ -167,10 +167,16 @@ export class MetricsSectionWriter extends BaseSectionWriter {
     if (contextResult?.confidence) confidence *= contextResult.confidence
     if (!validation.isValid) confidence *= 0.6
 
+    const confidenceAssessment = {
+      level: 'medium' as const,
+      reasons: ['Legacy section writer using default confidence'],
+      factors: {}
+    }
+
     return {
       name: this.getSectionName(),
       content: metricsSection as MetricsSection,
-      confidence,
+      confidence: confidenceAssessment,
       metadata: {
         success_metrics_count: metricsSection.successMetrics.length,
         kpis_count: metricsSection.kpis.length,

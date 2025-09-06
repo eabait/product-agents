@@ -1,5 +1,19 @@
 import { z } from 'zod';
 
+// Confidence Assessment Schema
+export const ConfidenceAssessmentSchema = z.object({
+  level: z.enum(['high', 'medium', 'low']),
+  reasons: z.array(z.string()),
+  factors: z.object({
+    inputCompleteness: z.enum(['high', 'medium', 'low']).optional(),
+    contextRichness: z.enum(['high', 'medium', 'low']).optional(),
+    validationSuccess: z.boolean().optional(),
+    contentSpecificity: z.enum(['high', 'medium', 'low']).optional()
+  }).optional()
+});
+
+export type ConfidenceAssessment = z.infer<typeof ConfidenceAssessmentSchema>;
+
 // Individual Section Schemas
 export const TargetUsersSectionSchema = z.object({
   targetUsers: z.array(z.string()).describe('List of specific target user personas')
@@ -44,9 +58,13 @@ export const PRDMetadataSchema = z.object({
   lastUpdated: z.string(),
   generatedBy: z.string().default('PRD Orchestrator Agent'),
   sections_generated: z.array(z.string()),
+  // Legacy confidence fields (for backwards compatibility)
   confidence_scores: z.record(z.number()).optional(),
-  processing_time_ms: z.number().optional(),
-  total_confidence: z.number().optional()
+  total_confidence: z.number().optional(),
+  // New confidence fields
+  confidence_assessments: z.record(ConfidenceAssessmentSchema).optional(),
+  overall_confidence: ConfidenceAssessmentSchema.optional(),
+  processing_time_ms: z.number().optional()
 });
 
 // Complete New PRD Schema
