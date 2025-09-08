@@ -8,11 +8,13 @@
 import { PRDOrchestratorAgent } from '../prd-orchestrator-agent'
 import { MockOpenRouterClient } from './mock-openrouter-client'
 
+// Create a shared mock client instance
+let globalMockClient: MockOpenRouterClient
+
 // Mock the OpenRouterClient to avoid real API calls
 jest.mock('@product-agents/openrouter-client', () => {
-  const { MockOpenRouterClient } = jest.requireActual('./mock-openrouter-client')
   return {
-    OpenRouterClient: MockOpenRouterClient
+    OpenRouterClient: jest.fn().mockImplementation(() => globalMockClient)
   }
 })
 
@@ -21,6 +23,13 @@ describe('PRD Generation and Editing Functionality', () => {
   let mockClient: MockOpenRouterClient
 
   beforeEach(() => {
+    // Create the mock client instance that will be used by the mocked constructor
+    mockClient = new MockOpenRouterClient('test-key')
+    globalMockClient = mockClient
+    
+    // Setup mock responses for all required components
+    setupMockResponses(mockClient)
+    
     // Create a new agent instance for each test
     const settings = {
       model: 'anthropic/claude-3-5-sonnet',
@@ -30,12 +39,6 @@ describe('PRD Generation and Editing Functionality', () => {
     }
     
     agent = new PRDOrchestratorAgent(settings)
-    
-    // Get the mock client instance to set up responses
-    mockClient = new MockOpenRouterClient('test-key')
-    
-    // Setup mock responses for all required components
-    setupMockResponses(mockClient)
   })
 
   afterEach(() => {
@@ -292,6 +295,14 @@ describe('PRD Generation and Editing Functionality', () => {
 
 // Helper function to set up comprehensive mock responses
 function setupMockResponses(mockClient: MockOpenRouterClient) {
+  // Clarification Analysis
+  mockClient.setMockResponse('clarification', {
+    needsClarification: false,
+    confidence: 85,
+    missingCritical: [],
+    questions: []
+  })
+
   // Context Analysis
   mockClient.setMockResponse('contextAnalysis', {
     themes: ['Mobile Applications', 'Student Productivity', 'Note-Taking', 'Digital Organization'],

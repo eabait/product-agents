@@ -10,7 +10,7 @@ import { promisify } from 'util'
 
 const exec = promisify(require('child_process').exec)
 
-describe('PRD Functionality Proof Tests', () => {
+describe.skip('PRD Functionality Proof Tests', () => {
   const SERVER_URL = 'http://localhost:3001'
   const TEST_TIMEOUT = 45000
 

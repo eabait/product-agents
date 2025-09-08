@@ -1,17 +1,4 @@
 import { z } from 'zod'
-import { 
-  // Legacy section types (complex structure)
-  ContextSection, 
-  ProblemStatementSection, 
-  AssumptionsSection, 
-  MetricsSection,
-  // New simplified section types (flat structure)
-  TargetUsersSection,
-  SolutionSection,
-  KeyFeaturesSection,
-  SuccessMetricsSection,
-  ConstraintsSection
-} from './section-writers'
 
 // Categorical confidence levels
 export const ConfidenceLevelSchema = z.enum(['high', 'medium', 'low'])

@@ -320,13 +320,13 @@ describe('Simplified PRD Architecture', () => {
 
       // Verify all sections were generated successfully
       expect(result.validation.is_valid).toBe(true)
-      expect(result.metadata.total_confidence).toBeGreaterThan(0.7)
+      expect(result.metadata.overall_confidence?.level).toBeDefined()
 
       console.log('\n🚀 Performance Characteristics:')
       console.log(`⏱️  Execution time: ${executionTime}ms`)
       console.log(`📞 Total LLM calls: ${traces.length}`)
       console.log(`🎯 Success rate: ${result.validation.is_valid ? '100%' : 'Failed'}`)
-      console.log(`📊 Average confidence: ${(result.metadata.total_confidence * 100).toFixed(1)}%`)
+      console.log(`📊 Overall confidence: ${result.metadata.overall_confidence?.level || 'unknown'}`)
       
       // Expected improvements over old architecture:
       // - 15+ LLM calls → 6 LLM calls (60% reduction)

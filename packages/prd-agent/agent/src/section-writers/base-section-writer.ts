@@ -3,10 +3,7 @@ import {
   BaseAnalyzer, 
   AnalyzerInput,
   ContextAnalyzer,
-  RequirementsExtractor,
-  ClarificationAnalyzer,
-  RiskIdentifier,
-  ContentSummarizer
+  ClarificationAnalyzer
 } from '../analyzers'
 import { ConfidenceAssessment } from '../schemas'
 
@@ -35,10 +32,7 @@ export abstract class BaseSectionWriter {
   
   // Fallback analyzers (only used when shared analysis results are not available)
   protected contextAnalyzer?: ContextAnalyzer
-  protected requirementsExtractor?: RequirementsExtractor
   protected clarificationAnalyzer?: ClarificationAnalyzer
-  protected riskIdentifier?: RiskIdentifier
-  protected contentSummarizer?: ContentSummarizer
 
   constructor(settings: AgentSettings) {
     this.settings = settings
@@ -113,17 +107,8 @@ export abstract class BaseSectionWriter {
     if (!this.contextAnalyzer) {
       this.contextAnalyzer = new ContextAnalyzer(this.settings)
     }
-    if (!this.requirementsExtractor) {
-      this.requirementsExtractor = new RequirementsExtractor(this.settings)
-    }
     if (!this.clarificationAnalyzer) {
       this.clarificationAnalyzer = new ClarificationAnalyzer(this.settings)
-    }
-    if (!this.riskIdentifier) {
-      this.riskIdentifier = new RiskIdentifier(this.settings)
-    }
-    if (!this.contentSummarizer) {
-      this.contentSummarizer = new ContentSummarizer(this.settings)
     }
   }
 

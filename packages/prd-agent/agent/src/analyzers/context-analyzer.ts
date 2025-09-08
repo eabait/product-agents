@@ -1,7 +1,6 @@
 import { z } from 'zod'
 import { BaseAnalyzer, AnalyzerResult, AnalyzerInput } from './base-analyzer'
 import { createContextAnalysisPrompt } from '../prompts'
-import { ensureArrayFields } from '../utils/post-process-structured-response'
 import { 
   assessConfidence, 
   assessInputCompleteness, 
