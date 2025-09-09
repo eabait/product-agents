@@ -8,6 +8,12 @@ import {
   assessContextRichness, 
   assessContentSpecificity 
 } from '../utils/confidence-assessment'
+import {
+  DEFAULT_TEMPERATURE,
+  MIN_KEY_FEATURES,
+  MAX_KEY_FEATURES,
+  MIN_FEATURE_DESCRIPTION_LENGTH
+} from '../constants'
 
 const KeyFeaturesSectionSchema = z.object({
   keyFeatures: z.array(z.string())
@@ -60,7 +66,7 @@ export class KeyFeaturesSectionWriter extends BaseSectionWriter {
       model: this.settings.model,
       schema: KeyFeaturesSectionSchema,
       prompt,
-      temperature: 0.3
+      temperature: DEFAULT_TEMPERATURE
     })
 
     const validation = this.validateKeyFeaturesSection(rawSection)
@@ -99,17 +105,17 @@ export class KeyFeaturesSectionWriter extends BaseSectionWriter {
       issues.push('No key features defined')
     }
 
-    if (section.keyFeatures.length < 3) {
-      issues.push('Too few key features (should have 3-7 core features)')
+    if (section.keyFeatures.length < MIN_KEY_FEATURES) {
+      issues.push(`Too few key features (should have ${MIN_KEY_FEATURES}-${MAX_KEY_FEATURES} core features)`)
     }
 
-    if (section.keyFeatures.length > 8) {
-      issues.push('Too many key features (should focus on 3-7 core features)')
+    if (section.keyFeatures.length > MAX_KEY_FEATURES) {
+      issues.push(`Too many key features (should focus on ${MIN_KEY_FEATURES}-${MAX_KEY_FEATURES} core features)`)
     }
 
-    const shortFeatures = section.keyFeatures.filter(feature => feature.length < 15)
+    const shortFeatures = section.keyFeatures.filter(feature => feature.length < MIN_FEATURE_DESCRIPTION_LENGTH)
     if (shortFeatures.length > 0) {
-      issues.push('Some key features are too vague (should describe what the feature does)')
+      issues.push(`Some key features are too vague (should be at least ${MIN_FEATURE_DESCRIPTION_LENGTH} characters)`)
     }
 
     const duplicateFeatures = section.keyFeatures.filter((feature, index, array) => 

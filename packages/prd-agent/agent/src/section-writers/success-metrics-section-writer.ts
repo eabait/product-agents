@@ -8,6 +8,10 @@ import {
   assessContextRichness, 
   assessContentSpecificity 
 } from '../utils/confidence-assessment'
+import {
+  MIN_SUCCESS_METRICS,
+  MAX_SUCCESS_METRICS
+} from '../constants'
 
 const SuccessMetricsSectionSchema = z.object({
   successMetrics: z.array(z.object({
@@ -107,12 +111,12 @@ export class SuccessMetricsSectionWriter extends BaseSectionWriter {
       issues.push('No success metrics defined')
     }
 
-    if (section.successMetrics.length < 2) {
-      issues.push('Too few success metrics (should have 2-4 key metrics)')
+    if (section.successMetrics.length < MIN_SUCCESS_METRICS) {
+      issues.push(`Too few success metrics (should have ${MIN_SUCCESS_METRICS}-${MAX_SUCCESS_METRICS} key metrics)`)
     }
 
-    if (section.successMetrics.length > 5) {
-      issues.push('Too many success metrics (should focus on 2-4 key metrics)')
+    if (section.successMetrics.length > MAX_SUCCESS_METRICS) {
+      issues.push(`Too many success metrics (should focus on ${MIN_SUCCESS_METRICS}-${MAX_SUCCESS_METRICS} key metrics)`)
     }
 
     // Check for vague targets

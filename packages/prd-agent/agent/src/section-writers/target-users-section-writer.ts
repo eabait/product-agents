@@ -8,6 +8,11 @@ import {
   assessContextRichness, 
   assessContentSpecificity 
 } from '../utils/confidence-assessment'
+import {
+  MAX_TARGET_USERS,
+  MIN_USER_DESCRIPTION_LENGTH,
+  DEFAULT_TEMPERATURE
+} from '../constants'
 
 const TargetUsersSectionSchema = z.object({
   targetUsers: z.array(z.string())
@@ -60,7 +65,7 @@ export class TargetUsersSectionWriter extends BaseSectionWriter {
       model: this.settings.model,
       schema: TargetUsersSectionSchema,
       prompt,
-      temperature: 0.3
+      temperature: DEFAULT_TEMPERATURE
     })
 
     const validation = this.validateTargetUsersSection(rawSection)
@@ -99,13 +104,13 @@ export class TargetUsersSectionWriter extends BaseSectionWriter {
       issues.push('No target users defined')
     }
 
-    if (section.targetUsers.length > 5) {
-      issues.push('Too many target users (should be 2-5 for focus)')
+    if (section.targetUsers.length > MAX_TARGET_USERS) {
+      issues.push(`Too many target users (should be 2-${MAX_TARGET_USERS} for focus)`)
     }
 
-    const shortUsers = section.targetUsers.filter(user => user.length < 10)
+    const shortUsers = section.targetUsers.filter(user => user.length < MIN_USER_DESCRIPTION_LENGTH)
     if (shortUsers.length > 0) {
-      issues.push('Some target users are too vague (should be specific personas)')
+      issues.push(`Some target users are too vague (should be at least ${MIN_USER_DESCRIPTION_LENGTH} characters)`)
     }
 
     return {

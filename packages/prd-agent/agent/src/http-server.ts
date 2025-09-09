@@ -3,6 +3,22 @@ import * as http from 'http'
 import * as fs from 'fs'
 import * as path from 'path'
 import { PRDOrchestratorAgent } from './index'
+import {
+  DEFAULT_TEMPERATURE,
+  DEFAULT_MAX_TOKENS,
+  FALLBACK_MAX_TOKENS,
+  CURRENT_PRD_VERSION,
+  ALL_SECTION_NAMES,
+  HTTP_STATUS,
+  ERROR_MESSAGES
+} from './constants'
+import {
+  validateAgentSettings,
+  buildPRDMetadata,
+  createErrorResponse,
+  createSuccessResponse,
+  safeParseJSON
+} from './utilities'
 
 // Simple .env file loader
 try {
@@ -30,38 +46,13 @@ console.log('Default OpenRouter API Key configured:', defaultApiKey ? `${default
 const defaultSettings = {
   apiKey: defaultApiKey,
   model: process.env.PRD_AGENT_MODEL || PRDOrchestratorAgent.defaultModel,
-  temperature: parseFloat(process.env.PRD_AGENT_TEMPERATURE || '0.3'),
-  maxTokens: parseInt(process.env.PRD_AGENT_MAX_TOKENS || '8000')
+  temperature: parseFloat(process.env.PRD_AGENT_TEMPERATURE || DEFAULT_TEMPERATURE.toString()),
+  maxTokens: parseInt(process.env.PRD_AGENT_MAX_TOKENS || DEFAULT_MAX_TOKENS.toString())
 }
 
 // Helper function to create agent with merged settings
 const createAgent = async (requestSettings?: any) => {
-  const effectiveSettings = {
-    ...defaultSettings,
-    ...(requestSettings || {}),
-    // Use request API key if provided, otherwise fall back to environment
-    apiKey: requestSettings?.apiKey || defaultSettings.apiKey
-  }
-  
-  // Validate critical settings
-  if (!effectiveSettings.apiKey) {
-    throw new Error('No API key configured. Please set OPENROUTER_API_KEY environment variable or provide apiKey in settings.')
-  }
-  
-  if (!effectiveSettings.model) {
-    throw new Error('No model specified. Please provide a valid model in settings.')
-  }
-  
-  // Validate numeric settings
-  if (typeof effectiveSettings.temperature !== 'number' || effectiveSettings.temperature < 0 || effectiveSettings.temperature > 2) {
-    console.warn(`Invalid temperature ${effectiveSettings.temperature}, using default 0.3`)
-    effectiveSettings.temperature = 0.3
-  }
-  
-  if (typeof effectiveSettings.maxTokens !== 'number' || effectiveSettings.maxTokens < 1) {
-    console.warn(`Invalid maxTokens ${effectiveSettings.maxTokens}, using default 4000`)
-    effectiveSettings.maxTokens = 4000
-  }
+  const effectiveSettings = validateAgentSettings(requestSettings, defaultSettings)
   
   console.log('Creating orchestrator agent with validated settings:', {
     model: effectiveSettings.model,
@@ -79,11 +70,7 @@ const parseJsonBody = (req: http.IncomingMessage): Promise<any> => {
       body += chunk
     })
     req.on('end', () => {
-      try {
-        resolve(body ? JSON.parse(body) : {})
-      } catch {
-        resolve({})
-      }
+      resolve(safeParseJSON(body, {}))
     })
   })
 }
@@ -102,7 +89,7 @@ const server = http.createServer(async (req, res) => {
   
   // Handle preflight requests
   if (method === 'OPTIONS') {
-    res.statusCode = 200
+    res.statusCode = HTTP_STATUS.OK
     res.end()
     return
   }
@@ -111,7 +98,7 @@ const server = http.createServer(async (req, res) => {
 
   // Health check
   if (method === 'GET' && url === '/health') {
-    res.statusCode = 200
+    res.statusCode = HTTP_STATUS.OK
     res.setHeader('Content-Type', 'application/json')
     res.end(JSON.stringify({ 
       status: 'ok',
@@ -139,8 +126,8 @@ const server = http.createServer(async (req, res) => {
     const existingPRD = body?.existingPRD
     
     if (!message) {
-      res.statusCode = 400
-      res.end(JSON.stringify({ error: 'Missing message' }))
+      res.statusCode = HTTP_STATUS.BAD_REQUEST
+      res.end(JSON.stringify({ error: ERROR_MESSAGES.MISSING_MESSAGE }))
       return
     }
     
@@ -158,7 +145,7 @@ const server = http.createServer(async (req, res) => {
         settings
       })
       
-      res.statusCode = 200
+      res.statusCode = HTTP_STATUS.OK
       res.setHeader('Content-Type', 'application/json')
       
       // Check if clarification is needed
@@ -182,7 +169,7 @@ const server = http.createServer(async (req, res) => {
           // New simplified sections
           sections: result.sections,
           metadata: {
-            version: '2.0',
+            version: CURRENT_PRD_VERSION,
             lastUpdated: new Date().toISOString(),
             generatedBy: 'PRD Orchestrator Agent',
             sections_generated: result.metadata.sections_updated,
@@ -195,7 +182,7 @@ const server = http.createServer(async (req, res) => {
       }
     } catch (e: any) {
       console.error('PRD creation error:', e)
-      res.statusCode = 500
+      res.statusCode = HTTP_STATUS.INTERNAL_SERVER_ERROR
       res.end(JSON.stringify({ error: String(e?.message || e) }))
     }
     return
@@ -210,8 +197,8 @@ const server = http.createServer(async (req, res) => {
     const contextPayload = body?.contextPayload
     
     if (!message || !existingPRD) {
-      res.statusCode = 400
-      res.end(JSON.stringify({ error: 'Missing message or existingPRD' }))
+      res.statusCode = HTTP_STATUS.BAD_REQUEST
+      res.end(JSON.stringify({ error: ERROR_MESSAGES.INVALID_EXISTING_PRD }))
       return
     }
     
@@ -225,12 +212,12 @@ const server = http.createServer(async (req, res) => {
         contextPayload
       })
       
-      res.statusCode = 200
+      res.statusCode = HTTP_STATUS.OK
       res.setHeader('Content-Type', 'application/json')
       res.end(JSON.stringify(result))
     } catch (e: any) {
       console.error('PRD edit error:', e)
-      res.statusCode = 500
+      res.statusCode = HTTP_STATUS.INTERNAL_SERVER_ERROR
       res.end(JSON.stringify({ error: String(e?.message || e) }))
     }
     return
@@ -246,8 +233,8 @@ const server = http.createServer(async (req, res) => {
     const targetSections = body?.targetSections
     
     if (!message) {
-      res.statusCode = 400
-      res.end(JSON.stringify({ error: 'Missing message' }))
+      res.statusCode = HTTP_STATUS.BAD_REQUEST
+      res.end(JSON.stringify({ error: ERROR_MESSAGES.MISSING_MESSAGE }))
       return
     }
     
@@ -266,12 +253,12 @@ const server = http.createServer(async (req, res) => {
         targetSections
       })
       
-      res.statusCode = 200
+      res.statusCode = HTTP_STATUS.OK
       res.setHeader('Content-Type', 'application/json')
       res.end(JSON.stringify(result))
     } catch (e: any) {
       console.error('Section generation error:', e)
-      res.statusCode = 500
+      res.statusCode = HTTP_STATUS.INTERNAL_SERVER_ERROR
       res.end(JSON.stringify({ error: String(e?.message || e) }))
     }
     return
@@ -280,10 +267,10 @@ const server = http.createServer(async (req, res) => {
   // Update specific section
   if (method === 'POST' && url.startsWith('/prd/section/')) {
     const sectionName = url.split('/prd/section/')[1]
-    const validSections = ['targetUsers', 'solution', 'keyFeatures', 'successMetrics', 'constraints']
+    const validSections = ALL_SECTION_NAMES
     
-    if (!validSections.includes(sectionName)) {
-      res.statusCode = 400
+    if (!validSections.includes(sectionName as any)) {
+      res.statusCode = HTTP_STATUS.BAD_REQUEST
       res.end(JSON.stringify({ error: `Invalid section name. Valid sections: ${validSections.join(', ')}` }))
       return
     }
@@ -295,8 +282,8 @@ const server = http.createServer(async (req, res) => {
     const existingPRD = body?.existingPRD
     
     if (!message) {
-      res.statusCode = 400
-      res.end(JSON.stringify({ error: 'Missing message' }))
+      res.statusCode = HTTP_STATUS.BAD_REQUEST
+      res.end(JSON.stringify({ error: ERROR_MESSAGES.MISSING_MESSAGE }))
       return
     }
     
@@ -315,7 +302,7 @@ const server = http.createServer(async (req, res) => {
         targetSections: [sectionName]
       })
       
-      res.statusCode = 200
+      res.statusCode = HTTP_STATUS.OK
       res.setHeader('Content-Type', 'application/json')
       res.end(JSON.stringify({
         section: sectionName,
@@ -325,14 +312,14 @@ const server = http.createServer(async (req, res) => {
       }))
     } catch (e: any) {
       console.error(`Section ${sectionName} generation error:`, e)
-      res.statusCode = 500
+      res.statusCode = HTTP_STATUS.INTERNAL_SERVER_ERROR
       res.end(JSON.stringify({ error: String(e?.message || e) }))
     }
     return
   }
 
   console.log(`404 - Unhandled request: ${method} ${url}`)
-  res.statusCode = 404
+  res.statusCode = HTTP_STATUS.NOT_FOUND
   res.end(JSON.stringify({ error: 'Not found' }))
 })
 

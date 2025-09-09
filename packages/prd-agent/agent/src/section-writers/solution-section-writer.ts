@@ -8,6 +8,10 @@ import {
   assessContextRichness, 
   assessContentSpecificity 
 } from '../utils/confidence-assessment'
+import {
+  MIN_SOLUTION_OVERVIEW_LENGTH,
+  MIN_SOLUTION_APPROACH_LENGTH
+} from '../constants'
 
 const SolutionSectionSchema = z.object({
   solutionOverview: z.string(),
@@ -98,12 +102,12 @@ export class SolutionSectionWriter extends BaseSectionWriter {
   private validateSolutionSection(section: SolutionSection): { isValid: boolean; issues: string[] } {
     const issues: string[] = []
 
-    if (!section.solutionOverview || section.solutionOverview.length < 50) {
-      issues.push('Solution overview is too short (should be 1-2 paragraphs)')
+    if (!section.solutionOverview || section.solutionOverview.length < MIN_SOLUTION_OVERVIEW_LENGTH) {
+      issues.push(`Solution overview is too short (should be at least ${MIN_SOLUTION_OVERVIEW_LENGTH} characters)`)
     }
 
-    if (!section.approach || section.approach.length < 30) {
-      issues.push('Solution approach is too brief (should describe how we will solve the problem)')
+    if (!section.approach || section.approach.length < MIN_SOLUTION_APPROACH_LENGTH) {
+      issues.push(`Solution approach is too brief (should be at least ${MIN_SOLUTION_APPROACH_LENGTH} characters)`)
     }
 
     if (section.solutionOverview.toLowerCase().includes('tbd') || 

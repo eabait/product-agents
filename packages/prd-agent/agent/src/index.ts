@@ -3,7 +3,7 @@ export type { PRD, SectionRoutingRequest, SectionRoutingResponse } from './schem
 export { PRDSchema, SectionRoutingRequestSchema, SectionRoutingResponseSchema } from './schemas'
 
 // Re-export utility functions
-export { applyPatch, cleanPatchResponse, ensureArrayFields, postProcessStructuredResponse } from './utils'
+export { applyPatch, ensureArrayFields, postProcessStructuredResponse } from './utils'
 
 // Re-export constants
 export { CONFIDENCE_THRESHOLDS, CONTENT_VALIDATION, CONFIDENCE_SCORING, CONTENT_THRESHOLDS } from './utils/confidence-assessment'

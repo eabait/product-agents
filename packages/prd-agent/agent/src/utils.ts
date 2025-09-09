@@ -45,7 +45,3 @@ export function applyPatch(basePRD: PRD, sectionUpdates: any): PRD {
   return result
 }
 
-// Helper function for backward compatibility - does nothing now but kept for API compatibility
-export function cleanPatchResponse(data: any): any {
-  return data
-}
