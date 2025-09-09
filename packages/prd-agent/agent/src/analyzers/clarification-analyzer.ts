@@ -6,7 +6,9 @@ import { ensureArrayFields } from '../utils/post-process-structured-response'
 import { 
   assessConfidence, 
   assessInputCompleteness, 
-  assessContextRichness 
+  assessContextRichness,
+  CONFIDENCE_THRESHOLDS,
+  CONTENT_VALIDATION
 } from '../utils/confidence-assessment'
 
 // Temporary schema that accepts numeric confidence from AI
@@ -41,7 +43,7 @@ export class ClarificationAnalyzer extends BaseAnalyzer {
       contextRichness: assessContextRichness(input.context?.contextPayload),
       validationSuccess: !rawResult.needsClarification,
       hasErrors: rawResult.missingCritical.length > 0,
-      contentSpecificity: rawResult.missingCritical.length === 0 ? 'high' : rawResult.missingCritical.length <= 2 ? 'medium' : 'low'
+      contentSpecificity: rawResult.missingCritical.length === CONTENT_VALIDATION.MAX_MISSING_ITEMS_FOR_HIGH ? 'high' : rawResult.missingCritical.length <= CONTENT_VALIDATION.MAX_MISSING_ITEMS_FOR_MEDIUM ? 'medium' : 'low'
     })
 
     // Build the final result with new confidence format
@@ -53,7 +55,7 @@ export class ClarificationAnalyzer extends BaseAnalyzer {
     }
 
     // If clarification is not needed but original confidence was low, log warning
-    if (!result.needsClarification && rawResult.confidence < 70) {
+    if (!result.needsClarification && rawResult.confidence < CONFIDENCE_THRESHOLDS.LOW_AI_CONFIDENCE_WARNING) {
       console.warn(`ClarificationAnalyzer: Proceeding with low AI confidence (${rawResult.confidence}%) for message: "${input.message}"`)
     }
 

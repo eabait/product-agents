@@ -1,5 +1,45 @@
 import { ConfidenceAssessment, ConfidenceLevel } from '../schemas'
 
+// Confidence threshold constants
+export const CONFIDENCE_THRESHOLDS = {
+  LOW_AI_CONFIDENCE_WARNING: 70,
+  MIN_ACCEPTABLE_CONFIDENCE: 50,
+  HIGH_CONFIDENCE_THRESHOLD: 85
+} as const
+
+// Content validation constants
+export const CONTENT_VALIDATION = {
+  MIN_CONTENT_LENGTH: 10,
+  MAX_MISSING_ITEMS_FOR_MEDIUM: 2,
+  MAX_MISSING_ITEMS_FOR_HIGH: 0
+} as const
+
+// Confidence scoring constants
+export const CONFIDENCE_SCORING = {
+  HIGH_FACTOR_SCORE: 3,
+  MEDIUM_FACTOR_SCORE: 2,
+  LOW_FACTOR_SCORE: 1,
+  DEFAULT_SCORE: 2,
+  HIGH_THRESHOLD: 2.7,
+  MEDIUM_THRESHOLD: 2.0
+} as const
+
+// Content assessment thresholds
+export const CONTENT_THRESHOLDS = {
+  DETAILED_INPUT_LENGTH: 100,
+  ADEQUATE_INPUT_LENGTH: 50,
+  SUBSTANTIAL_CONTENT_LENGTH: 200,
+  ADEQUATE_CONTENT_LENGTH: 50,
+  RICH_CONTEXT_ITEMS: 5,
+  ADEQUATE_CONTEXT_ITEMS: 2,
+  PRD_CONTEXT_WEIGHT: 2,
+  LONG_CONTENT_LENGTH: 500,
+  SHORT_CONTENT_LENGTH: 100,
+  HIGH_SPECIFICITY_SCORE: 2,
+  MEDIUM_SPECIFICITY_SCORE: 0,
+  MAX_COMBINED_REASONS: 5
+} as const
+
 interface ConfidenceFactors {
   inputCompleteness?: 'high' | 'medium' | 'low'
   contextRichness?: 'high' | 'medium' | 'low'
@@ -22,15 +62,15 @@ export function assessConfidence(factors: ConfidenceFactors): ConfidenceAssessme
     totalFactors++
     switch (factors.inputCompleteness) {
       case 'high':
-        overallScore += 3
+        overallScore += CONFIDENCE_SCORING.HIGH_FACTOR_SCORE
         reasons.push('Input provides comprehensive information')
         break
       case 'medium':
-        overallScore += 2
+        overallScore += CONFIDENCE_SCORING.MEDIUM_FACTOR_SCORE
         reasons.push('Input provides adequate information')
         break
       case 'low':
-        overallScore += 1
+        overallScore += CONFIDENCE_SCORING.LOW_FACTOR_SCORE
         reasons.push('Input provides limited information')
         break
     }
@@ -41,15 +81,15 @@ export function assessConfidence(factors: ConfidenceFactors): ConfidenceAssessme
     totalFactors++
     switch (factors.contextRichness) {
       case 'high':
-        overallScore += 3
+        overallScore += CONFIDENCE_SCORING.HIGH_FACTOR_SCORE
         reasons.push('Rich contextual information available')
         break
       case 'medium':
-        overallScore += 2
+        overallScore += CONFIDENCE_SCORING.MEDIUM_FACTOR_SCORE
         reasons.push('Some contextual information available')
         break
       case 'low':
-        overallScore += 1
+        overallScore += CONFIDENCE_SCORING.LOW_FACTOR_SCORE
         reasons.push('Limited contextual information')
         break
     }
@@ -59,10 +99,10 @@ export function assessConfidence(factors: ConfidenceFactors): ConfidenceAssessme
   if (factors.validationSuccess !== undefined) {
     totalFactors++
     if (factors.validationSuccess) {
-      overallScore += 3
+      overallScore += CONFIDENCE_SCORING.HIGH_FACTOR_SCORE
       reasons.push('Content passes validation checks')
     } else {
-      overallScore += 1
+      overallScore += CONFIDENCE_SCORING.LOW_FACTOR_SCORE
       reasons.push('Content has validation issues')
     }
   }
@@ -72,15 +112,15 @@ export function assessConfidence(factors: ConfidenceFactors): ConfidenceAssessme
     totalFactors++
     switch (factors.contentSpecificity) {
       case 'high':
-        overallScore += 3
+        overallScore += CONFIDENCE_SCORING.HIGH_FACTOR_SCORE
         reasons.push('Generated content is highly specific and detailed')
         break
       case 'medium':
-        overallScore += 2
+        overallScore += CONFIDENCE_SCORING.MEDIUM_FACTOR_SCORE
         reasons.push('Generated content has moderate specificity')
         break
       case 'low':
-        overallScore += 1
+        overallScore += CONFIDENCE_SCORING.LOW_FACTOR_SCORE
         reasons.push('Generated content lacks specificity')
         break
     }
@@ -90,10 +130,10 @@ export function assessConfidence(factors: ConfidenceFactors): ConfidenceAssessme
   if (factors.hasErrors !== undefined) {
     totalFactors++
     if (!factors.hasErrors) {
-      overallScore += 3
+      overallScore += CONFIDENCE_SCORING.HIGH_FACTOR_SCORE
       reasons.push('No processing errors occurred')
     } else {
-      overallScore += 1
+      overallScore += CONFIDENCE_SCORING.LOW_FACTOR_SCORE
       reasons.push('Errors occurred during processing')
     }
   }
@@ -101,26 +141,26 @@ export function assessConfidence(factors: ConfidenceFactors): ConfidenceAssessme
   // Content Length (quality indicator)
   if (factors.contentLength !== undefined) {
     totalFactors++
-    if (factors.contentLength > 200) {
-      overallScore += 3
+    if (factors.contentLength > CONTENT_THRESHOLDS.SUBSTANTIAL_CONTENT_LENGTH) {
+      overallScore += CONFIDENCE_SCORING.HIGH_FACTOR_SCORE
       reasons.push('Generated substantial content')
-    } else if (factors.contentLength > 50) {
-      overallScore += 2
+    } else if (factors.contentLength > CONTENT_THRESHOLDS.ADEQUATE_CONTENT_LENGTH) {
+      overallScore += CONFIDENCE_SCORING.MEDIUM_FACTOR_SCORE
       reasons.push('Generated adequate content')
     } else {
-      overallScore += 1
+      overallScore += CONFIDENCE_SCORING.LOW_FACTOR_SCORE
       reasons.push('Generated minimal content')
     }
   }
 
   // Calculate average score if we have factors
-  const averageScore = totalFactors > 0 ? overallScore / totalFactors : 2
+  const averageScore = totalFactors > 0 ? overallScore / totalFactors : CONFIDENCE_SCORING.DEFAULT_SCORE
 
   // Determine confidence level based on average score
   let level: ConfidenceLevel
-  if (averageScore >= 2.7) {
+  if (averageScore >= CONFIDENCE_SCORING.HIGH_THRESHOLD) {
     level = 'high'
-  } else if (averageScore >= 2.0) {
+  } else if (averageScore >= CONFIDENCE_SCORING.MEDIUM_THRESHOLD) {
     level = 'medium'
   } else {
     level = 'low'
@@ -155,12 +195,12 @@ export function assessInputCompleteness(message: string, contextPayload?: any): 
   )
   
   // Detailed input with context
-  if (messageLength > 100 && hasContextData) {
+  if (messageLength > CONTENT_THRESHOLDS.DETAILED_INPUT_LENGTH && hasContextData) {
     return 'high'
   }
   
   // Either detailed input or good context
-  if (messageLength > 50 || hasContextData) {
+  if (messageLength > CONTENT_THRESHOLDS.ADEQUATE_INPUT_LENGTH || hasContextData) {
     return 'medium'
   }
   
@@ -177,10 +217,10 @@ export function assessContextRichness(contextPayload?: any): ConfidenceLevel {
   const selectedMessages = contextPayload.selectedMessages?.length || 0
   const hasCurrentPRD = !!contextPayload.currentPRD
   
-  const totalContext = contextItems + selectedMessages + (hasCurrentPRD ? 2 : 0)
+  const totalContext = contextItems + selectedMessages + (hasCurrentPRD ? CONTENT_THRESHOLDS.PRD_CONTEXT_WEIGHT : 0)
   
-  if (totalContext >= 5) return 'high'
-  if (totalContext >= 2) return 'medium'
+  if (totalContext >= CONTENT_THRESHOLDS.RICH_CONTEXT_ITEMS) return 'high'
+  if (totalContext >= CONTENT_THRESHOLDS.ADEQUATE_CONTEXT_ITEMS) return 'medium'
   return 'low'
 }
 
@@ -214,11 +254,11 @@ export function assessContentSpecificity(content: any): ConfidenceLevel {
   if (hasVagueTerms) specificityScore--
   
   // Content length as specificity indicator
-  if (contentStr.length > 500) specificityScore++
-  if (contentStr.length < 100) specificityScore--
+  if (contentStr.length > CONTENT_THRESHOLDS.LONG_CONTENT_LENGTH) specificityScore++
+  if (contentStr.length < CONTENT_THRESHOLDS.SHORT_CONTENT_LENGTH) specificityScore--
   
-  if (specificityScore >= 2) return 'high'
-  if (specificityScore >= 0) return 'medium'
+  if (specificityScore >= CONTENT_THRESHOLDS.HIGH_SPECIFICITY_SCORE) return 'high'
+  if (specificityScore >= CONTENT_THRESHOLDS.MEDIUM_SPECIFICITY_SCORE) return 'medium'
   return 'low'
 }
 
@@ -255,7 +295,7 @@ export function combineConfidenceAssessments(
     reasons: [
       `Overall assessment based on ${sectionNames.length} sections`,
       `${levelCounts.high} high confidence, ${levelCounts.medium} medium confidence, ${levelCounts.low} low confidence`,
-      ...allReasons.slice(0, 5) // Limit to first 5 reasons
+      ...allReasons.slice(0, CONTENT_THRESHOLDS.MAX_COMBINED_REASONS) // Limit to first few reasons
     ]
   }
 }

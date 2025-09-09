@@ -6,6 +6,7 @@ import {
   ClarificationAnalyzer
 } from '../analyzers'
 import { ConfidenceAssessment } from '../schemas'
+import { CONTENT_VALIDATION } from '../utils/confidence-assessment'
 
 export interface SectionWriterResult<T = any> {
   name: string
@@ -124,7 +125,7 @@ export abstract class BaseSectionWriter {
     }
     
     if (typeof content === 'string') {
-      if (content.trim().length < 10) {
+      if (content.trim().length < CONTENT_VALIDATION.MIN_CONTENT_LENGTH) {
         issues.push('Section content is too short')
       }
       if (content.includes('TODO') || content.includes('[TBD]')) {

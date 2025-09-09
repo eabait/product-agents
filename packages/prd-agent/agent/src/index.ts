@@ -5,6 +5,9 @@ export { PRDSchema, SectionRoutingRequestSchema, SectionRoutingResponseSchema } 
 // Re-export utility functions
 export { applyPatch, cleanPatchResponse, ensureArrayFields, postProcessStructuredResponse } from './utils'
 
+// Re-export constants
+export { CONFIDENCE_THRESHOLDS, CONTENT_VALIDATION, CONFIDENCE_SCORING, CONTENT_THRESHOLDS } from './utils/confidence-assessment'
+
 // Re-export analyzers
 export * from './analyzers'
 
