@@ -303,6 +303,15 @@ function setupMockResponses(mockClient: MockOpenRouterClient) {
     questions: []
   })
 
+  // Section Detection (for edit operations)
+  mockClient.setMockResponse('sectionDetection', {
+    affectedSections: ['keyFeatures'],
+    reasoning: {
+      keyFeatures: 'Adding new integration features to existing functionality'
+    },
+    confidence: 'high'
+  })
+
   // Context Analysis
   mockClient.setMockResponse('contextAnalysis', {
     themes: ['Mobile Applications', 'Student Productivity', 'Note-Taking', 'Digital Organization'],

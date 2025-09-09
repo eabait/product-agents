@@ -7,6 +7,7 @@
 // Analyzer prompts
 export { createClarificationPrompt } from './clarification'
 export { createContextAnalysisPrompt } from './context-analysis'
+export { createSectionDetectionPrompt } from './section-detection'
 
 // Section writer prompts
 export { createTargetUsersSectionPrompt } from './target-users-section'

@@ -35,6 +35,15 @@ describe('Simplified PRD Architecture', () => {
         questions: []
       },
       
+      // Section detection for edit operations
+      sectionDetection: {
+        affectedSections: ['keyFeatures'],
+        reasoning: {
+          keyFeatures: 'Adding new features to existing functionality'
+        },
+        confidence: 'high'
+      },
+      
       // Only context analysis needed (no more content summarizer or risk identifier)
       contextAnalysis: {
         themes: ['Task management', 'Team collaboration', 'Project tracking'],

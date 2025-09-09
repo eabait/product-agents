@@ -124,6 +124,9 @@ export class MockOpenRouterClient {
         prompt.includes('Analyze and extract:')) {
       return 'contextAnalysis'
     }
+    if (prompt.includes('You are analyzing a PRD edit request to determine which sections need to be updated')) {
+      return 'sectionDetection'
+    }
     
     // New simplified section writer patterns
     if (prompt.includes('creating a concise Target Users section') ||

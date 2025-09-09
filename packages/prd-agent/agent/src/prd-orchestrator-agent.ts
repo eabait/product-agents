@@ -10,7 +10,8 @@ import {
 import { combineConfidenceAssessments } from './utils/confidence-assessment'
 import { 
   ClarificationAnalyzer,
-  ContextAnalyzer
+  ContextAnalyzer,
+  SectionDetectionAnalyzer
 } from './analyzers'
 import {
   // New simplified section writers
@@ -34,6 +35,7 @@ export class PRDOrchestratorAgent extends BaseAgent {
   
   // Simplified analyzers for centralized analysis
   private contextAnalyzer: ContextAnalyzer
+  private sectionDetectionAnalyzer: SectionDetectionAnalyzer
 
   constructor(settings?: any) {
     super(settings)
@@ -41,6 +43,7 @@ export class PRDOrchestratorAgent extends BaseAgent {
     // Initialize simplified analyzers for centralized analysis
     this.contextAnalyzer = new ContextAnalyzer(this.settings)
     this.clarificationAnalyzer = new ClarificationAnalyzer(this.settings)
+    this.sectionDetectionAnalyzer = new SectionDetectionAnalyzer(this.settings)
     
     // Initialize simplified section writers for 5-section PRD
     this.sectionWriters = new Map()
@@ -57,15 +60,17 @@ export class PRDOrchestratorAgent extends BaseAgent {
       message,
       context: {
         contextPayload: context?.contextPayload,
-        existingPRD: context?.existingPRD,
+        existingPRD: context,  // Support passing existing PRD directly as context
         conversationHistory: context?.conversationHistory
       },
       settings: this.settings,
       targetSections: context?.targetSections
     }
 
-    // Handle edit operations
-    if (context?.operation === 'edit' && context?.existingPRD) {
+    // Handle edit operations - detect automatically if PRD already exists
+    const existingPRD = context?.existingPRD || (context?.sections ? context : null)
+    if (existingPRD && routingRequest.context) {
+      routingRequest.context.existingPRD = existingPRD
       return this.handleEditOperation(routingRequest)
     }
 
@@ -350,12 +355,25 @@ export class PRDOrchestratorAgent extends BaseAgent {
   }
 
   private async detectAffectedSections(message: string, existingPRD: any): Promise<string[]> {
-    // Enhanced section detection logic could use an analyzer here
-    // For now, use the same logic as determineSectionsToProcess
-    return this.determineSectionsToProcess({
-      message,
-      context: { existingPRD }
-    })
+    try {
+      // Use LLM-powered section detection for accurate results
+      const detectionResult = await this.sectionDetectionAnalyzer.analyze({
+        message,
+        existingPRD,
+        context: { existingPRD }
+      })
+      
+      console.log(`SectionDetection: ${detectionResult.data.affectedSections.join(', ')} (confidence: ${detectionResult.data.confidence})`)
+      
+      return detectionResult.data.affectedSections
+    } catch (error) {
+      console.warn('Section detection analyzer failed, using fallback logic:', error)
+      // Fallback to conservative keyword-based detection
+      return this.determineSectionsToProcess({
+        message,
+        context: { existingPRD }
+      })
+    }
   }
 
   private applySectionUpdates(existingPRD: PRD, updatedSections: any): PRD {
