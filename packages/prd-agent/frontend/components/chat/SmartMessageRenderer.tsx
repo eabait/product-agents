@@ -11,10 +11,10 @@ import { NewPRD, FlattenedPRD, isNewPRD, isFlattenedPRD } from '@/lib/prd-schema
 interface SmartMessageRendererProps {
   content: string;
   messageId: string;
-  onPRDUpdate?: (messageId: string, updatedPRD: NewPRD) => void;
-  onRegenerateSection?: (messageId: string, sectionName: string) => void;
+  onPRDUpdate?: (_messageId: string, _updatedPRD: NewPRD) => void;
+  onRegenerateSection?: (_messageId: string, _sectionName: string) => void;
   isExpanded?: boolean;
-  onToggleExpanded?: (messageId: string) => void;
+  onToggleExpanded?: (_messageId: string) => void;
 }
 
 export function SmartMessageRenderer({ 

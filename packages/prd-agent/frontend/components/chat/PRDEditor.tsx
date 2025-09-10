@@ -19,8 +19,8 @@ import {
 
 interface PRDEditorProps {
   prd: NewPRD | FlattenedPRD | any; // Accept any for backward compatibility during transition
-  onChange: (updatedPRD: NewPRD) => void;
-  onRegenerateSection?: (sectionName: string) => void;
+  onChange: (_updatedPRD: NewPRD) => void;
+  onRegenerateSection?: (_sectionName: string) => void;
   readOnly?: boolean;
   isRegenerating?: { [sectionName: string]: boolean };
 }

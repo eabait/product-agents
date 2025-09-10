@@ -5,7 +5,7 @@ import { Textarea } from '@/components/ui/textarea';
 
 interface ChatInputProps {
   value: string;
-  onChange: (value: string) => void;
+  onChange: (_value: string) => void;
   onSend: () => void;
   isProcessing: boolean;
 }

@@ -10,6 +10,7 @@ import { getConfidenceBadgeText, getConfidenceBadgeClasses, type ConfidenceValue
 
 interface KeyFeaturesSectionProps {
   section?: KeyFeaturesSectionType;
+  // eslint-disable-next-line no-unused-vars
   onChange: (updatedSection: KeyFeaturesSectionType) => void;
   onRegenerate?: () => void;
   readOnly?: boolean;
@@ -25,6 +26,7 @@ export function KeyFeaturesSection({
   confidence,
   isRegenerating = false 
 }: KeyFeaturesSectionProps) {
+  // eslint-disable-next-line no-unused-vars
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   
   const keyFeatures = section?.keyFeatures || [];

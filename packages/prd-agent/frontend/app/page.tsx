@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { AppStateProvider, useModelContext, useContextSettings } from "@/contexts/AppStateProvider";
+import { AppStateProvider, useModelContext } from "@/contexts/AppStateProvider";
 import { ChatMessages } from "@/components/chat/ChatMessages";
 import {
   Menu,
@@ -52,7 +52,6 @@ function PRDAgentPageContent() {
 
   // Use reactive contexts
   const { setModels, updateModelFromId } = useModelContext();
-  const { contextSettings } = useContextSettings();
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -72,12 +71,6 @@ function PRDAgentPageContent() {
   const [contextOpen, setContextOpen] = useState(false);
   const [contextSummary, setContextSummary] = useState<string>('');
 
-  // Models state (now managed by context)
-  const [localModels, setLocalModels] = useState<any[]>([]);
-
-  // Note: Context summary useEffect will be defined after computed values
-  
-  
   // Title editing state
   const [editingConversationId, setEditingConversationId] = useState<string | null>(null);
   const [tempTitle, setTempTitle] = useState("");
@@ -95,7 +88,7 @@ function PRDAgentPageContent() {
 
 
   // Helper to update the active conversation
-  const updateActiveConversation = (updater: (conv: Conversation) => Conversation) => {
+  const updateActiveConversation = (updater: (_conv: Conversation) => Conversation) => {
     if (!activeId) return;
     setConversations(prev => 
       prev.map(c => c.id === activeId ? updater(c) : c)
@@ -103,7 +96,7 @@ function PRDAgentPageContent() {
   };
 
   // Helper to update any conversation by ID
-  const updateConversation = (conversationId: string, updater: (conv: Conversation) => Conversation) => {
+  const updateConversation = (conversationId: string, updater: (_conv: Conversation) => Conversation) => {
     setConversations(prev => 
       prev.map(c => c.id === conversationId ? updater(c) : c)
     );
@@ -267,7 +260,6 @@ function PRDAgentPageContent() {
       
       const data = await response.json();
       if (data.models && Array.isArray(data.models)) {
-        setLocalModels(data.models);
         setModels(data.models); // Update context
         return data.models;
       } else {
@@ -275,7 +267,6 @@ function PRDAgentPageContent() {
       }
     } catch (error) {
       console.error('Error fetching models:', error);
-      setLocalModels([]);
       setModels([]); // Update context
       return [];
     }

@@ -12,14 +12,14 @@ import {
   CategorizedContextItem, 
   ContextCategory, 
   ContextPriority,
-  CONTEXT_CATEGORY_LABELS,
-  CONTEXT_CATEGORY_DESCRIPTIONS
+  CONTEXT_CATEGORY_LABELS
 } from '@/lib/context-types'
 import { estimateTokens, suggestCategory } from '@/lib/context-utils'
 
 interface ContextFormProps {
   isOpen: boolean
   onClose: () => void
+  // eslint-disable-next-line no-unused-vars
   onSubmit: (item: Omit<CategorizedContextItem, 'id' | 'createdAt' | 'lastUsed'>) => void
   editingItem?: CategorizedContextItem | null
 }

@@ -5,6 +5,7 @@
   "private": true,
   "workspaces": [
     "packages/shared/*",
+    "packages/prd-agent/agent",
     "packages/prd-agent/*",
     "packages/research-agent/*",
     "packages/persona-agent/*",
@@ -17,6 +18,7 @@
     "dev": "turbo run dev",
     "test": "turbo run test",
     "lint": "turbo run lint",
+    "lint:fix": "turbo run lint:fix",
     "clean": "turbo run clean"
   },
   "devDependencies": {

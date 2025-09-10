@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils"
 
 interface SliderProps {
   value?: number[]
+  // eslint-disable-next-line no-unused-vars
   onValueChange?: (value: number[]) => void
   min?: number
   max?: number

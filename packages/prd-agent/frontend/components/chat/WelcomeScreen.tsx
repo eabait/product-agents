@@ -3,7 +3,7 @@ export function WelcomeScreen({
   onSuggestionClick,
 }: {
   suggestions: string[];
-  onSuggestionClick: (suggestion: string) => void;
+  onSuggestionClick: (_suggestion: string) => void;
 }) {
   return (
     <div className="flex flex-col items-center justify-center h-full px-6">

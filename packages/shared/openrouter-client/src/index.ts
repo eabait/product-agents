@@ -99,7 +99,7 @@ export class OpenRouterClient {
     sanitized = sanitized.replace(/^```\s*/g, '').replace(/```\s*$/g, '')
     
     // Remove any text before the first { or [
-    const jsonStart = sanitized.search(/^[\s]*[{\[]/)
+    const jsonStart = sanitized.search(/^[\s]*[{[]/)
     if (jsonStart > 0) {
       sanitized = sanitized.substring(jsonStart)
     }

@@ -13,7 +13,7 @@ export interface AgentSettings {
 
 export interface SettingsPanelProps {
   settings: AgentSettings
-  onSave: (settings: AgentSettings) => void
+  onSave: (_settings: AgentSettings) => void
   onClose: () => void
   availableModels?: string[]
   agentSpecificSettings?: React.ReactNode

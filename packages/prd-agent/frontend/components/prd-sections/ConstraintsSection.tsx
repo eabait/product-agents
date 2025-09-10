@@ -10,6 +10,7 @@ import { getConfidenceBadgeText, getConfidenceBadgeClasses, type ConfidenceValue
 
 interface ConstraintsSectionProps {
   section?: ConstraintsSectionType;
+  // eslint-disable-next-line no-unused-vars
   onChange: (updatedSection: ConstraintsSectionType) => void;
   onRegenerate?: () => void;
   readOnly?: boolean;
@@ -25,7 +26,9 @@ export function ConstraintsSection({
   confidence,
   isRegenerating = false 
 }: ConstraintsSectionProps) {
+  // eslint-disable-next-line no-unused-vars
   const [editingConstraint, setEditingConstraint] = useState<number | null>(null);
+  // eslint-disable-next-line no-unused-vars
   const [editingAssumption, setEditingAssumption] = useState<number | null>(null);
   
   const constraints = section?.constraints || [];

@@ -10,6 +10,7 @@ import { getConfidenceBadgeText, getConfidenceBadgeClasses, type ConfidenceValue
 
 interface TargetUsersSectionProps {
   section?: TargetUsersSectionType;
+  // eslint-disable-next-line no-unused-vars
   onChange: (updatedSection: TargetUsersSectionType) => void;
   onRegenerate?: () => void;
   readOnly?: boolean;
@@ -25,6 +26,7 @@ export function TargetUsersSection({
   confidence,
   isRegenerating = false 
 }: TargetUsersSectionProps) {
+  // eslint-disable-next-line no-unused-vars
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   
   const targetUsers = section?.targetUsers || [];

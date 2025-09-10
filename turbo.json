@@ -15,7 +15,12 @@
       "outputs": ["coverage/**"]
     },
     "lint": {
-      "dependsOn": ["^lint"]
+      "dependsOn": ["^lint"],
+      "outputs": []
+    },
+    "lint:fix": {
+      "dependsOn": ["^lint:fix"],
+      "outputs": []
     },
     "clean": {
       "cache": false

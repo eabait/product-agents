@@ -10,6 +10,7 @@ import { getConfidenceBadgeText, getConfidenceBadgeClasses, type ConfidenceValue
 
 interface SuccessMetricsSectionProps {
   section?: SuccessMetricsSectionType;
+  // eslint-disable-next-line no-unused-vars
   onChange: (updatedSection: SuccessMetricsSectionType) => void;
   onRegenerate?: () => void;
   readOnly?: boolean;
@@ -25,6 +26,7 @@ export function SuccessMetricsSection({
   confidence,
   isRegenerating = false 
 }: SuccessMetricsSectionProps) {
+  // eslint-disable-next-line no-unused-vars
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   
   const successMetrics = section?.successMetrics || [];

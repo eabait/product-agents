@@ -10,6 +10,7 @@ import { SolutionSection as SolutionSectionType } from '@/lib/prd-schema';
 
 interface SolutionSectionProps {
   section?: SolutionSectionType;
+  // eslint-disable-next-line no-unused-vars
   onChange: (updatedSection: SolutionSectionType) => void;
   onRegenerate?: () => void;
   readOnly?: boolean;

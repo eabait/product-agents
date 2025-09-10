@@ -1,4 +1,4 @@
-import { User, Bot, Copy, Check, Database } from 'lucide-react';
+import { User, Bot, Database } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { SmartMessageRenderer } from './SmartMessageRenderer';
@@ -10,13 +10,14 @@ import { useState, useEffect } from 'react';
 
 interface MessageBubbleProps {
   message: Message;
-  onCopy: (content: string, messageId: string) => void;
+  onCopy: (_content: string, _messageId: string) => void;
   copied: boolean;
-  onPRDUpdate?: (messageId: string, updatedPRD: NewPRD) => void;
+  onPRDUpdate?: (_messageId: string, _updatedPRD: NewPRD) => void;
   isExpanded?: boolean;
-  onToggleExpanded?: (messageId: string) => void;
+  onToggleExpanded?: (_messageId: string) => void;
 }
 
+// eslint-disable-next-line no-unused-vars
 export function MessageBubble({ message, onCopy, copied, onPRDUpdate, isExpanded, onToggleExpanded }: MessageBubbleProps) {
   const isUser = message.role === 'user';
   const [isSelectedForContext, setIsSelectedForContext] = useState(false);

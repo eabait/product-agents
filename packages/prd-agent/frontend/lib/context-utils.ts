@@ -6,12 +6,10 @@ import {
   ContextUsage, 
   CategorizedContextItem, 
   SelectedMessage, 
-  ContextSettings,
   ContextCategory,
   CONTEXT_CATEGORY_LABELS,
   CATEGORY_KEYWORDS,
-  CONTEXT_CONSTRAINTS,
-  createContextItemId
+  CONTEXT_CONSTRAINTS
 } from './context-types'
 import { contextStorage } from './context-storage'
 import {
@@ -53,8 +51,8 @@ function detectTextType(text: unknown): keyof typeof TEXT_TYPE_MULTIPLIERS {
   
   // Simple heuristics to detect text type
   const codePatterns = /^\s*(?:function|class|import|export|const|let|var|if|for|while|\{|\})/m
-  const jsonPattern = /^\s*[{\[][\s\S]*[}\]]\s*$/
-  const markdownPattern = /(?:^#{1,6}\s|\*\*|__|\_|\_|\[.*\]\(.*\)|```)/m
+  const jsonPattern = /^\s*[{[][\s\S]*[}\]]\s*$/
+  const markdownPattern = /(?:^#{1,6}\s|\*\*|__|_|_|\[.*\]\(.*\)|```)/m
   
   try {
     const trimmedText = text.trim()

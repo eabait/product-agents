@@ -9,10 +9,8 @@ import {
 } from './schemas'
 import { combineConfidenceAssessments } from './utils/confidence-assessment'
 import { 
-  CURRENT_PRD_VERSION, 
   SECTION_NAMES,
-  ALL_SECTION_NAMES,
-  DEFAULT_EXISTING_RESULT_CONFIDENCE
+  ALL_SECTION_NAMES
 } from './constants'
 import { buildPRDMetadata } from './utilities'
 import { 
@@ -33,7 +31,7 @@ import {
 export class PRDOrchestratorAgent extends BaseAgent {
   // Agent capabilities and default configuration
   static readonly requiredCapabilities: ModelCapability[] = ['structured_output' as ModelCapability]
-  static readonly defaultModel = 'anthropic/claude-3-5-sonnet'
+  static readonly defaultModel = 'anthropic/claude-3-7-sonnet'
   static readonly agentName = 'PRD Orchestrator'
   static readonly agentDescription = 'Orchestrates PRD generation with modular section writers'
 
@@ -213,7 +211,6 @@ export class PRDOrchestratorAgent extends BaseAgent {
     // All sections are independent and can run in parallel (all use shared context analysis)
     return ALL_SECTION_NAMES.filter(section => sections.includes(section))
   }
-
 
   private async detectAffectedSections(message: string, existingPRD: any): Promise<string[]> {
     try {
