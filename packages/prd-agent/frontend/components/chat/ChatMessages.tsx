@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion';
 import { MessageBubble } from './MessageBubble';
 import { TypingIndicator } from './TypingIndicator';
-import { PRD } from './PRDEditor';
+import { NewPRD } from '@/lib/prd-schema';
 import { Message } from '../../types';
 import { useState, useEffect, useMemo } from 'react';
 
@@ -9,8 +9,8 @@ interface ChatMessagesProps {
   messages: Message[];
   isProcessing: boolean;
   copied: string | null;
-  onCopy: (content: string, messageId: string) => void;
-  onPRDUpdate?: (messageId: string, updatedPRD: PRD) => void;
+  onCopy: (_content: string, _messageId: string) => void;
+  onPRDUpdate?: (_messageId: string, _updatedPRD: NewPRD) => void;
 }
 
 export function ChatMessages({
@@ -46,7 +46,7 @@ export function ChatMessages({
   // Auto-expand the last PRD message when it changes
   useEffect(() => {
     if (lastPRDMessageId) {
-      setExpandedPRDs(prev => {
+      setExpandedPRDs(_ => {
         const newSet = new Set<string>();
         newSet.add(lastPRDMessageId);
         return newSet;

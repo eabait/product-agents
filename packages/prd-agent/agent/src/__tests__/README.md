@@ -1,24 +1,30 @@
 # PRD Agent Tests
 
-This directory contains comprehensive tests for the PRD agent implementation, with a focus on **prompt tracing** and **agent pipeline flow**.
+This directory contains comprehensive tests for the **simplified PRD architecture** with parallel processing and 5-section structure.
 
 ## Test Files
 
-### `prompt-tracing.test.ts`
-**Main test file for observing prompt flow through the agent pipeline**
+### `simplified-architecture.test.ts`
+**Main test file for the new simplified PRD architecture**
 
-- Tests complete PRD generation flow with all 5 workers
-- Tests PRD edit flow using the ChangeWorker
-- Traces prompts as they flow between workers with cumulative context
-- Provides detailed console output showing prompt evolution
+- Tests parallel processing of 5 sections after context analysis
+- Validates flat, simple schemas for each section
+- Tests section-level editing with parallel architecture
+- Demonstrates significant performance improvements
 
-### `agent-pipeline.test.ts`
-**Individual worker testing and prompt validation**
+### `architecture-comparison.test.ts`  
+**Performance comparison between legacy and simplified architectures**
 
-- Tests each worker in isolation
-- Validates prompt generation for specific scenarios
-- Demonstrates data flow between workers
-- Shows how context accumulates through the pipeline
+- Documents improvements: 15+ LLM calls → 7 LLM calls (53% reduction)
+- Shows 5-8x faster generation through parallel processing
+- Validates content quality and frontend compatibility
+- Provides detailed metrics and achievement summary
+
+### `legacy-architecture.test.ts`
+**Deprecated test for reference only**
+
+- Documents the old 6-worker sequential pipeline (deprecated)
+- Kept for historical reference of the architecture evolution
 
 ### `mock-openrouter-client.ts`
 **Mock implementation for testing without API calls**
@@ -33,54 +39,46 @@ This directory contains comprehensive tests for the PRD agent implementation, wi
 # Run all tests
 npm test
 
-# Run only prompt tracing tests
-npm run test:prompts
+# Run only simplified architecture tests
+npm test simplified-architecture.test.ts
 
-# Run tests with detailed console output
+# Run architecture comparison test
+npm test architecture-comparison.test.ts
+
+# Run tests with detailed console output (shows performance metrics)
 ENABLE_TEST_LOGS=1 npm test
 
 # Run tests in watch mode
 npm run test:watch
 ```
 
-## Test Output
+## New Architecture Test Output
 
-The tests provide detailed console output showing:
-
-1. **Prompt Traces**: Complete prompts sent to each worker
-2. **Worker Sequence**: Order of worker execution
-3. **Context Flow**: How data accumulates between workers
-4. **Response Validation**: Ensuring mock responses match expected schemas
-
-## Example Output
+The tests provide detailed console output showing performance improvements:
 
 ```
-=== DETAILED PROMPT TRACES ===
-
---- 1. CONTEXTANALYSIS ---
-Timestamp: 2023-12-07T10:30:00.000Z
-Model: anthropic/claude-3-5-sonnet
-Temperature: 0.3
-Prompt:
-Analyze this product request and extract key themes, requirements, and constraints: I need a user authentication system...
-
---- 2. REQUIREMENTSEXTRACTION ---
-Timestamp: 2023-12-07T10:30:01.000Z
-Model: anthropic/claude-3-5-sonnet
-Temperature: 0.3
-Prompt:
-Extract functional and non-functional requirements from:
-Original request: I need a user authentication system...
-Context analysis: {"themes":["User authentication","Data security"]...}
+🚀 ARCHITECTURE PERFORMANCE COMPARISON
+┌─────────────────────────────────────────────────────────────────┐
+│                    LEGACY VS SIMPLIFIED                        │
+├─────────────────────────────────────────────────────────────────┤
+│ METRIC              │ LEGACY (OLD)    │ SIMPLIFIED (NEW)    │
+├─────────────────────────────────────────────────────────────────┤
+│ LLM Calls           │ 15+ calls       │ 7 calls             │
+│ Processing          │ Sequential      │ Parallel            │
+│ Generation Time     │ ~35-50 seconds  │ ~6-10 seconds       │
+│ Sections Generated  │ 4 complex       │ 5 simple            │
+│ Schema Complexity   │ Deeply nested   │ Flat structures     │
+│ Maintenance         │ High complexity │ Low complexity      │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-## Key Benefits
+## Key Benefits of New Architecture
 
-- **🔍 Visibility**: See exactly what prompts are generated
-- **🧪 Testing**: Validate prompt logic without API costs
-- **📊 Analysis**: Understand how context builds through pipeline
-- **🐛 Debugging**: Identify prompt issues early
-- **📝 Documentation**: Demonstrate agent capabilities
+- **⚡ Performance**: 5-8x faster generation through parallel processing
+- **🎯 Efficiency**: 53% fewer LLM calls (15+ → 7 calls)
+- **📋 Simplicity**: Flat schemas instead of deeply nested structures  
+- **🔧 Maintainability**: Single analyzer eliminates duplicate calls
+- **🎨 Product-Focused**: Concise 1-page PRDs for actionable planning
 
 ## Extending Tests
 

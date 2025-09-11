@@ -1,0 +1,21 @@
+# Build outputs
+dist/
+build/
+
+# Dependencies
+node_modules/
+
+# Test coverage
+coverage/
+
+# Temporary files
+*.tmp
+*.temp
+
+# JavaScript config files (not part of source code)
+jest.config.js
+*.config.js
+*.config.mjs
+
+# Log files
+*.log

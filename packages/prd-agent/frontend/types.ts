@@ -19,4 +19,4 @@ export type Conversation = {
 }
 
 // PRD-specific types
-export type { PRD, SuccessMetric } from '@/lib/prd-schema';
+export type { FlattenedPRD, SuccessMetric } from '@/lib/prd-schema';

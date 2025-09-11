@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
-import { Progress } from '@/components/ui/progress'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { AlertCircle, BarChart3, CheckCircle } from 'lucide-react'
 import { calculateContextUsage, buildEnhancedContextPayload, formatContextWindow } from '@/lib/context-utils'

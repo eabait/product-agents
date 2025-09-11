@@ -3,7 +3,6 @@
 import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { 
@@ -19,8 +18,7 @@ import {
   CategorizedContextItem, 
   ContextCategory, 
   ContextPriority,
-  CONTEXT_CATEGORY_LABELS,
-  CONTEXT_CATEGORY_DESCRIPTIONS 
+  CONTEXT_CATEGORY_LABELS
 } from '@/lib/context-types'
 import { contextStorage } from '@/lib/context-storage'
 import { buildEnhancedContextPayload, calculateContextUsage } from '@/lib/context-utils'

@@ -6,8 +6,10 @@ import { cn } from "@/lib/utils"
 
 interface SelectContextType {
   value: string
+  // eslint-disable-next-line no-unused-vars
   onValueChange: (value: string) => void
   open: boolean
+  // eslint-disable-next-line no-unused-vars
   setOpen: (open: boolean) => void
   disabled?: boolean
   itemLabels: Map<string, string>
@@ -41,6 +43,7 @@ const Select = React.forwardRef<
   HTMLDivElement,
   {
     value?: string
+    // eslint-disable-next-line no-unused-vars
     onValueChange?: (value: string) => void
     disabled?: boolean
     children: React.ReactNode
@@ -161,6 +164,7 @@ const SelectContent = React.forwardRef<
   React.HTMLAttributes<HTMLDivElement> & {
     position?: "item-aligned" | "popper"
   }
+  // eslint-disable-next-line no-unused-vars
 >(({ className, children, position = "popper", ...props }, ref) => {
   const context = React.useContext(SelectContext)
   if (!context) throw new Error("SelectContent must be used within Select")

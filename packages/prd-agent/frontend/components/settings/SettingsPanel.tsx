@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
@@ -44,6 +43,7 @@ interface SettingsPanelProps {
     maxTokens: number
     apiKey?: string
   }
+  // eslint-disable-next-line no-unused-vars
   onSettingsChange: (settings: any) => void
 }
 
@@ -77,7 +77,7 @@ export function SettingsPanel({ isOpen, onClose, settings, onSettingsChange }: S
 
   const modelsForProvider = models.filter(model => model.provider === selectedProvider)
 
-  const setSettings = (updater: (prev: any) => any) => {
+  const setSettings = (updater: (_prev: any) => any) => {
     onSettingsChange(updater(settings))
   }
 

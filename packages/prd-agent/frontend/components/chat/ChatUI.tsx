@@ -9,7 +9,7 @@ import { Message } from '../../types';
 export interface ChatUIProps {
   agentName: string;
   agentDescription: string;
-  onSendMessage: (message: string) => Promise<void>;
+  onSendMessage: (_message: string) => Promise<void>;
   messages: Message[];
   isProcessing: boolean;
   capabilities?: string[];

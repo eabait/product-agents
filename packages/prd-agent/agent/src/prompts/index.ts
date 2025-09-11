@@ -1,13 +1,17 @@
 /**
  * Barrel exports for all PRD Agent prompts
  * 
- * Centralizes access to all prompt functions used by worker agents.
+ * Centralizes access to all prompt functions used by analyzers and section writers.
  */
 
+// Analyzer prompts
 export { createClarificationPrompt } from './clarification'
 export { createContextAnalysisPrompt } from './context-analysis'
-export { createRequirementsExtractionPrompt } from './requirements-extraction'
-export { createProblemStatementPrompt } from './problem-statement'
-export { createSolutionFrameworkPrompt } from './solution-framework'
-export { createPRDSynthesisPrompt } from './prd-synthesis'
-export { createChangeWorkerPrompt } from './change-worker'
+export { createSectionDetectionPrompt } from './section-detection'
+
+// Section writer prompts
+export { createTargetUsersSectionPrompt } from './target-users-section'
+export { createSolutionSectionPrompt } from './solution-section'
+export { createKeyFeaturesSectionPrompt } from './key-features-section'
+export { createSuccessMetricsSectionPrompt } from './success-metrics-section'
+export { createConstraintsSectionPrompt } from './constraints-section'

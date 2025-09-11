@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react'
 import { contextStorage } from '@/lib/context-storage'
-import { ContextSettings } from '@/lib/context-types'
+import { ContextSettings, DEFAULT_CONTEXT_SETTINGS } from '@/lib/context-types'
 
 interface ContextSettingsContextType {
   contextSettings: ContextSettings
@@ -17,20 +17,25 @@ interface ContextSettingsProviderProps {
 }
 
 export function ContextSettingsProvider({ children }: ContextSettingsProviderProps) {
-  const [contextSettings, setContextSettings] = useState<ContextSettings>(() => {
-    // Initialize with current settings from storage
-    return contextStorage.getContextSettings()
-  })
+  const [contextSettings, setContextSettings] = useState<ContextSettings>(DEFAULT_CONTEXT_SETTINGS)
+
+  // Load settings from storage on client-side only
+  useEffect(() => {
+    const loadedSettings = contextStorage.getContextSettings()
+    setContextSettings(loadedSettings)
+  }, [])
 
   // Function to update settings
   const updateContextSettings = (updates: Partial<ContextSettings>) => {
     const newSettings = contextStorage.updateContextSettings(updates)
     setContextSettings(newSettings)
     
-    // Emit a custom event to notify other components
-    window.dispatchEvent(new CustomEvent('contextSettingsChanged', { 
-      detail: newSettings 
-    }))
+    // Emit a custom event to notify other components (client-side only)
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('contextSettingsChanged', { 
+        detail: newSettings 
+      }))
+    }
   }
 
   // Function to refresh settings from storage

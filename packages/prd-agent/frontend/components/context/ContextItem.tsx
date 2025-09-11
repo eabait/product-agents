@@ -8,7 +8,6 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { 
   Edit3, 
   Trash2, 
-  MoreVertical,
   Calendar,
   Tag
 } from 'lucide-react'
@@ -16,14 +15,17 @@ import {
   CategorizedContextItem, 
   CONTEXT_CATEGORY_LABELS 
 } from '@/lib/context-types'
-import { contextStorage } from '@/lib/context-storage'
 import { estimateTokens, checkCategoryMismatch } from '@/lib/context-utils'
 
 interface ContextItemProps {
   item: CategorizedContextItem
+  // eslint-disable-next-line no-unused-vars
   onEdit: (item: CategorizedContextItem) => void
+  // eslint-disable-next-line no-unused-vars
   onDelete: (id: string) => void
+  // eslint-disable-next-line no-unused-vars
   onToggleActive: (id: string) => void
+  // eslint-disable-next-line no-unused-vars
   onUpdateCategory?: (id: string, category: string) => void
 }
 
