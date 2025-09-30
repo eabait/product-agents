@@ -42,6 +42,7 @@ interface SettingsPanelProps {
     temperature: number
     maxTokens: number
     apiKey?: string
+    streaming?: boolean
   }
   // eslint-disable-next-line no-unused-vars
   onSettingsChange: (settings: any) => void
@@ -372,6 +373,20 @@ export function SettingsPanel({ isOpen, onClose, settings, onSettingsChange }: S
                     <p className="text-xs text-muted-foreground mt-1">
                       Leave empty to use environment variable
                     </p>
+                  </div>
+                  
+                  {/* Streaming Toggle */}
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      id="enableStreaming"
+                      checked={settings.streaming || true}
+                      onChange={(e) => setSettings(prev => ({ ...prev, streaming: e.target.checked }))}
+                      className="rounded"
+                    />
+                    <label htmlFor="enableStreaming" className="text-sm font-medium">
+                      Enable live progress updates (streaming)
+                    </label>
                   </div>
                 </div>
               </div>

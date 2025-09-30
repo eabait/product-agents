@@ -1,10 +1,18 @@
 import { createOpenRouter } from '@openrouter/ai-sdk-provider'
-import { generateObject, generateText, streamText } from 'ai'
+import { generateObject, generateText, streamText, streamObject } from 'ai'
 import { z } from 'zod'
 
+/**
+ * OpenRouter client for AI model interactions with streaming support
+ * Provides structured generation, text generation, and streaming capabilities
+ */
 export class OpenRouterClient {
   private provider: any
   
+  /**
+   * Initialize OpenRouter client
+   * @param apiKey - Optional API key, defaults to environment variable
+   */
   constructor(apiKey?: string) {
     this.provider = createOpenRouter({
       apiKey: apiKey || process.env.OPENROUTER_API_KEY || '',
@@ -111,13 +119,17 @@ export class OpenRouterClient {
     }
 
     // Enhanced XML parameter extraction - handle multiple patterns
-    console.log('Raw response before XML parameter extraction:', sanitized.substring(0, 200));
+    if (process.env.NODE_ENV === 'development') {
+      console.log('Raw response before XML parameter extraction:', sanitized.substring(0, 200));
+    }
 
     // Pattern 1: Handle XML-like parameter tags with proper closing: <parameter name="fieldName">value</parameter>
     sanitized = sanitized.replace(
       /<parameter\s+name="([^"]+)"[^>]*>(.*?)<\/parameter>/gs,
       (match, fieldName, value) => {
-        console.log(`Found closed XML parameter: ${fieldName}, value length: ${value.length}`);
+        if (process.env.NODE_ENV === 'development') {
+          console.log(`Found closed XML parameter: ${fieldName}, value length: ${value.length}`);
+        }
         try {
           // Test if value is valid JSON
           JSON.parse(value.trim())
@@ -133,13 +145,17 @@ export class OpenRouterClient {
     sanitized = sanitized.replace(
       /,\s*<parameter\s+name="([^"]+)"[^>]*>(\[[\s\S]*?\])/g,
       (match, fieldName, value) => {
-        console.log(`Found unclosed XML parameter with array: ${fieldName}, value length: ${value.length}`);
+        if (process.env.NODE_ENV === 'development') {
+          console.log(`Found unclosed XML parameter with array: ${fieldName}, value length: ${value.length}`);
+        }
         try {
           // Validate that it's a proper JSON array
           JSON.parse(value.trim())
           return `, "${fieldName}": ${value.trim()}`
         } catch (e) {
-          console.warn(`Failed to parse array value for ${fieldName}:`, e);
+          if (process.env.NODE_ENV === 'development') {
+            console.warn(`Failed to parse array value for ${fieldName}:`, e);
+          }
           return `, "${fieldName}": []`
         }
       }
@@ -200,7 +216,9 @@ export class OpenRouterClient {
       }
     )
 
-    console.log('After XML parameter extraction:', sanitized.substring(0, 200));
+    if (process.env.NODE_ENV === 'development') {
+      console.log('After XML parameter extraction:', sanitized.substring(0, 200));
+    }
 
     // Clean up any remaining XML artifacts before fixing commas
     sanitized = sanitized.replace(/<[^>]+>/g, '')
@@ -216,7 +234,9 @@ export class OpenRouterClient {
     sanitized = sanitized.replace(/(:\s*\[[^\]]*\])(\s*)("([^"]+)":)/g, '$1,$2$3')
     sanitized = sanitized.replace(/(:\s*\{[^}]*\})(\s*)("([^"]+)":)/g, '$1,$2$3')
 
-    console.log('After comma fixes:', sanitized.substring(0, 200));
+    if (process.env.NODE_ENV === 'development') {
+      console.log('After comma fixes:', sanitized.substring(0, 200));
+    }
     
     // Fix trailing commas
     sanitized = sanitized.replace(/,(\s*[}\]])/g, '$1')
@@ -224,12 +244,16 @@ export class OpenRouterClient {
     // Validate the sanitized JSON
     try {
       JSON.parse(sanitized)
-      console.log('Response sanitization successful')
+      if (process.env.NODE_ENV === 'development') {
+        console.log('Response sanitization successful')
+      }
       return sanitized
     } catch (parseError) {
       console.error('Failed to sanitize malformed response:', parseError)
-      console.error('Original response:', responseText)
-      console.error('Sanitized attempt:', sanitized)
+      if (process.env.NODE_ENV === 'development') {
+        console.error('Original response:', responseText)
+        console.error('Sanitized attempt:', sanitized)
+      }
       throw new Error(`Unable to sanitize malformed AI response: ${parseError}`)
     }
   }
@@ -305,6 +329,131 @@ export class OpenRouterClient {
     for await (const chunk of textStream) {
       yield chunk
     }
+  }
+
+  /**
+   * Stream structured data generation with progress callbacks
+   * Emits partial objects as they're being constructed by the AI
+   * @param params - Configuration for streaming structured generation
+   * @param params.model - Model identifier to use
+   * @param params.schema - Zod schema for output validation
+   * @param params.prompt - Input prompt for generation
+   * @param params.temperature - Optional temperature setting (0-2)
+   * @param params.maxTokens - Optional maximum tokens to generate
+   * @param params.onProgress - Optional callback for progress updates
+   * @returns AsyncIterableIterator yielding partial and complete objects
+   */
+  async *streamStructured<T>(params: {
+    model: string
+    schema: z.ZodSchema<T>
+    prompt: string
+    temperature?: number
+    maxTokens?: number
+    onProgress?: (partialObject: Partial<T> | T, type: 'partial' | 'complete') => void
+  }): AsyncIterableIterator<{
+    type: 'partial' | 'complete'
+    object: Partial<T> | T
+  }> {
+    try {
+      const { partialObjectStream, object: finalObject } = await streamObject({
+        model: this.getModel(params.model),
+        schema: params.schema,
+        prompt: params.prompt,
+        temperature: params.temperature || 0.3,
+        maxTokens: params.maxTokens || 8000
+      })
+
+      // Stream partial objects as they arrive
+      for await (const partialObject of partialObjectStream) {
+        const streamItem = {
+          type: 'partial' as const,
+          object: partialObject as Partial<T>
+        }
+        
+        // Call progress callback if provided
+        if (params.onProgress) {
+          params.onProgress(partialObject as Partial<T>, 'partial')
+        }
+        
+        yield streamItem
+      }
+
+      // Yield the final complete object
+      const finalResult = await finalObject
+      const finalItem = {
+        type: 'complete' as const,
+        object: finalResult
+      }
+
+      // Call progress callback for completion
+      if (params.onProgress) {
+        params.onProgress(finalResult, 'complete')
+      }
+
+      yield finalItem
+
+    } catch (error: any) {
+      // For streaming, we'll implement a simplified fallback that yields progress updates
+      console.warn('Structured streaming failed, falling back to non-streaming with progress simulation:', error.message)
+      
+      try {
+        // Use regular generateStructured as fallback, but simulate progress
+        const result = await this.generateStructured({
+          model: params.model,
+          schema: params.schema,
+          prompt: params.prompt,
+          temperature: params.temperature,
+          maxTokens: params.maxTokens
+        })
+
+        // Simulate progress by yielding a partial first, then complete
+        yield {
+          type: 'partial' as const,
+          object: {} as Partial<T>
+        }
+
+        if (params.onProgress) {
+          params.onProgress(result, 'complete')
+        }
+
+        yield {
+          type: 'complete' as const,
+          object: result
+        }
+
+      } catch (fallbackError) {
+        throw error // Re-throw original streaming error
+      }
+    }
+  }
+
+  /**
+   * Utility method to consume the entire stream and return the final object
+   * Useful when you want streaming progress but need the final result
+   */
+  async generateStructuredWithProgress<T>(params: {
+    model: string
+    schema: z.ZodSchema<T>
+    prompt: string
+    temperature?: number
+    maxTokens?: number
+    onProgress?: (partialObject: Partial<T>, type: 'partial' | 'complete') => void
+  }): Promise<T> {
+    const stream = this.streamStructured(params)
+    
+    let finalResult: T | undefined
+    
+    for await (const item of stream) {
+      if (item.type === 'complete') {
+        finalResult = item.object as T
+      }
+    }
+
+    if (!finalResult) {
+      throw new Error('Stream completed without returning final object')
+    }
+
+    return finalResult
   }
 }
 

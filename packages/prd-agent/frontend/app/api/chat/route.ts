@@ -1,7 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { formatConfidence, type ConfidenceValue } from '@/lib/confidence-display';
 
 const PRD_AGENT_URL = process.env.PRD_AGENT_URL;
+
+// Validation schemas
+const MessageSchema = z.object({
+  id: z.string(),
+  role: z.enum(['user', 'assistant']),
+  content: z.string(),
+  timestamp: z.union([z.string(), z.date()]).optional()
+});
+
+const SettingsSchema = z.object({
+  model: z.string(),
+  temperature: z.number().min(0).max(2),
+  maxTokens: z.number().min(1).max(100000),
+  apiKey: z.string().optional(),
+  streaming: z.boolean().optional()
+});
+
+const ChatRequestSchema = z.object({
+  messages: z.array(MessageSchema).min(1),
+  settings: SettingsSchema.optional(),
+  contextPayload: z.any().optional(),
+  targetSections: z.array(z.string()).optional(),
+  stream: z.boolean().optional()
+});
 
 export async function POST(request: NextRequest) {
   const requestId = Math.random().toString(36).substring(7);
@@ -10,7 +35,23 @@ export async function POST(request: NextRequest) {
   
   try {
     const body = await request.json();
-    const { messages, settings, contextPayload, targetSections } = body;
+    
+    // Validate request body
+    const validationResult = ChatRequestSchema.safeParse(body);
+    if (!validationResult.success) {
+      console.error(`[${requestId}] Request validation failed:`, validationResult.error);
+      return NextResponse.json(
+        { error: 'Invalid request format', details: validationResult.error.issues },
+        { status: 400 }
+      );
+    }
+    
+    const { messages, settings, contextPayload, targetSections, stream } = validationResult.data;
+    
+    // If streaming is requested, return SSE response
+    if (stream) {
+      return handleStreamingRequest(requestId, body);
+    }
     
     console.log(`[${requestId}] Request body structure:`, {
       messagesCount: messages?.length || 0,
@@ -307,4 +348,156 @@ function getPRDFromMessages(messages: any[]): any {
     }
   }
   return null;
+}
+
+// Handle streaming requests using Server-Sent Events
+async function handleStreamingRequest(requestId: string, body: any) {
+  console.log(`[${requestId}] === STREAMING REQUEST ===`);
+  
+  const { messages, settings, contextPayload, targetSections } = body;
+  
+  // Check if there's an existing PRD to edit
+  const existingPRD = getPRDFromMessages(messages);
+  const isEdit = existingPRD !== null;
+  
+  // Extract the user's latest message content for the backend
+  const latestUserMessage = messages.filter((m: any) => m.role === 'user').pop()?.content || '';
+  
+  // Determine the streaming endpoint to use
+  let endpoint: string;
+  let payload: any;
+
+  if (targetSections && targetSections.length === 1) {
+    // Single section update
+    endpoint = `/prd/section/${targetSections[0]}/stream`;
+    payload = {
+      message: buildConversationContext(messages),
+      settings,
+      contextPayload,
+      ...(existingPRD && { existingPRD }),
+      conversationHistory: messages
+    };
+  } else if (targetSections && targetSections.length > 1) {
+    // Multiple sections update
+    endpoint = '/prd/sections/stream';
+    payload = {
+      message: buildConversationContext(messages),
+      settings,
+      contextPayload,
+      ...(existingPRD && { existingPRD }),
+      targetSections,
+      conversationHistory: messages
+    };
+  } else {
+    // Full PRD generation or edit (use main streaming endpoint)
+    endpoint = isEdit ? '/prd/edit/stream' : '/prd/stream';
+    payload = {
+      message: buildConversationContext(messages),
+      settings,
+      contextPayload,
+      ...(existingPRD && { existingPRD }),
+      conversationHistory: messages
+    };
+  }
+
+  const fullUrl = `${PRD_AGENT_URL}${endpoint}`;
+  console.log(`[${requestId}] Streaming backend request:`, {
+    url: fullUrl,
+    endpoint: endpoint,
+    isEdit: isEdit,
+    targetSections: targetSections
+  });
+
+  // Create a ReadableStream to proxy the SSE events from backend
+  const stream = new ReadableStream({
+    async start(controller) {
+      const encoder = new TextEncoder();
+      
+      try {
+        const response = await fetch(fullUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.log(`[${requestId}] Backend error response:`, errorText);
+          
+          // Send error event
+          controller.enqueue(encoder.encode(`event: error\n`));
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: `Backend error: ${response.statusText}` })}\n\n`));
+          controller.close();
+          return;
+        }
+
+        if (!response.body) {
+          controller.enqueue(encoder.encode(`event: error\n`));
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: 'No response body' })}\n\n`));
+          controller.close();
+          return;
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+
+        try {
+          let timeoutId: NodeJS.Timeout | null = null
+          
+          // Set up timeout for hanging connections
+          const STREAM_TIMEOUT_MS = 300000; // 5 minutes timeout
+          timeoutId = setTimeout(() => {
+            console.warn(`[${requestId}] Stream timeout after ${STREAM_TIMEOUT_MS}ms`);
+            controller.enqueue(encoder.encode(`event: error\n`));
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: 'Connection timeout' })}\n\n`));
+            controller.close();
+          }, STREAM_TIMEOUT_MS);
+
+          // eslint-disable-next-line no-constant-condition
+          while (true) {
+            const { done, value } = await reader.read();
+            
+            if (done) {
+              console.log(`[${requestId}] Streaming complete`);
+              if (timeoutId) clearTimeout(timeoutId);
+              controller.close();
+              break;
+            }
+
+            // Forward the SSE data from backend to frontend
+            const chunk = decoder.decode(value, { stream: true });
+            if (process.env.NODE_ENV === 'development') {
+              console.log(`[${requestId}] Streaming chunk:`, chunk.substring(0, 200));
+            }
+            
+            controller.enqueue(encoder.encode(chunk));
+          }
+        } finally {
+          reader.releaseLock();
+        }
+
+      } catch (error) {
+        console.error(`[${requestId}] Streaming error:`, error);
+        
+        // Send error event
+        controller.enqueue(encoder.encode(`event: error\n`));
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ 
+          error: error instanceof Error ? error.message : 'Streaming failed' 
+        })}\n\n`));
+        
+        controller.close();
+      }
+    }
+  });
+
+  // Return SSE response
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Headers': 'Cache-Control'
+    }
+  });
 }

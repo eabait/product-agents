@@ -108,7 +108,7 @@ describe('HTTP Server REST API', () => {
     jest.resetModules()
     
     // Create a simple test server that mimics the real server behavior
-    const { createTestServer } = await import('./test-server-factory')
+    const { createTestServer } = await import('./test-server-factory.helper')
     server = createTestServer()
     
     // Start the test server

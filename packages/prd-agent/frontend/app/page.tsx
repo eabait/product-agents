@@ -26,6 +26,7 @@ import { NewPRD } from "@/lib/prd-schema";
 import { ContextPanel } from "@/components/context";
 import { ContextUsageIndicator } from "@/components/context/ContextUsageIndicator";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
+import { type ProgressEvent } from "@/components/chat/ProgressIndicator";
 import { contextStorage } from "@/lib/context-storage";
 import { buildEnhancedContextPayload, getContextSummary } from "@/lib/context-utils";
 import { 
@@ -33,12 +34,18 @@ import {
   VALIDATION_LIMITS, 
   TimingSettings
 } from "@/lib/ui-constants";
+
+// Streaming configuration constants
+const STREAM_TIMEOUT_MS = 300000; // 5 minutes
+// const STREAM_RETRY_COUNT = 3; // Reserved for future retry implementation
+// const STREAM_RETRY_DELAY_MS = 1000; // Reserved for future retry implementation
 // AgentSettings interface
 interface AgentSettings {
   model: string;
   temperature: number;
   maxTokens: number;
   apiKey?: string;
+  streaming?: boolean;
 }
 
 // Enhanced model interface from OpenRouter
@@ -64,8 +71,15 @@ function PRDAgentPageContent() {
     model: "anthropic/claude-3-7-sonnet", // Will be updated with agent defaults
     temperature: 0.7, // Will be updated with agent defaults
     maxTokens: 8000, // Will be updated with agent defaults
-    apiKey: undefined
+    apiKey: undefined,
+    streaming: true // Enable streaming by default
   });
+  
+  // Streaming state
+  const [progressEvents, setProgressEvents] = useState<ProgressEvent[]>([]);
+  
+  // Derive streaming state from settings
+  const isStreamingEnabled = settings.streaming !== false;
   
   // Context panel state
   const [contextOpen, setContextOpen] = useState(false);
@@ -80,6 +94,8 @@ function PRDAgentPageContent() {
 
   // track initialization so we don't run sync effects before we've loaded from localStorage
   const isInitializedRef = useRef(false);
+  
+  // No cleanup needed since we handle streaming directly in the fetch response
   
 
   // Computed helpers for working with active conversation
@@ -569,6 +585,9 @@ function PRDAgentPageContent() {
     updateActiveConversation(conv => ({ ...conv, messages: newMessages }));
     setInput("");
     setIsChatLoading(true);
+    
+    // Reset progress events for new request
+    setProgressEvents([]);
 
     try {
       // Sync conversation messages to selectable messages storage
@@ -586,77 +605,12 @@ function PRDAgentPageContent() {
       // Build enhanced context payload including categorized context, selected messages, and current PRD
       const existingPRD = getPRDFromMessages(newMessages);
       const contextPayload = buildEnhancedContextPayload(newMessages, existingPRD);
-
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          messages: newMessages, 
-          settings: settings,
-          contextPayload: contextPayload
-        }),
-      });
-
-      if (!response.ok) throw new Error("Chat request failed");
-
-      const data = await response.json();
-      if (data.error) throw new Error(data.error);
-
-      console.log("Frontend received API response:", {
-        hasError: !!data.error,
-        hasContent: !!data.content,
-        isStructured: data.isStructured,
-        contentType: typeof data.content,
-        contentKeys: typeof data.content === 'object' ? Object.keys(data.content) : null,
-        allResponseKeys: Object.keys(data),
-        contentPreview: typeof data.content === 'string' 
-          ? data.content.substring(0, 100) 
-          : JSON.stringify(data.content || {}).substring(0, 100)
-      });
-
-      // Handle both structured data and string content
-      let messageContent: string;
-      if (data.isStructured && typeof data.content === 'object') {
-        // Convert structured data to formatted JSON for display
-        messageContent = JSON.stringify(data.content, null, 2);
-        console.log("Processing as structured data, length:", messageContent.length);
-      } else if (data.content && typeof data.content === 'string') {
-        // Use content directly if it's a string
-        messageContent = data.content;
-        console.log("Processing as string content, length:", messageContent.length);
+      
+      if (isStreamingEnabled) {
+        await handleStreamingSubmit(newMessages, contextPayload, userMessage);
       } else {
-        // Fallback - this might be where the issue is
-        console.warn("Falling back to 'No response' - this indicates a problem:", {
-          contentExists: !!data.content,
-          contentType: typeof data.content,
-          isStructured: data.isStructured
-        });
-        messageContent = data.content || "No response";
+        await handleNonStreamingSubmit(newMessages, contextPayload, userMessage);
       }
-
-      console.log("Final message content prepared:", {
-        contentLength: messageContent.length,
-        isJSONString: messageContent.startsWith('{') || messageContent.startsWith('['),
-        contentPreview: messageContent.substring(0, 200)
-      });
-
-      const assistantMessage: Message = {
-        id: uuidv4(),
-        role: "assistant",
-        content: messageContent,
-        timestamp: new Date(),
-      };
-
-      const finalMessages = [...newMessages, assistantMessage];
-      updateActiveConversation(conv => {
-        // Auto-generate title from first user message if still using default
-        const shouldUpdateTitle = conv.title === "New PRD" && conv.messages.length === 0;
-        return {
-          ...conv, 
-          messages: finalMessages,
-          title: shouldUpdateTitle ? generateTitleFromMessage(userMessage.content) : conv.title
-        };
-      });
     } catch (error) {
       console.error("Chat error:", error);
       const errorMessage: Message = {
@@ -676,8 +630,228 @@ function PRDAgentPageContent() {
         };
       });
     } finally {
-      setIsChatLoading(false);
+      // Only reset loading state for non-streaming mode
+      // Streaming mode handles this in its own finally block
+      if (!isStreamingEnabled) {
+        setIsChatLoading(false);
+      }
     }
+  };
+
+  // Streaming submission handler with proper cleanup and error handling
+  const handleStreamingSubmit = async (newMessages: Message[], contextPayload: any, userMessage: Message) => {
+    let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+    let timeoutId: NodeJS.Timeout | null = null;
+
+    try {
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          messages: newMessages, 
+          settings: settings,
+          contextPayload: contextPayload,
+          stream: true // Enable streaming
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Chat request failed: ${response.status} ${response.statusText}`);
+      }
+
+      // Create EventSource-like interface from the response stream
+      reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error("No response stream available");
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+      const assistantMessageId = uuidv4();
+
+      // Set up timeout for streaming connection
+      timeoutId = setTimeout(() => {
+        if (reader) {
+          reader.cancel('Stream timeout');
+        }
+        setProgressEvents(prev => [...prev, {
+          type: 'final',
+          timestamp: new Date().toISOString(),
+          error: `Stream timeout after ${STREAM_TIMEOUT_MS / 1000 / 60} minutes`
+        }]);
+      }, STREAM_TIMEOUT_MS);
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const { done, value } = await reader.read();
+        
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        
+        // Process complete lines from buffer
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || ''; // Keep incomplete line in buffer
+        
+        for (const line of lines) {
+          if (line.trim() === '') continue;
+          
+          if (line.startsWith('event:')) {
+            // const eventType = line.substring(6).trim();
+            continue;
+          }
+          
+          if (line.startsWith('data:')) {
+            const dataStr = line.substring(5).trim();
+            if (dataStr === '') continue;
+            
+            try {
+              const eventData = JSON.parse(dataStr);
+              
+              // Handle different event types
+              if (eventData.type) {
+                // Progress event
+                setProgressEvents(prev => [...prev, eventData]);
+              } else if (eventData.error) {
+                throw new Error(eventData.error);
+              } else if (eventData.problemStatement || eventData.sections || eventData.solutionOverview) {
+                // Direct PRD object response
+                const messageContent = JSON.stringify(eventData, null, 2);
+                
+                const assistantMessage: Message = {
+                  id: assistantMessageId,
+                  role: "assistant",
+                  content: messageContent,
+                  timestamp: new Date(),
+                };
+
+                const finalMessages = [...newMessages, assistantMessage];
+                updateActiveConversation(conv => {
+                  const shouldUpdateTitle = conv.title === "New PRD" && conv.messages.length === 0;
+                  return {
+                    ...conv, 
+                    messages: finalMessages,
+                    title: shouldUpdateTitle ? generateTitleFromMessage(userMessage.content) : conv.title
+                  };
+                });
+              } else if (eventData.prd || eventData.content) {
+                // Final result
+                const messageContent = eventData.prd 
+                  ? JSON.stringify(eventData.prd, null, 2)
+                  : (typeof eventData.content === 'object' 
+                      ? JSON.stringify(eventData.content, null, 2)
+                      : eventData.content);
+                
+                const assistantMessage: Message = {
+                  id: assistantMessageId,
+                  role: "assistant",
+                  content: messageContent,
+                  timestamp: new Date(),
+                };
+
+                const finalMessages = [...newMessages, assistantMessage];
+                updateActiveConversation(conv => {
+                  const shouldUpdateTitle = conv.title === "New PRD" && conv.messages.length === 0;
+                  return {
+                    ...conv, 
+                    messages: finalMessages,
+                    title: shouldUpdateTitle ? generateTitleFromMessage(userMessage.content) : conv.title
+                  };
+                });
+              } else if (eventData.needsClarification) {
+                // Handle clarification request
+                const questionsText = eventData.questions?.map((q: string, index: number) => 
+                  `**${index + 1}. ${q}**`
+                ).join('\n\n');
+                
+                const content = `I need more information to create a comprehensive PRD. Please help me understand:\n\n${questionsText}\n\nPlease provide as much detail as possible for each area.`;
+                
+                const assistantMessage: Message = {
+                  id: assistantMessageId,
+                  role: "assistant",
+                  content: content,
+                  timestamp: new Date(),
+                };
+
+                const finalMessages = [...newMessages, assistantMessage];
+                updateActiveConversation(conv => {
+                  const shouldUpdateTitle = conv.title === "New PRD" && conv.messages.length === 0;
+                  return {
+                    ...conv, 
+                    messages: finalMessages,
+                    title: shouldUpdateTitle ? generateTitleFromMessage(userMessage.content) : conv.title
+                  };
+                });
+              }
+            } catch (parseError) {
+              console.warn('Failed to parse SSE data:', dataStr, parseError);
+            }
+          }
+        }
+      }
+    } finally {
+      // Reset loading state
+      setIsChatLoading(false);
+      setProgressEvents([]); // Clear progress events
+      
+      // Clear timeout
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      
+      // Clean up reader
+      if (reader) {
+        try {
+          reader.releaseLock();
+        } catch (error) {
+          console.warn('Error releasing reader lock:', error);
+        }
+      }
+    }
+  };
+
+  // Non-streaming submission handler (original logic)
+  const handleNonStreamingSubmit = async (newMessages: Message[], contextPayload: any, userMessage: Message) => {
+    const response = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ 
+        messages: newMessages, 
+        settings: settings,
+        contextPayload: contextPayload
+      }),
+    });
+
+    if (!response.ok) throw new Error("Chat request failed");
+
+    const data = await response.json();
+    if (data.error) throw new Error(data.error);
+
+    // Handle both structured data and string content
+    let messageContent: string;
+    if (data.isStructured && typeof data.content === 'object') {
+      messageContent = JSON.stringify(data.content, null, 2);
+    } else if (data.content && typeof data.content === 'string') {
+      messageContent = data.content;
+    } else {
+      messageContent = data.content || "No response";
+    }
+
+    const assistantMessage: Message = {
+      id: uuidv4(),
+      role: "assistant",
+      content: messageContent,
+      timestamp: new Date(),
+    };
+
+    const finalMessages = [...newMessages, assistantMessage];
+    updateActiveConversation(conv => {
+      const shouldUpdateTitle = conv.title === "New PRD" && conv.messages.length === 0;
+      return {
+        ...conv, 
+        messages: finalMessages,
+        title: shouldUpdateTitle ? generateTitleFromMessage(userMessage.content) : conv.title
+      };
+    });
   };
 
   return (
@@ -922,6 +1096,8 @@ function PRDAgentPageContent() {
                 copied={copied}
                 onCopy={handleCopy}
                 onPRDUpdate={handlePRDUpdate}
+                progressEvents={progressEvents}
+                isStreaming={isChatLoading && isStreamingEnabled}
               />
             )}
           </div>

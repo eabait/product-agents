@@ -16,6 +16,7 @@ export * from './section-writers'
 
 // Re-export main agent
 export { PRDOrchestratorAgent } from './prd-orchestrator-agent'
+export type { ProgressEvent, ProgressCallback } from './prd-orchestrator-agent'
 
 // Re-export base types from agent-core
 export type { WorkerResult } from '@product-agents/agent-core'

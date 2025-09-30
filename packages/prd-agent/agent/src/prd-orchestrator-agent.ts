@@ -28,6 +28,20 @@ import {
   type SectionWriterInput
 } from './section-writers'
 
+// Progress event types for streaming
+export interface ProgressEvent {
+  type: 'status' | 'worker_start' | 'worker_complete' | 'section_start' | 'section_complete' | 'final'
+  timestamp: string
+  message?: string
+  worker?: string
+  section?: string
+  data?: any
+  confidence?: number
+  error?: string
+}
+
+export type ProgressCallback = (event: ProgressEvent) => void
+
 export class PRDOrchestratorAgent extends BaseAgent {
   // Agent capabilities and default configuration
   static readonly requiredCapabilities: ModelCapability[] = ['structured_output' as ModelCapability]
@@ -84,27 +98,99 @@ export class PRDOrchestratorAgent extends BaseAgent {
   }
 
   async generateSections(request: SectionRoutingRequest): Promise<SectionRoutingResponse> {
+    return this.generateSectionsWithProgress(request)
+  }
+
+  async generateSectionsWithProgress(request: SectionRoutingRequest, onProgress?: ProgressCallback): Promise<SectionRoutingResponse> {
     const startTime = Date.now()
     
+    // Emit initial status
+    this.emitProgress(onProgress, {
+      type: 'status',
+      timestamp: new Date().toISOString(),
+      message: 'Starting PRD generation...'
+    })
+    
     // Check if clarification is needed first
+    this.emitProgress(onProgress, {
+      type: 'worker_start',
+      timestamp: new Date().toISOString(),
+      worker: 'ClarificationAnalyzer',
+      message: 'Checking if more information is needed...'
+    })
+
     const clarificationCheck = await this.checkClarificationNeeded(request, startTime)
     if (clarificationCheck) {
+      this.emitProgress(onProgress, {
+        type: 'worker_complete',
+        timestamp: new Date().toISOString(),
+        worker: 'ClarificationAnalyzer',
+        message: 'Additional information required'
+      })
       return clarificationCheck
     }
+
+    this.emitProgress(onProgress, {
+      type: 'worker_complete',
+      timestamp: new Date().toISOString(),
+      worker: 'ClarificationAnalyzer',
+      message: 'Requirements analysis complete'
+    })
 
     // Determine which sections to generate/update
     const sectionsToProcess = this.determineSectionsToProcess(request)
     
+    this.emitProgress(onProgress, {
+      type: 'status',
+      timestamp: new Date().toISOString(),
+      message: `Processing sections: ${sectionsToProcess.join(', ')}`
+    })
+    
     // PHASE 1: Run simplified centralized analysis once
+    this.emitProgress(onProgress, {
+      type: 'worker_start',
+      timestamp: new Date().toISOString(),
+      worker: 'ContextAnalyzer',
+      message: 'Analyzing themes and requirements...'
+    })
+
     const sharedAnalysisResults = await this.runCentralizedAnalysis(request)
     
-    // PHASE 2: Process sections in parallel
+    this.emitProgress(onProgress, {
+      type: 'worker_complete',
+      timestamp: new Date().toISOString(),
+      worker: 'ContextAnalyzer',
+      message: 'Requirements analysis complete',
+      confidence: 0.85
+    })
+    
+    // PHASE 2: Process sections in parallel with progress tracking
     const { sectionResults, confidenceAssessments, allIssues, allWarnings } = 
-      await this.processSectionsInParallel(request, sectionsToProcess, sharedAnalysisResults)
+      await this.processSectionsInParallelWithProgress(request, sectionsToProcess, sharedAnalysisResults, onProgress)
 
-    return this.buildSectionResponse(
+    const response = this.buildSectionResponse(
       sectionResults, confidenceAssessments, allIssues, allWarnings, sectionsToProcess, startTime
     )
+
+    // Emit final completion
+    this.emitProgress(onProgress, {
+      type: 'final',
+      timestamp: new Date().toISOString(),
+      message: 'PRD generation complete',
+      data: response
+    })
+
+    return response
+  }
+
+  private emitProgress(onProgress: ProgressCallback | undefined, event: ProgressEvent): void {
+    if (onProgress) {
+      try {
+        onProgress(event)
+      } catch (error) {
+        console.warn('Progress callback failed:', error)
+      }
+    }
   }
 
   private async handleEditOperation(request: SectionRoutingRequest): Promise<PRD> {
@@ -304,10 +390,11 @@ export class PRDOrchestratorAgent extends BaseAgent {
     return sharedAnalysisResults
   }
 
-  private async processSectionsInParallel(
+  private async processSectionsInParallelWithProgress(
     request: SectionRoutingRequest, 
     sectionsToProcess: string[], 
-    sharedAnalysisResults: Map<string, any>
+    sharedAnalysisResults: Map<string, any>,
+    onProgress?: ProgressCallback
   ): Promise<{
     sectionResults: Map<string, any>
     confidenceAssessments: Map<string, ConfidenceAssessment>
@@ -320,7 +407,7 @@ export class PRDOrchestratorAgent extends BaseAgent {
     const allWarnings: string[] = []
 
     const sectionsToGenerate = this.getSectionProcessingOrder(sectionsToProcess)
-    console.log(`Processing ${sectionsToGenerate.length} sections in parallel:`, sectionsToGenerate)
+    console.log(`Processing ${sectionsToGenerate.length} sections with progress tracking:`, sectionsToGenerate)
     
     const sectionPromises = sectionsToGenerate.map(async (sectionName) => {
       const writer = this.sectionWriters.get(sectionName)
@@ -329,6 +416,14 @@ export class PRDOrchestratorAgent extends BaseAgent {
       }
 
       try {
+        // Emit section start
+        this.emitProgress(onProgress, {
+          type: 'section_start',
+          timestamp: new Date().toISOString(),
+          section: sectionName,
+          message: `Generating ${sectionName} section...`
+        })
+
         const sectionInput: SectionWriterInput = {
           message: request.message,
           context: {
@@ -344,6 +439,16 @@ export class PRDOrchestratorAgent extends BaseAgent {
         const result = await writer.writeSection(sectionInput)
         console.log(`✓ Completed section: ${sectionName}`)
         
+        // Emit section completion
+        this.emitProgress(onProgress, {
+          type: 'section_complete',
+          timestamp: new Date().toISOString(),
+          section: sectionName,
+          message: `${sectionName} section generated successfully`,
+          data: result.content,
+          confidence: this.extractConfidenceScore(result.confidence)
+        })
+        
         return {
           sectionName,
           result,
@@ -353,6 +458,16 @@ export class PRDOrchestratorAgent extends BaseAgent {
         }
       } catch (error) {
         console.error(`✗ Error processing section ${sectionName}:`, error)
+        
+        // Emit section error
+        this.emitProgress(onProgress, {
+          type: 'section_complete',
+          timestamp: new Date().toISOString(),
+          section: sectionName,
+          message: `Failed to generate ${sectionName} section`,
+          error: String(error)
+        })
+        
         return {
           sectionName,
           error: `Failed to generate ${sectionName} section: ${error}`
@@ -377,6 +492,31 @@ export class PRDOrchestratorAgent extends BaseAgent {
     }
 
     return { sectionResults, confidenceAssessments, allIssues, allWarnings }
+  }
+
+  private async processSectionsInParallel(
+    request: SectionRoutingRequest, 
+    sectionsToProcess: string[], 
+    sharedAnalysisResults: Map<string, any>
+  ): Promise<{
+    sectionResults: Map<string, any>
+    confidenceAssessments: Map<string, ConfidenceAssessment>
+    allIssues: string[]
+    allWarnings: string[]
+  }> {
+    return this.processSectionsInParallelWithProgress(request, sectionsToProcess, sharedAnalysisResults)
+  }
+
+  private extractConfidenceScore(confidence: ConfidenceAssessment | undefined): number | undefined {
+    if (!confidence) return undefined
+    
+    // Convert confidence level to numeric score
+    switch (confidence.level) {
+      case 'high': return 0.9
+      case 'medium': return 0.7
+      case 'low': return 0.4
+      default: return 0.5
+    }
   }
 
   private buildSectionResponse(

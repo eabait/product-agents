@@ -23,7 +23,8 @@ module.exports = {
     '<rootDir>/src/__tests__/setup.ts',
     '<rootDir>/src/__tests__/mock-openrouter-client.ts',
     '<rootDir>/src/__tests__/run-demo.ts',
-    '<rootDir>/src/__tests__/README.md'
+    '<rootDir>/src/__tests__/README.md',
+    '<rootDir>/src/__tests__/test-server-factory.helper.ts'
   ],
   verbose: true,
   testTimeout: 30000
