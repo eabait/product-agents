@@ -2,16 +2,44 @@ import { z } from 'zod'
 import { BaseAnalyzer, AnalyzerResult, AnalyzerInput } from './base-analyzer'
 import { createSectionDetectionPrompt } from '../prompts/section-detection'
 import { ConfidenceAssessment } from '../schemas'
-import { 
-  assessConfidence, 
-  assessInputCompleteness, 
-  assessContextRichness 
+import {
+  assessConfidence,
+  assessInputCompleteness,
+  assessContextRichness
 } from '../utils/confidence-assessment'
+
+const normalizeReasoning = (value: unknown): Record<string, string> => {
+  if (typeof value === 'string') {
+    return { summary: value }
+  }
+
+  if (value && typeof value === 'object') {
+    const record: Record<string, string> = {}
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+      if (typeof entry === 'string') {
+        record[key] = entry
+        continue
+      }
+
+      if (entry && typeof entry === 'object') {
+        // Flatten nested objects such as excluded_sections
+        for (const [nestedKey, nestedValue] of Object.entries(entry as Record<string, unknown>)) {
+          if (typeof nestedValue === 'string') {
+            record[`${key}_${nestedKey}`] = nestedValue
+          }
+        }
+      }
+    }
+    return record
+  }
+
+  return {}
+}
 
 // Schema for section detection response
 const SectionDetectionResultSchema = z.object({
   affectedSections: z.array(z.enum(['targetUsers', 'solution', 'keyFeatures', 'successMetrics', 'constraints'])),
-  reasoning: z.record(z.string()), // section name -> reason
+  reasoning: z.any().transform(normalizeReasoning),
   confidence: z.enum(['high', 'medium', 'low'])
 })
 
@@ -74,7 +102,10 @@ export class SectionDetectionAnalyzer extends BaseAnalyzer {
 
     return {
       name: 'sectionDetection',
-      data: result,
+      data: {
+        ...result,
+        reasoning: normalizeReasoning(result.reasoning)
+      },
       confidence: confidenceAssessment,
       metadata: {
         sections_count: result.affectedSections.length,

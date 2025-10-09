@@ -45,7 +45,10 @@ export type ProgressCallback = (event: ProgressEvent) => void
 
 export class PRDOrchestratorAgent extends BaseAgent {
   // Agent capabilities and default configuration
-  static readonly requiredCapabilities: ModelCapability[] = ['structured_output' as ModelCapability]
+  static readonly requiredCapabilities: ModelCapability[] = [
+    'structured_output' as ModelCapability,
+    'streaming' as ModelCapability
+  ]
   static readonly defaultModel = 'anthropic/claude-3-7-sonnet'
   static readonly agentName = 'PRD Orchestrator'
   static readonly agentDescription = 'Orchestrates PRD generation with modular section writers'

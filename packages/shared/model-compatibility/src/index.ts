@@ -1,10 +1,16 @@
 // Model capability types
-export type ModelCapability = 'reasoning' | 'structured_output' | 'tools' | 'multimodal'
+export type ModelCapability =
+  | 'reasoning'
+  | 'structured_output'
+  | 'tools'
+  | 'multimodal'
+  | 'streaming'
 
 // Model capability definitions and compatibility mappings
 export const MODEL_CAPABILITIES: Record<ModelCapability, string[]> = {
   // Models with advanced reasoning capabilities
   reasoning: [
+    'anthropic/claude-3-7-sonnet',
     'anthropic/claude-3-5-sonnet',
     'anthropic/claude-3-opus',
     'anthropic/claude-3-sonnet',
@@ -18,6 +24,8 @@ export const MODEL_CAPABILITIES: Record<ModelCapability, string[]> = {
   
   // Models with structured output capabilities (JSON, schema-based generation)
   structured_output: [
+    'anthropic/claude-3-7-sonnet',
+    'anthropic/claude-3-7-haiku',
     'anthropic/claude-3-5-sonnet',
     'anthropic/claude-3-5-haiku',
     'anthropic/claude-3-opus',
@@ -36,6 +44,8 @@ export const MODEL_CAPABILITIES: Record<ModelCapability, string[]> = {
   
   // Models with function calling/tool use capabilities
   tools: [
+    'anthropic/claude-3-7-sonnet',
+    'anthropic/claude-3-7-haiku',
     'anthropic/claude-3-5-sonnet',
     'anthropic/claude-3-5-haiku', 
     'anthropic/claude-3-opus',
@@ -54,12 +64,33 @@ export const MODEL_CAPABILITIES: Record<ModelCapability, string[]> = {
   
   // Models with multimodal capabilities (vision, etc.)
   multimodal: [
+    'anthropic/claude-3-7-sonnet',
     'anthropic/claude-3-5-sonnet',
     'anthropic/claude-3-opus',
     'anthropic/claude-3-sonnet',
     'openai/gpt-4o',
     'openai/gpt-4-turbo',
     'google/gemini-pro-1.5'
+  ],
+
+  // Models with streaming (SSE/websocket) response support
+  streaming: [
+    'anthropic/claude-3-7-sonnet',
+    'anthropic/claude-3-7-haiku',
+    'anthropic/claude-3-5-sonnet',
+    'anthropic/claude-3-5-haiku',
+    'anthropic/claude-3-opus',
+    'anthropic/claude-3-sonnet',
+    'anthropic/claude-3-haiku',
+    'openai/gpt-4o',
+    'openai/gpt-4o-mini',
+    'openai/gpt-4-turbo',
+    'openai/gpt-4',
+    'openai/gpt-3.5-turbo',
+    'google/gemini-pro',
+    'google/gemini-pro-1.5',
+    'mistralai/mistral-large',
+    'cohere/command-r-plus'
   ]
 }
 
@@ -67,6 +98,8 @@ export const MODEL_CAPABILITIES: Record<ModelCapability, string[]> = {
 // These models support function calling/structured generation
 export const TOOL_COMPATIBLE_MODELS = [
   // Anthropic models (all support tools)
+  'anthropic/claude-3-7-sonnet',
+  'anthropic/claude-3-7-haiku',
   'anthropic/claude-3-5-sonnet',
   'anthropic/claude-3-5-haiku', 
   'anthropic/claude-3-opus',
@@ -144,6 +177,17 @@ export function mapOpenRouterToAgentCapabilities(model: any): ModelCapability[] 
   if (model.supported_parameters?.includes('tools') || model.supported_parameters?.includes('tool_choice')) {
     mappedCapabilities.push('tools' as ModelCapability)
   }
+
+  // Check for streaming capability
+  if (
+    model.supported_parameters?.includes('stream') ||
+    model.supported_parameters?.includes('streaming') ||
+    model.supported_parameters?.includes('stream_response') ||
+    model.supported_parameters?.includes('streamed_responses') ||
+    model.capabilities?.includes('streaming')
+  ) {
+    mappedCapabilities.push('streaming' as ModelCapability)
+  }
   
   // Check for structured output capability
   if (model.supported_parameters?.includes('structured_outputs') || 
@@ -166,6 +210,7 @@ export function mapOpenRouterToAgentCapabilities(model: any): ModelCapability[] 
   // For models that support tools, check if they're from known families that support all capabilities
   if (mappedCapabilities.includes('tools')) {
     const fullCapabilityModels = [
+      'anthropic/claude-3-7-sonnet', 'anthropic/claude-3-7-haiku',
       'anthropic/claude-3-5-sonnet', 'anthropic/claude-3-opus', 'anthropic/claude-3-sonnet', 'anthropic/claude-3-haiku',
       'openai/gpt-4o', 'openai/gpt-4-turbo', 'openai/gpt-4', 'openai/gpt-3.5-turbo',
       'google/gemini-pro', 'google/gemini-pro-1.5',
@@ -180,6 +225,9 @@ export function mapOpenRouterToAgentCapabilities(model: any): ModelCapability[] 
       }
       if (!mappedCapabilities.includes('reasoning' as ModelCapability)) {
         mappedCapabilities.push('reasoning' as ModelCapability)
+      }
+      if (!mappedCapabilities.includes('streaming' as ModelCapability)) {
+        mappedCapabilities.push('streaming' as ModelCapability)
       }
     }
   }

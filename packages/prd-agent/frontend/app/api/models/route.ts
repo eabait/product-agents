@@ -31,8 +31,15 @@ interface OpenRouterModel {
   supported_parameters?: string[];
 }
 
+type AgentCapabilityProfile = {
+  agent: ModelCapability[]
+  subAgents: Record<string, ModelCapability[]>
+}
+
+const DEFAULT_CAPABILITIES: ModelCapability[] = ['structured_output']
+
 // Helper function to fetch agent capabilities
-async function fetchAgentCapabilities(): Promise<ModelCapability[]> {
+async function fetchAgentCapabilities(): Promise<AgentCapabilityProfile> {
   try {
     const agentUrl = process.env.PRD_AGENT_URL || "http://localhost:3001";
     const response = await fetch(`${agentUrl}/health`, {
@@ -44,17 +51,36 @@ async function fetchAgentCapabilities(): Promise<ModelCapability[]> {
 
     if (response.ok) {
       const data = await response.json();
-      if (data.metadata?.requiredCapabilities) {
-        return data.metadata.requiredCapabilities;
+      const agentCapabilities: ModelCapability[] =
+        data.metadata?.requiredCapabilities ||
+        data.agentInfo?.requiredCapabilities ||
+        DEFAULT_CAPABILITIES;
+
+      const subAgentCapabilities: Record<string, ModelCapability[]> = {};
+      if (Array.isArray(data.metadata?.subAgents)) {
+        for (const subAgent of data.metadata.subAgents) {
+          if (subAgent?.id) {
+            subAgentCapabilities[subAgent.id] = Array.isArray(subAgent.requiredCapabilities)
+              ? subAgent.requiredCapabilities
+              : [];
+          }
+        }
       }
-      return data.agentInfo?.requiredCapabilities || ['structured_output']; // fallback to structured_output only
+
+      return {
+        agent: agentCapabilities,
+        subAgents: subAgentCapabilities
+      };
     }
   } catch (error) {
     console.warn('Failed to fetch agent capabilities:', error);
   }
   
   // Fallback to legacy behavior (structured_output only)
-  return ['structured_output'];
+  return {
+    agent: DEFAULT_CAPABILITIES,
+    subAgents: {}
+  };
 }
 
 // Check if a model meets agent requirements
@@ -83,8 +109,14 @@ export async function GET(request: NextRequest) {
     }
     
     // Fetch agent capabilities to filter models accordingly
-    const requiredCapabilities = await fetchAgentCapabilities();
-    console.log('Agent required capabilities:', requiredCapabilities);
+    const capabilityProfile = await fetchAgentCapabilities();
+    const aggregatedCapabilities = Array.from(
+      new Set([
+        ...capabilityProfile.agent,
+        ...Object.values(capabilityProfile.subAgents).flat()
+      ])
+    );
+    console.log('Agent required capabilities:', aggregatedCapabilities);
 
     const response = await fetch("https://openrouter.ai/api/v1/models", {
       method: "GET",
@@ -104,36 +136,39 @@ export async function GET(request: NextRequest) {
     const models = data.data;
 
     console.log("Fetched models from OpenRouter:", models.length, "models found");
-    console.log("Required capabilities:", requiredCapabilities);
+    console.log("Required capabilities:", aggregatedCapabilities);
     
     // Filter and enhance model data for frontend use
     const enhancedModels = models
       .filter(model => {
-        const meetsRequirements = doesModelMeetRequirements(model, requiredCapabilities);
+        const meetsRequirements = doesModelMeetRequirements(model, aggregatedCapabilities);
         if (!meetsRequirements) {
           const capabilities = mapOpenRouterToAgentCapabilities(model);
-          console.log(`Filtering out ${model.id}: has [${capabilities.join(', ')}], needs [${requiredCapabilities.join(', ')}]`);
+          console.log(`Filtering out ${model.id}: has [${capabilities.join(', ')}], needs [${aggregatedCapabilities.join(', ')}]`);
         }
         return meetsRequirements;
       }) // Filter by agent capabilities using OpenRouter data
-      .map(model => ({
-        id: model.id,
-        name: model.name,
-        description: model.description,
-        contextLength: model.context_length,
-        pricing: {
-          prompt: parseFloat(model.pricing.prompt) * 1000000, // Convert to per 1M tokens
-          completion: parseFloat(model.pricing.completion) * 1000000, // Convert to per 1M tokens
-          promptFormatted: `$${(parseFloat(model.pricing.prompt) * 1000000).toFixed(2)}`,
-          completionFormatted: `$${(parseFloat(model.pricing.completion) * 1000000).toFixed(2)}`,
-        },
-        isTopProvider: !!model.top_provider,
-        maxCompletionTokens: model.top_provider?.max_completion_tokens,
-        isModerated: model.top_provider?.is_moderated || false,
-        provider: model.id.split('/')[0], // Extract provider from model ID
-        toolSupport: true, // All filtered models support tools
-        capabilities: mapOpenRouterToAgentCapabilities(model) // Show which capabilities this model has from OpenRouter data
-      }))
+      .map(model => {
+        const capabilities = Array.from(new Set(mapOpenRouterToAgentCapabilities(model)));
+        return {
+          id: model.id,
+          name: model.name,
+          description: model.description,
+          contextLength: model.context_length,
+          pricing: {
+            prompt: parseFloat(model.pricing.prompt) * 1000000, // Convert to per 1M tokens
+            completion: parseFloat(model.pricing.completion) * 1000000, // Convert to per 1M tokens
+            promptFormatted: `$${(parseFloat(model.pricing.prompt) * 1000000).toFixed(2)}`,
+            completionFormatted: `$${(parseFloat(model.pricing.completion) * 1000000).toFixed(2)}`,
+          },
+          isTopProvider: !!model.top_provider,
+          maxCompletionTokens: model.top_provider?.max_completion_tokens,
+          isModerated: model.top_provider?.is_moderated || false,
+          provider: model.id.split('/')[0], // Extract provider from model ID
+          toolSupport: capabilities.includes('tools'),
+          capabilities
+        }
+      })
       .sort((a, b) => {
         // Sort by: top providers first, then by price (cheaper first)
         if (a.isTopProvider && !b.isTopProvider) return -1;
@@ -141,11 +176,46 @@ export async function GET(request: NextRequest) {
         return a.pricing.prompt - b.pricing.prompt;
       });
 
-    console.log(`Filtered to ${enhancedModels.length} models that meet requirements:`, enhancedModels.map(m => m.id));
+    const providerBestModel = new Map<string, typeof enhancedModels[number]>();
+    for (const model of enhancedModels) {
+      const current = providerBestModel.get(model.provider);
+      if (!current || model.pricing.prompt < current.pricing.prompt) {
+        providerBestModel.set(model.provider, model);
+      }
+    }
+
+    const MAX_RECOMMENDED_PROVIDERS = 8;
+    const recommendedModels = Array.from(providerBestModel.values())
+      .sort((a, b) => a.pricing.prompt - b.pricing.prompt)
+      .slice(0, MAX_RECOMMENDED_PROVIDERS);
+    const recommendedIds = new Set(recommendedModels.map(model => model.id));
+
+    const prioritizedModels = [
+      ...recommendedModels,
+      ...enhancedModels.filter(model => !recommendedIds.has(model.id))
+    ];
+
+    const modelsWithRecommendation = prioritizedModels.map(model => ({
+      ...model,
+      isRecommended: recommendedIds.has(model.id),
+      recommendedReason: recommendedIds.has(model.id)
+        ? `Best ${model.provider} option for agent capabilities`
+        : undefined
+    }));
+
+    console.log(
+      `Filtered to ${modelsWithRecommendation.length} models that meet requirements:`,
+      modelsWithRecommendation.map(m => `${m.id}${m.isRecommended ? ' (recommended)' : ''}`)
+    );
 
     return NextResponse.json({
-      models: enhancedModels,
-      count: enhancedModels.length,
+      models: modelsWithRecommendation,
+      count: modelsWithRecommendation.length,
+      capabilityProfile: {
+        agent: capabilityProfile.agent,
+        subAgents: capabilityProfile.subAgents,
+        aggregated: aggregatedCapabilities
+      },
       cached: false,
       timestamp: new Date().toISOString(),
     });

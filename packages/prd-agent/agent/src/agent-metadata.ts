@@ -66,7 +66,7 @@ export const PRD_AGENT_METADATA: AgentMetadata = {
   name: 'PRD Orchestrator Agent',
   description: 'Modular PRD generation agent with analyzers and section writers',
   version: CURRENT_PRD_VERSION,
-  requiredCapabilities: ['structured_output'],
+  requiredCapabilities: ['structured_output', 'streaming'],
   defaultSettings: { ...DEFAULT_AGENT_SETTINGS },
   subAgents: [
     {
@@ -74,7 +74,7 @@ export const PRD_AGENT_METADATA: AgentMetadata = {
       name: 'Orchestrator Core',
       description: 'Coordinates analyzers and section writers, merges final PRD',
       kind: 'orchestrator',
-      requiredCapabilities: ['structured_output'],
+      requiredCapabilities: ['structured_output', 'streaming', 'tools', 'reasoning'],
       defaultSettings: { ...DEFAULT_AGENT_SETTINGS },
       configurableParameters: COMMON_PARAMETERS
     },
@@ -83,7 +83,7 @@ export const PRD_AGENT_METADATA: AgentMetadata = {
       name: 'Context Analyzer',
       description: 'Extracts themes, requirements, and constraints from inputs',
       kind: 'analyzer',
-      requiredCapabilities: ['structured_output'],
+      requiredCapabilities: ['structured_output', 'reasoning'],
       defaultSettings: { ...DEFAULT_AGENT_SETTINGS },
       configurableParameters: COMMON_PARAMETERS
     },
@@ -92,7 +92,7 @@ export const PRD_AGENT_METADATA: AgentMetadata = {
       name: 'Clarification Analyzer',
       description: 'Determines if additional user input is required',
       kind: 'analyzer',
-      requiredCapabilities: ['structured_output'],
+      requiredCapabilities: ['structured_output', 'reasoning'],
       defaultSettings: { ...DEFAULT_AGENT_SETTINGS },
       configurableParameters: COMMON_PARAMETERS
     },
@@ -101,7 +101,7 @@ export const PRD_AGENT_METADATA: AgentMetadata = {
       name: 'Section Detection Analyzer',
       description: 'Routes edits to appropriate sections based on user intent',
       kind: 'analyzer',
-      requiredCapabilities: ['structured_output'],
+      requiredCapabilities: ['structured_output', 'reasoning'],
       defaultSettings: { ...DEFAULT_AGENT_SETTINGS },
       configurableParameters: COMMON_PARAMETERS
     },

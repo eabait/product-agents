@@ -9,6 +9,9 @@ interface Model {
   contextLength: number
   isTopProvider?: boolean
   isModerated?: boolean
+  capabilities: string[]
+  isRecommended?: boolean
+  recommendedReason?: string
   pricing: {
     promptFormatted: string
     completionFormatted: string

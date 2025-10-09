@@ -3,7 +3,16 @@
 import { useState, useEffect } from 'react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectSeparator,
+  SelectTrigger,
+  SelectValue
+} from '@/components/ui/select'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Slider } from '@/components/ui/slider'
 import { Settings, ChevronDown } from 'lucide-react'
@@ -39,7 +48,9 @@ interface Model {
   contextLength: number
   isTopProvider?: boolean
   isModerated?: boolean
-  capabilities?: string[]
+  capabilities: string[]
+  isRecommended?: boolean
+  recommendedReason?: string
   pricing: {
     promptFormatted: string
     completionFormatted: string
@@ -50,6 +61,7 @@ interface Provider {
   name: string
   count: number
   isTopProvider?: boolean
+  hasRecommended?: boolean
 }
 
 interface SettingsPanelProps {
@@ -60,6 +72,11 @@ interface SettingsPanelProps {
   // eslint-disable-next-line no-unused-vars
   onSettingsChange: (settings: AgentSettingsState) => void
 }
+
+const formatCapabilityLabel = (capability: string) =>
+  capability
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, char => char.toUpperCase())
 
 type SettingsGroupId = 'openrouter' | 'model' | 'streaming' | 'context'
 
@@ -128,11 +145,13 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
     if (existing) {
       existing.count++
       if (model.isTopProvider) existing.isTopProvider = true
+      if (model.isRecommended) existing.hasRecommended = true
     } else {
       acc.push({
         name: model.provider,
         count: 1,
-        isTopProvider: model.isTopProvider
+        isTopProvider: model.isTopProvider,
+        hasRecommended: !!model.isRecommended
       })
     }
     return acc
@@ -440,7 +459,89 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
           </div>
         )
 
-      case 'model':
+      case 'model': {
+        const recommendedProviders = availableProviders.filter(provider => provider.hasRecommended)
+        const additionalProviders = recommendedProviders.length > 0
+          ? availableProviders.filter(provider => !provider.hasRecommended)
+          : availableProviders
+        const recommendedModelsForProvider = modelsForProvider.filter(model => model.isRecommended)
+        const additionalModelsForProvider = recommendedModelsForProvider.length > 0
+          ? modelsForProvider.filter(model => !model.isRecommended)
+          : modelsForProvider
+
+        const renderProviderOption = (provider: Provider) => (
+          <SelectItem key={provider.name} value={provider.name}>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="font-medium capitalize">{provider.name}</span>
+                {provider.isTopProvider && (
+                  <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded flex-shrink-0">
+                    ⭐ Top
+                  </span>
+                )}
+                {provider.hasRecommended && (
+                  <span className="text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded flex-shrink-0">
+                    Recommended
+                  </span>
+                )}
+              </div>
+              <span className="text-xs text-muted-foreground">
+                ({provider.count} model{provider.count !== VALIDATION_LIMITS.SINGULAR_ITEM_COUNT ? 's' : ''})
+              </span>
+            </div>
+          </SelectItem>
+        )
+
+        const renderModelOption = (model: Model) => (
+          <SelectItem key={model.id} value={model.id}>
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center gap-2">
+                <span className="font-medium break-words">{model.name}</span>
+                {model.isTopProvider && (
+                  <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded flex-shrink-0">
+                    ⭐ Top
+                  </span>
+                )}
+                {model.isModerated && (
+                  <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded flex-shrink-0">
+                    🛡️ Safe
+                  </span>
+                )}
+                {model.isRecommended && (
+                  <span className="text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded flex-shrink-0">
+                    Recommended
+                  </span>
+                )}
+              </div>
+              <div className="text-xs text-muted-foreground flex flex-wrap items-center gap-3">
+                <span className="font-medium">{formatContextWindow(model.contextLength)} context</span>
+                <span>{model.pricing.promptFormatted}/{model.pricing.completionFormatted} per 1M</span>
+              </div>
+              {model.recommendedReason && (
+                <p className="text-xs text-muted-foreground italic">{model.recommendedReason}</p>
+              )}
+              {model.capabilities.length > 0 && (
+                <div className="flex flex-wrap gap-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+                  {model.capabilities.map(capability => (
+                    <span
+                      key={`${model.id}-${capability}`}
+                      className="rounded bg-muted px-1.5 py-0.5"
+                    >
+                      {formatCapabilityLabel(capability)}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </SelectItem>
+        )
+
+        const selectPlaceholder = !selectedProvider
+          ? 'Select a provider first'
+          : modelsLoading
+            ? 'Loading models...'
+            : 'Select a model'
+
         return (
           <div className="space-y-8">
             <div className="space-y-4">
@@ -473,9 +574,11 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
                   onValueChange={(value: string) => {
                     setSelectedProvider(value)
                     setProviderDropdownOpen(false)
-                    const firstModel = models.find(model => model.provider === value)
-                    if (firstModel) {
-                      setSettings(prev => ({ ...prev, model: firstModel.id }))
+                    const preferredModel =
+                      models.find(model => model.provider === value && model.isRecommended) ||
+                      models.find(model => model.provider === value)
+                    if (preferredModel) {
+                      setSettings(prev => ({ ...prev, model: preferredModel.id }))
                     }
                   }}
                   disabled={modelsLoading || availableProviderCount === 0}
@@ -491,21 +594,30 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
                           : 'No providers available. Test your API key from the OpenRouter tab.'}
                       </div>
                     ) : (
-                      availableProviders.map((provider) => (
-                        <SelectItem key={provider.name} value={provider.name}>
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium capitalize">{provider.name}</span>
-                            {provider.isTopProvider && (
-                              <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded flex-shrink-0">
-                                ⭐ Top
-                              </span>
+                      <>
+                        {recommendedProviders.length > 0 && (
+                          <>
+                            <SelectGroup>
+                              <SelectLabel>Recommended</SelectLabel>
+                              {recommendedProviders.map(renderProviderOption)}
+                            </SelectGroup>
+                            {additionalProviders.length > 0 && <SelectSeparator />}
+                          </>
+                        )}
+                        {additionalProviders.length > 0 && (
+                          <SelectGroup>
+                            {recommendedProviders.length > 0 && (
+                              <SelectLabel>All Providers</SelectLabel>
                             )}
-                            <span className="text-xs text-muted-foreground">
-                              ({provider.count} model{provider.count !== VALIDATION_LIMITS.SINGULAR_ITEM_COUNT ? 's' : ''})
-                            </span>
-                          </div>
-                        </SelectItem>
-                      ))
+                            {additionalProviders.map(renderProviderOption)}
+                          </SelectGroup>
+                        )}
+                        {recommendedProviders.length === 0 && additionalProviders.length === 0 && (
+                          <SelectGroup>
+                            {availableProviders.map(renderProviderOption)}
+                          </SelectGroup>
+                        )}
+                      </>
                     )}
                   </SelectContent>
                 </Select>
@@ -532,11 +644,7 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
                   disabled={modelsLoading || !selectedProvider}
                 >
                   <SelectTrigger id="modelSelect">
-                    <SelectValue placeholder={
-                      !selectedProvider ? 'Select a provider first' :
-                      modelsLoading ? 'Loading models...' :
-                      'Select a model'
-                    } />
+                    <SelectValue placeholder={selectPlaceholder} />
                   </SelectTrigger>
                   <SelectContent>
                     {modelsForProvider.length === 0 && !modelsLoading && selectedProvider ? (
@@ -544,33 +652,30 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
                         No models available for {selectedProvider}
                       </div>
                     ) : (
-                      modelsForProvider.map((model) => (
-                        <SelectItem key={model.id} value={model.id}>
-                          <div className="flex items-start justify-between w-full min-w-0">
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2">
-                                <span className="font-medium break-words">{model.name}</span>
-                                {model.isTopProvider && (
-                                  <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded flex-shrink-0">
-                                    ⭐ Top
-                                  </span>
-                                )}
-                                {model.isModerated && (
-                                  <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded flex-shrink-0">
-                                    🛡️ Safe
-                                  </span>
-                                )}
-                              </div>
-                              <div className="text-xs text-muted-foreground mt-0.5 space-y-0.5">
-                                <div className="flex flex-wrap items-center gap-3">
-                                  <span className="font-medium">{formatContextWindow(model.contextLength)} context</span>
-                                  <span>{model.pricing.promptFormatted}/{model.pricing.completionFormatted} per 1M</span>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </SelectItem>
-                      ))
+                      <>
+                        {recommendedModelsForProvider.length > 0 && (
+                          <>
+                            <SelectGroup>
+                              <SelectLabel>Recommended</SelectLabel>
+                              {recommendedModelsForProvider.map(renderModelOption)}
+                            </SelectGroup>
+                            {additionalModelsForProvider.length > 0 && <SelectSeparator />}
+                          </>
+                        )}
+                        {additionalModelsForProvider.length > 0 && (
+                          <SelectGroup>
+                            {recommendedModelsForProvider.length > 0 && (
+                              <SelectLabel>More Models</SelectLabel>
+                            )}
+                            {additionalModelsForProvider.map(renderModelOption)}
+                          </SelectGroup>
+                        )}
+                        {recommendedModelsForProvider.length === 0 && additionalModelsForProvider.length === 0 && (
+                          <SelectGroup>
+                            {modelsForProvider.map(renderModelOption)}
+                          </SelectGroup>
+                        )}
+                      </>
                     )}
                   </SelectContent>
                 </Select>
@@ -582,8 +687,7 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
                 <p className="text-xs text-muted-foreground mt-1">
                   {selectedProvider
                     ? `${modelsForProvider.length} model${modelsForProvider.length !== VALIDATION_LIMITS.SINGULAR_ITEM_COUNT ? 's' : ''} available`
-                    : `${availableProviderCount} provider${availableProviderCount !== VALIDATION_LIMITS.SINGULAR_ITEM_COUNT ? 's' : ''} available`
-                  }
+                    : `${availableProviderCount} provider${availableProviderCount !== VALIDATION_LIMITS.SINGULAR_ITEM_COUNT ? 's' : ''} available`}
                   {modelsLoading && ' (loading...)'}
                 </p>
 
@@ -609,6 +713,15 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
                         <span>Pricing (per 1M):</span>
                         <span>{currentModel.pricing.promptFormatted} / {currentModel.pricing.completionFormatted}</span>
                       </div>
+                      {currentModel.capabilities.length > 0 && (
+                        <div className="flex flex-wrap gap-1 text-[10px] uppercase tracking-wide text-muted-foreground pt-2 border-t border-muted/60 mt-2">
+                          {currentModel.capabilities.map(capability => (
+                            <span key={`selected-${capability}`} className="rounded bg-muted px-1.5 py-0.5">
+                              {formatCapabilityLabel(capability)}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
@@ -670,24 +783,39 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
                     const baselineSettings = resolveBaselineForSubAgent(subAgent)
                     const overrideActive = hasSubAgentOverride(subAgent)
                     const compatibleModels = getCompatibleModels(subAgent)
+
                     const providerOptions = compatibleModels.reduce<Provider[]>((acc, model) => {
-                      const existingProvider = acc.find(provider => provider.name === model.provider)
-                      if (existingProvider) {
-                        existingProvider.count += 1
-                        if (model.isTopProvider) {
-                          existingProvider.isTopProvider = true
-                        }
+                      const existing = acc.find(provider => provider.name === model.provider)
+                      if (existing) {
+                        existing.count += 1
+                        if (model.isTopProvider) existing.isTopProvider = true
+                        if (model.isRecommended) existing.hasRecommended = true
                       } else {
                         acc.push({
                           name: model.provider,
                           count: 1,
-                          isTopProvider: model.isTopProvider
+                          isTopProvider: model.isTopProvider,
+                          hasRecommended: !!model.isRecommended
                         })
                       }
                       return acc
                     }, [])
+
                     const currentProvider = currentSettings.model?.split('/')[0]
                     const dropdownState = getSubAgentDropdownState(subAgent.id)
+                    const recommendedProviderOptions = providerOptions.filter(provider => provider.hasRecommended)
+                    const additionalProviderOptions = recommendedProviderOptions.length > 0
+                      ? providerOptions.filter(provider => !provider.hasRecommended)
+                      : providerOptions
+
+                    const modelsForCurrentProvider = currentProvider
+                      ? compatibleModels.filter(model => model.provider === currentProvider)
+                      : []
+
+                    const recommendedModelOptions = modelsForCurrentProvider.filter(model => model.isRecommended)
+                    const additionalModelOptions = recommendedModelOptions.length > 0
+                      ? modelsForCurrentProvider.filter(model => !model.isRecommended)
+                      : modelsForCurrentProvider
 
                     return (
                       <Collapsible key={subAgent.id}>
@@ -739,11 +867,13 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
                                     }))
                                   }}
                                   onValueChange={(value: string) => {
-                                    const modelForProvider = compatibleModels.find(model => model.provider === value)
-                                    if (modelForProvider) {
+                                    const preferredModel =
+                                      compatibleModels.find(model => model.provider === value && model.isRecommended) ||
+                                      compatibleModels.find(model => model.provider === value)
+                                    if (preferredModel) {
                                       updateSubAgentSettings(subAgent.id, prev => ({
                                         ...prev,
-                                        model: modelForProvider.id
+                                        model: preferredModel.id
                                       }))
                                       setSubAgentDropdown(subAgent.id, { providerOpen: false, modelOpen: false })
                                     }
@@ -754,23 +884,28 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
                                     <SelectValue placeholder={modelsLoading ? 'Loading providers...' : 'Select a provider'} />
                                   </SelectTrigger>
                                   <SelectContent>
-                                    {providerOptions.map(provider => (
-                                      <SelectItem key={provider.name} value={provider.name}>
-                                        <div className="flex items-center justify-between gap-2">
-                                          <div className="flex items-center gap-2">
-                                            <span className="capitalize">{provider.name}</span>
-                                            {provider.isTopProvider && (
-                                              <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded">
-                                                ⭐ Top
-                                              </span>
-                                            )}
-                                          </div>
-                                          <span className="text-xs text-muted-foreground">
-                                            {provider.count} model{provider.count !== VALIDATION_LIMITS.SINGULAR_ITEM_COUNT ? 's' : ''}
-                                          </span>
-                                        </div>
-                                      </SelectItem>
-                                    ))}
+                                    {recommendedProviderOptions.length > 0 && (
+                                      <>
+                                        <SelectGroup>
+                                          <SelectLabel>Recommended</SelectLabel>
+                                          {recommendedProviderOptions.map(renderProviderOption)}
+                                        </SelectGroup>
+                                        {additionalProviderOptions.length > 0 && <SelectSeparator />}
+                                      </>
+                                    )}
+                                    {additionalProviderOptions.length > 0 && (
+                                      <SelectGroup>
+                                        {recommendedProviderOptions.length > 0 && (
+                                          <SelectLabel>All Providers</SelectLabel>
+                                        )}
+                                        {additionalProviderOptions.map(renderProviderOption)}
+                                      </SelectGroup>
+                                    )}
+                                    {recommendedProviderOptions.length === 0 && additionalProviderOptions.length === 0 && (
+                                      <SelectGroup>
+                                        {providerOptions.map(renderProviderOption)}
+                                      </SelectGroup>
+                                    )}
                                   </SelectContent>
                                 </Select>
                               </div>
@@ -778,14 +913,18 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
                               <div>
                                 <label className="block text-sm font-medium mb-2">Model</label>
                                 {(() => {
-                                  const modelsForProvider = currentProvider
-                                    ? compatibleModels.filter(model => model.provider === currentProvider)
-                                    : compatibleModels
-
-                                  if (modelsForProvider.length === 0) {
+                                  if (!currentProvider) {
                                     return (
                                       <div className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
                                         Select a provider to view compatible models.
+                                      </div>
+                                    )
+                                  }
+
+                                  if (modelsForCurrentProvider.length === 0) {
+                                    return (
+                                      <div className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
+                                        No compatible models for this provider.
                                       </div>
                                     )
                                   }
@@ -813,14 +952,28 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
                                         <SelectValue placeholder="Select a model" />
                                       </SelectTrigger>
                                       <SelectContent>
-                                        {modelsForProvider.map(model => (
-                                          <SelectItem key={model.id} value={model.id}>
-                                            <div className="flex flex-col">
-                                              <span className="font-medium text-sm">{model.name}</span>
-                                              <span className="text-xs text-muted-foreground">{model.provider} • {formatContextWindow(model.contextLength)}</span>
-                                            </div>
-                                          </SelectItem>
-                                        ))}
+                                        {recommendedModelOptions.length > 0 && (
+                                          <>
+                                            <SelectGroup>
+                                              <SelectLabel>Recommended</SelectLabel>
+                                              {recommendedModelOptions.map(renderModelOption)}
+                                            </SelectGroup>
+                                            {additionalModelOptions.length > 0 && <SelectSeparator />}
+                                          </>
+                                        )}
+                                        {additionalModelOptions.length > 0 && (
+                                          <SelectGroup>
+                                            {recommendedModelOptions.length > 0 && (
+                                              <SelectLabel>More Models</SelectLabel>
+                                            )}
+                                            {additionalModelOptions.map(renderModelOption)}
+                                          </SelectGroup>
+                                        )}
+                                        {recommendedModelOptions.length === 0 && additionalModelOptions.length === 0 && (
+                                          <SelectGroup>
+                                            {modelsForCurrentProvider.map(renderModelOption)}
+                                          </SelectGroup>
+                                        )}
                                       </SelectContent>
                                     </Select>
                                   )
@@ -894,7 +1047,7 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
             )}
           </div>
         )
-
+      }
       case 'streaming':
         return (
           <div className="space-y-6">
