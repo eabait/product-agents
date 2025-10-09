@@ -1,7 +1,11 @@
 import { SectionWriterInput } from '../section-writers/base-section-writer'
 
-export function createKeyFeaturesSectionPrompt(input: SectionWriterInput, contextAnalysis: any): string {
-  let prompt = `You are a product manager creating a Key Features section for a Product Requirements Document (PRD).
+export function createKeyFeaturesSectionPrompt(
+  input: SectionWriterInput,
+  contextAnalysis: any,
+  existingFeatures: string[]
+): string {
+  let prompt = `You are a product manager updating the Key Features section of a Product Requirements Document (PRD). Respect well-written existing features and apply user edits with the smallest necessary change.
 
 ## Input Context:
 **User Message:** ${input.message}
@@ -41,6 +45,35 @@ ${JSON.stringify(input.context.existingPRD, null, 2)}
 
 Ensure key features align with the target users and solution approach defined in the existing PRD.`
   }
+
+  if (existingFeatures.length > 0) {
+    prompt += `\n\n## Existing Key Features:
+${JSON.stringify(existingFeatures, null, 2)}
+
+Preserve these features unless the user explicitly requests changes. Favor appending or refining individual entries over replacing the entire list.`
+  }
+
+  prompt += `\n\n## Structured Output Requirement:
+Return JSON with the following structure:
+\`\`\`json
+{
+  "mode": "smart_merge | append | replace",
+  "operations": [
+    {
+      "action": "add | update | remove",
+      "referenceFeature": "Existing feature to reference when updating/removing",
+      "feature": "Full feature description (required for add/update)",
+      "rationale": "Brief explanation (optional)"
+    }
+  ],
+  "proposedFeatures": ["List of fully written new features to append"],
+  "summary": "Brief explanation of the applied changes (optional)"
+}
+\`\`\`
+
+- Use \`mode: "replace"\` only if a complete rewrite is required.
+- Use \`operations\` for precise modifications.
+- Include fully phrased features in \`proposedFeatures\` when adding new ones.`
 
   return prompt
 }

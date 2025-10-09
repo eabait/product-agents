@@ -223,10 +223,13 @@ function setupBasicMockResponses(mockClient: MockOpenRouterClient) {
 
   // Section Writers
   mockClient.setMockResponse('targetUsers', {
-    targetUsers: [
+    mode: 'replace',
+    operations: [],
+    proposedUsers: [
       'Restaurant managers seeking to reduce staffing costs',
       'Tech-savvy customers who prefer messaging apps'
-    ]
+    ],
+    summary: 'Baseline personas for restaurant chatbot'
   })
 
   mockClient.setMockResponse('solution', {
@@ -235,31 +238,45 @@ function setupBasicMockResponses(mockClient: MockOpenRouterClient) {
   })
 
   mockClient.setMockResponse('keyFeatures', {
-    keyFeatures: [
+    mode: 'replace',
+    operations: [],
+    proposedFeatures: [
       '**Table Reservation System**: Book, modify, cancel reservations through chatbot',
       '**Takeaway Order Management**: Browse menu, create orders, complete payments',
       '**Messaging Platform Integration**: Seamlessly connects with Telegram and WhatsApp',
       '**Order Status Tracking**: Real-time updates on order preparation and delivery',
       '**Intelligent Conversation Flow**: Natural language processing for seamless interactions'
-    ]
+    ],
+    summary: 'Baseline features for restaurant chatbot'
   })
 
   mockClient.setMockResponse('successMetrics', {
-    successMetrics: [
+    mode: 'replace',
+    operations: [],
+    proposedMetrics: [
       { metric: 'Platform Adoption Rate', target: '70% of users engage via messaging platforms', timeline: '6 months post-launch' },
       { metric: 'Response Time', target: 'Average response time under 2 seconds across all platforms', timeline: '3 months post-launch' }
-    ]
+    ],
+    summary: 'Baseline success metrics for omnichannel restaurant chatbot'
   })
 
   mockClient.setMockResponse('constraints', {
-    constraints: [
-      'Must integrate with Telegram Bot API and WhatsApp Business API',
-      'Message rate limits enforced by platform providers',
-      'End-to-end encryption requirements for messaging platforms'
-    ],
-    assumptions: [
-      'Users prefer messaging over phone calls for routine transactions',
-      'Messaging platforms will maintain stable API compatibility'
-    ]
+    mode: 'replace',
+    constraints: {
+      operations: [],
+      proposed: [
+        'Must integrate with Telegram Bot API and WhatsApp Business API',
+        'Message rate limits enforced by platform providers',
+        'End-to-end encryption requirements for messaging platforms'
+      ]
+    },
+    assumptions: {
+      operations: [],
+      proposed: [
+        'Users prefer messaging over phone calls for routine transactions',
+        'Messaging platforms will maintain stable API compatibility'
+      ]
+    },
+    summary: 'Constraints and assumptions for restaurant chatbot'
   })
 }

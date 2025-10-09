@@ -1,7 +1,11 @@
 import { SectionWriterInput } from '../section-writers/base-section-writer'
 
-export function createTargetUsersSectionPrompt(input: SectionWriterInput, contextAnalysis: any): string {
-  let prompt = `You are a product manager creating a concise Target Users section for a Product Requirements Document (PRD).
+export function createTargetUsersSectionPrompt(
+  input: SectionWriterInput,
+  contextAnalysis: any,
+  existingUsers: string[]
+): string {
+  let prompt = `You are a product manager updating the Target Users section of a Product Requirements Document (PRD). Apply the user request with minimal necessary changes while preserving high-quality existing personas.
 
 ## Input Context:
 **User Message:** ${input.message}
@@ -34,6 +38,35 @@ ${JSON.stringify(input.context.existingPRD, null, 2)}
 
 Consider the existing PRD content to ensure consistency with the overall product vision.`
   }
+
+  if (existingUsers.length > 0) {
+    prompt += `\n\n## Existing Target Users:
+${JSON.stringify(existingUsers, null, 2)}
+
+Retain these personas unless the user explicitly requests changes. Prefer append or targeted updates over complete replacement.`
+  }
+
+  prompt += `\n\n## Structured Output Requirement:
+Return JSON with the following structure:
+\`\`\`json
+{
+  "mode": "smart_merge | append | replace",
+  "operations": [
+    {
+      "action": "add | update | remove",
+      "referenceUser": "Existing persona to reference when updating/removing",
+      "user": "Persona description (required for add/update)",
+      "rationale": "Brief explanation (optional)"
+    }
+  ],
+  "proposedUsers": ["List of fully written new personas to add"],
+  "summary": "Brief explanation of changes (optional)"
+}
+\`\`\`
+
+- Use \`mode: "replace"\` only if the user explicitly requests an entirely new audience.
+- Use \`operations\` for targeted adds/updates/removals.
+- Populate \`proposedUsers\` with fully composed personas when appending new ones.`
 
   return prompt
 }

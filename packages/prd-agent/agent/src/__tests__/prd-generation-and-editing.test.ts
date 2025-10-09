@@ -360,12 +360,15 @@ function setupMockResponses(mockClient: MockOpenRouterClient) {
 function setupMockResponsesForSections(mockClient: MockOpenRouterClient) {
   // Target Users
   mockClient.setMockResponse('targetUsers', {
-    targetUsers: [
+    mode: 'replace',
+    operations: [],
+    proposedUsers: [
       'University students taking lecture notes across multiple subjects',
       'Graduate students conducting research and organizing findings',
       'High school students preparing for standardized tests',
       'Adult learners taking online courses and workshops'
-    ]
+    ],
+    summary: 'Baseline student personas for note-taking app'
   })
 
   // Solution
@@ -376,41 +379,55 @@ function setupMockResponsesForSections(mockClient: MockOpenRouterClient) {
 
   // Key Features
   mockClient.setMockResponse('keyFeatures', {
-    keyFeatures: [
-      'Quick Note Creation: Tap-to-create notes with rich text formatting, bullet points, and basic styling options optimized for mobile typing',
-      'Smart Organization: Automatic and manual categorization by subject, date, or custom tags with visual organization tools',
-      'Offline-First Design: All notes are immediately saved locally with background sync when online, ensuring no data loss',
-      'Universal Search: Fast full-text search across all notes with keyword highlighting and filtering options',
-      'Cross-Device Sync: Seamless synchronization across phone, tablet, and web with conflict resolution'
-    ]
+    mode: 'replace',
+    operations: [],
+    proposedFeatures: [
+      '**Quick Note Creation**: Tap-to-create notes with rich text formatting, bullet points, and basic styling options optimized for mobile typing',
+      '**Smart Organization**: Automatic and manual categorization by subject, date, or custom tags with visual organization tools',
+      '**Offline-First Design**: All notes are immediately saved locally with background sync when online, ensuring no data loss',
+      '**Universal Search**: Fast full-text search across all notes with keyword highlighting and filtering options',
+      '**Cross-Device Sync**: Seamless synchronization across phone, tablet, and web with conflict resolution'
+    ],
+    summary: 'Baseline key features for note-taking app'
   })
 
   // Success Metrics
   mockClient.setMockResponse('successMetrics', {
-    successMetrics: [
+    mode: 'replace',
+    operations: [],
+    proposedMetrics: [
       { metric: 'Daily Active Users', target: '10,000 students using the app daily', timeline: '6 months post-launch' },
       { metric: 'Note Retention Rate', target: '90% of created notes are kept for more than 1 month', timeline: '3 months post-launch' },
       { metric: 'User Engagement', target: 'Average of 15 notes created per user per week', timeline: '4 months post-launch' },
       { metric: 'Cross-Platform Adoption', target: '60% of users access notes on multiple devices', timeline: '8 months post-launch' }
-    ]
+    ],
+    summary: 'Baseline success metrics for note-taking app'
   })
 
   // Constraints
   mockClient.setMockResponse('constraints', {
-    constraints: [
-      'Must maintain full functionality without internet connection',
-      'Development budget limited to $150,000 for MVP',
-      'Must comply with FERPA privacy regulations for student data',
-      'App size must remain under 50MB for easy download on limited data plans',
-      'Must support devices running iOS 13+ and Android 8+ (covering 90% of student devices)'
-    ],
-    assumptions: [
-      'Target users own smartphones and have basic digital literacy',
-      'Students prefer mobile-first solutions over desktop applications',
-      'Users will primarily create text-based notes with occasional images',
-      'Cloud storage costs will remain within projected estimates based on usage patterns',
-      'Educational institutions will not block or restrict access to the application'
-    ]
+    mode: 'replace',
+    constraints: {
+      operations: [],
+      proposed: [
+        'Must maintain full functionality without internet connection',
+        'Development budget limited to $150,000 for MVP',
+        'Must comply with FERPA privacy regulations for student data',
+        'App size must remain under 50MB for easy download on limited data plans',
+        'Must support devices running iOS 13+ and Android 8+ (covering 90% of student devices)'
+      ]
+    },
+    assumptions: {
+      operations: [],
+      proposed: [
+        'Target users own smartphones and have basic digital literacy',
+        'Students prefer mobile-first solutions over desktop applications',
+        'Users will primarily create text-based notes with occasional images',
+        'Cloud storage costs will remain within projected estimates based on usage patterns',
+        'Educational institutions will not block or restrict access to the application'
+      ]
+    },
+    summary: 'Baseline constraints and assumptions for note-taking app'
   })
 }
 

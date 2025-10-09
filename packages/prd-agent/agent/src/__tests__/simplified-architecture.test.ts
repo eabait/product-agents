@@ -63,11 +63,14 @@ describe('Simplified PRD Architecture', () => {
       
       // New simplified section responses
       targetUsers: {
-        targetUsers: [
+        mode: 'replace',
+        operations: [],
+        proposedUsers: [
           'Small business owners managing 5-15 team members across multiple projects',
           'Project managers in remote teams who need visibility into task progress',
           'Team leads coordinating cross-functional work in fast-paced environments'
-        ]
+        ],
+        summary: 'Primary personas for task management platform'
       },
       
       solution: {
@@ -76,17 +79,22 @@ describe('Simplified PRD Architecture', () => {
       },
       
       keyFeatures: {
-        keyFeatures: [
+        mode: 'replace',
+        operations: [],
+        proposedFeatures: [
           'Drag-and-drop task boards with customizable workflows and status columns',
           'Real-time team notifications with smart filtering to reduce noise',
           'Project timeline views with milestone tracking and deadline alerts',
           'Team workload balancing with automatic capacity recommendations',
           'Slack integration for seamless communication and task updates'
-        ]
+        ],
+        summary: 'Core features for task management platform'
       },
       
       successMetrics: {
-        successMetrics: [
+        mode: 'replace',
+        operations: [],
+        proposedMetrics: [
           {
             metric: 'Team productivity improvement',
             target: '25% increase in tasks completed on time',
@@ -102,20 +110,29 @@ describe('Simplified PRD Architecture', () => {
             target: 'Net Promoter Score above 50',
             timeline: '6 months post-launch'
           }
-        ]
+        ],
+        summary: 'Initial success metrics for task management product'
       },
       
       constraints: {
-        constraints: [
-          'Must integrate with existing Slack workspaces without admin permissions',
-          'Development budget cannot exceed $200,000 including third-party services',
-          'Initial version must be delivered within 6 months from project start'
-        ],
-        assumptions: [
-          'Teams are already using Slack for daily communication',
-          'Users prefer simple interfaces over feature-rich complexity',
-          'Small teams will adopt new tools if they demonstrably save time'
-        ]
+        mode: 'replace',
+        constraints: {
+          operations: [],
+          proposed: [
+            'Must integrate with existing Slack workspaces without admin permissions',
+            'Development budget cannot exceed $200,000 including third-party services',
+            'Initial version must be delivered within 6 months from project start'
+          ]
+        },
+        assumptions: {
+          operations: [],
+          proposed: [
+            'Teams are already using Slack for daily communication',
+            'Users prefer simple interfaces over feature-rich complexity',
+            'Small teams will adopt new tools if they demonstrably save time'
+          ]
+        },
+        summary: 'Key delivery constraints and assumptions'
       }
     })
 

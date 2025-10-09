@@ -1,7 +1,12 @@
 import { SectionWriterInput } from '../section-writers/base-section-writer'
 
-export function createConstraintsSectionPrompt(input: SectionWriterInput, contextAnalysis: any): string {
-  let prompt = `You are a product manager creating a Constraints section for a Product Requirements Document (PRD).
+export function createConstraintsSectionPrompt(
+  input: SectionWriterInput,
+  contextAnalysis: any,
+  existingConstraints: string[],
+  existingAssumptions: string[]
+): string {
+  let prompt = `You are a product manager updating the Constraints section for a Product Requirements Document (PRD). Preserve strong existing constraints and assumptions while applying the user’s request with targeted edits.
 
 ## Input Context:
 **User Message:** ${input.message}
@@ -56,6 +61,49 @@ ${JSON.stringify(input.context.existingPRD, null, 2)}
 
 Ensure constraints and assumptions are consistent with the solution approach and success metrics defined in the existing PRD.`
   }
+
+  if (existingConstraints.length > 0 || existingAssumptions.length > 0) {
+    prompt += `\n\n## Existing Constraints and Assumptions:
+Constraints: ${JSON.stringify(existingConstraints, null, 2)}
+Assumptions: ${JSON.stringify(existingAssumptions, null, 2)}
+
+Retain these items unless explicitly instructed to change them. Prefer append/update/remove operations over full replacement.`
+  }
+
+  prompt += `\n\n## Structured Output Requirement:
+Return JSON with the following structure:
+\`\`\`json
+{
+  "mode": "smart_merge | append | replace",
+  "constraints": {
+    "operations": [
+      {
+        "action": "add | update | remove",
+        "reference": "Existing constraint to reference for update/remove",
+        "value": "Constraint text (required for add/update)",
+        "rationale": "Brief explanation (optional)"
+      }
+    ],
+    "proposed": ["List of fully written new constraints to append"]
+  },
+  "assumptions": {
+    "operations": [
+      {
+        "action": "add | update | remove",
+        "reference": "Existing assumption to reference for update/remove",
+        "value": "Assumption text (required for add/update)",
+        "rationale": "Brief explanation (optional)"
+      }
+    ],
+    "proposed": ["List of fully written new assumptions to append"]
+  },
+  "summary": "Brief explanation of changes (optional)"
+}
+\`\`\`
+
+- Use \`mode: "replace"\` only when the user insists on a full rewrite.
+- Use targeted operations to add/update/remove individual constraints or assumptions.
+- Populate \`proposed\` lists with complete statements when appending new items.`
 
   return prompt
 }

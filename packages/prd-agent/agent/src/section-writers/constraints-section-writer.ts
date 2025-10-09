@@ -1,11 +1,11 @@
 import { z } from 'zod'
 import { BaseSectionWriter, SectionWriterInput, SectionWriterResult } from './base-section-writer'
 import { createConstraintsSectionPrompt } from '../prompts'
-import { 
-  assessConfidence, 
-  assessInputCompleteness, 
-  assessContextRichness, 
-  assessContentSpecificity 
+import {
+  assessConfidence,
+  assessInputCompleteness,
+  assessContextRichness,
+  assessContentSpecificity
 } from '../utils/confidence-assessment'
 import {
   DEFAULT_TEMPERATURE,
@@ -17,9 +17,23 @@ import {
   MIN_ASSUMPTION_LENGTH
 } from '../constants'
 
-const ConstraintsSectionSchema = z.object({
-  constraints: z.array(z.string()),
-  assumptions: z.array(z.string())
+const ConstraintsPlanOperationSchema = z.object({
+  action: z.enum(['add', 'update', 'remove']).default('add'),
+  reference: z.string().optional(),
+  value: z.string().optional(),
+  rationale: z.string().optional()
+})
+
+const StringListPlanSchema = z.object({
+  operations: z.array(ConstraintsPlanOperationSchema).default([]),
+  proposed: z.array(z.string()).default([])
+})
+
+const ConstraintsSectionPlanSchema = z.object({
+  mode: z.enum(['append', 'replace', 'smart_merge']).default('smart_merge'),
+  constraints: StringListPlanSchema.default({ operations: [], proposed: [] }),
+  assumptions: StringListPlanSchema.default({ operations: [], proposed: [] }),
+  summary: z.string().optional()
 })
 
 export interface ConstraintsSection {
@@ -61,42 +75,60 @@ export class ConstraintsSectionWriter extends BaseSectionWriter {
       constraints: []
     }
 
-    const prompt = this.createConstraintsPrompt(input, contextData)
+    const existingConstraints = this.extractExistingList(input.context?.existingSection, 'constraints')
+    const existingAssumptions = this.extractExistingList(input.context?.existingSection, 'assumptions')
+
+    const prompt = this.createConstraintsPrompt(input, contextData, existingConstraints, existingAssumptions)
     
-    const rawSection = await this.generateStructuredWithFallback({
-      schema: ConstraintsSectionSchema,
+    const plan = await this.generateStructuredWithFallback({
+      schema: ConstraintsSectionPlanSchema,
       prompt,
       temperature: DEFAULT_TEMPERATURE
     })
 
-    const validation = this.validateConstraintsSection(rawSection)
+    const merged = applyConstraintsPlan(existingConstraints, existingAssumptions, plan)
+
+    const finalSection: ConstraintsSection = {
+      constraints: merged.constraints,
+      assumptions: merged.assumptions
+    }
+
+    const validation = this.validateConstraintsSection(finalSection)
     
     // Assess confidence based on actual factors
     const confidenceAssessment = assessConfidence({
       inputCompleteness: assessInputCompleteness(input.message, input.context?.contextPayload),
       contextRichness: assessContextRichness(input.context?.contextPayload),
-      contentSpecificity: assessContentSpecificity(rawSection),
+      contentSpecificity: assessContentSpecificity(finalSection),
       validationSuccess: validation.isValid,
       hasErrors: false,
-      contentLength: JSON.stringify(rawSection).length
+      contentLength: JSON.stringify(finalSection).length
     })
 
     return {
       name: this.getSectionName(),
-      content: rawSection as ConstraintsSection,
+      content: finalSection,
       confidence: confidenceAssessment,
       metadata: {
-        constraints_count: rawSection.constraints.length,
-        assumptions_count: rawSection.assumptions.length,
+        constraints_count: finalSection.constraints.length,
+        assumptions_count: finalSection.assumptions.length,
         validation_issues: validation.issues,
-        source_analyzers: ['contextAnalysis']
+        source_analyzers: ['contextAnalysis'],
+        plan_mode: plan.mode,
+        constraint_operations: plan.constraints?.operations?.length ?? 0,
+        assumption_operations: plan.assumptions?.operations?.length ?? 0
       },
       shouldRegenerate: true
     }
   }
 
-  private createConstraintsPrompt(input: SectionWriterInput, contextAnalysis: any): string {
-    return createConstraintsSectionPrompt(input, contextAnalysis)
+  private createConstraintsPrompt(
+    input: SectionWriterInput,
+    contextAnalysis: any,
+    existingConstraints: string[],
+    existingAssumptions: string[]
+  ): string {
+    return createConstraintsSectionPrompt(input, contextAnalysis, existingConstraints, existingAssumptions)
   }
 
   private validateConstraintsSection(section: ConstraintsSection): { isValid: boolean; issues: string[] } {
@@ -132,5 +164,120 @@ export class ConstraintsSectionWriter extends BaseSectionWriter {
       isValid: issues.length === 0,
       issues
     }
+  }
+
+  private extractExistingList(existingSection: any, key: 'constraints' | 'assumptions'): string[] {
+    if (!existingSection) return []
+
+    if (Array.isArray(existingSection)) {
+      return sanitizeEntries(existingSection)
+    }
+
+    if (Array.isArray(existingSection[key])) {
+      return sanitizeEntries(existingSection[key])
+    }
+
+    return []
+  }
+}
+
+type ConstraintsPlan = z.infer<typeof ConstraintsSectionPlanSchema>
+
+const sanitizeEntries = (entries: any[]): string[] =>
+  entries
+    .map(entry => (typeof entry === 'string' ? entry.trim() : ''))
+    .filter(entry => entry.length > 0)
+
+const dedupeEntries = (entries: string[]): string[] => {
+  const seen = new Set<string>()
+  const unique: string[] = []
+
+  for (const entry of entries) {
+    const key = entry.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    unique.push(entry)
+  }
+
+  return unique
+}
+
+const findEntryIndex = (entries: string[], reference?: string): number => {
+  if (!reference) return -1
+  const ref = reference.trim().toLowerCase()
+  return entries.findIndex(entry => entry.trim().toLowerCase() === ref)
+}
+
+const applyStringListPlan = (existing: string[], plan: z.infer<typeof StringListPlanSchema>): string[] => {
+  let working = sanitizeEntries(existing)
+
+  for (const operation of plan.operations ?? []) {
+    const action = operation.action ?? 'add'
+    const reference = operation.reference ?? operation.value
+    const index = findEntryIndex(working, reference)
+    const value = typeof operation.value === 'string' ? operation.value.trim() : ''
+
+    if (action === 'remove') {
+      if (index >= 0) {
+        working.splice(index, 1)
+      }
+      continue
+    }
+
+    if (action === 'update') {
+      if (index >= 0 && value) {
+        working[index] = value
+      } else if (value) {
+        working.push(value)
+      }
+      continue
+    }
+
+    if (value) {
+      if (index >= 0) {
+        working[index] = value
+      } else {
+        working.push(value)
+      }
+    }
+  }
+
+  const sanitizedProposed = sanitizeEntries(plan.proposed ?? [])
+
+  if (sanitizedProposed.length > 0) {
+    for (const entry of sanitizedProposed) {
+      const index = findEntryIndex(working, entry)
+      if (index >= 0) {
+        working[index] = entry
+      } else {
+        working.push(entry)
+      }
+    }
+  }
+
+  return dedupeEntries(working)
+}
+
+export const applyConstraintsPlan = (
+  existingConstraints: string[],
+  existingAssumptions: string[],
+  plan: ConstraintsPlan
+): { constraints: string[]; assumptions: string[] } => {
+  const constraints = applyStringListPlan(existingConstraints, plan.constraints ?? { operations: [], proposed: [] })
+  const assumptions = applyStringListPlan(existingAssumptions, plan.assumptions ?? { operations: [], proposed: [] })
+
+  if (plan.mode === 'replace') {
+    const proposedConstraints = sanitizeEntries(plan.constraints?.proposed ?? [])
+    const proposedAssumptions = sanitizeEntries(plan.assumptions?.proposed ?? [])
+
+    return {
+      constraints: proposedConstraints.length > 0 ? proposedConstraints : constraints,
+      assumptions: proposedAssumptions.length > 0 ? proposedAssumptions : assumptions
+    }
+  }
+
+  return {
+    constraints,
+    assumptions
   }
 }

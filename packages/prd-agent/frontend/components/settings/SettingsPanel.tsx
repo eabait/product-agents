@@ -125,8 +125,15 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
     if (typeof window === 'undefined') {
       return DEFAULT_SETTINGS_GROUP
     }
-    const hash = window.location.hash.replace('#', '')
-    return isSettingsGroupId(hash) ? hash : DEFAULT_SETTINGS_GROUP
+    try {
+      const stored = window.localStorage.getItem('settings-active-group')
+      if (stored && isSettingsGroupId(stored)) {
+        return stored
+      }
+    } catch (error) {
+      console.warn('Failed to read active settings group from storage:', error)
+    }
+    return DEFAULT_SETTINGS_GROUP
   })
   const [lastModelRefresh, setLastModelRefresh] = useState<Date | null>(null)
   const [lastFetchStatus, setLastFetchStatus] = useState<'success' | 'error' | null>(null)
@@ -159,21 +166,27 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
 
   const modelsForProvider = models.filter(model => model.provider === selectedProvider)
   const currentModel = settings.model ? models.find(model => model.id === settings.model) : undefined
-  const getSubAgentDropdownState = (id: string) =>
-    subAgentDropdownState[id] ?? { providerOpen: false, modelOpen: false }
+  const getSubAgentDropdownState = (id: string) => {
+    const state = subAgentDropdownState[id]
+    if (state) {
+      return state
+    }
+    const fallback = { providerOpen: false, modelOpen: false } as const
+    return fallback
+  }
   const setSubAgentDropdown = (
     id: string,
     update:
       | Partial<{ providerOpen: boolean; modelOpen: boolean }>
-      | ((current: { providerOpen: boolean; modelOpen: boolean }) => { providerOpen: boolean; modelOpen: boolean })
+      | ((state: { providerOpen: boolean; modelOpen: boolean }) => { providerOpen: boolean; modelOpen: boolean })
   ) => {
     setSubAgentDropdownState(prev => {
-      const current = getSubAgentDropdownState(id)
+      const snapshot = getSubAgentDropdownState(id)
       const next = typeof update === 'function'
-        ? update(current)
+        ? update(snapshot)
         : {
-            providerOpen: update.providerOpen ?? current.providerOpen,
-            modelOpen: update.modelOpen ?? current.modelOpen
+            providerOpen: update.providerOpen ?? snapshot.providerOpen,
+            modelOpen: update.modelOpen ?? snapshot.modelOpen
           }
       return {
         ...prev,
@@ -330,31 +343,12 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
 
   useEffect(() => {
     if (typeof window === 'undefined') {
-      return undefined
-    }
-
-    const handleHashChange = () => {
-      const hashValue = window.location.hash.replace('#', '')
-      if (isSettingsGroupId(hashValue)) {
-        setActiveGroup(hashValue)
-      }
-    }
-
-    handleHashChange()
-    window.addEventListener('hashchange', handleHashChange)
-
-    return () => {
-      window.removeEventListener('hashchange', handleHashChange)
-    }
-  }, [])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
       return
     }
-    const currentHash = window.location.hash.replace('#', '')
-    if (currentHash !== activeGroup) {
-      window.history.replaceState(null, '', `#${activeGroup}`)
+    try {
+      window.localStorage.setItem('settings-active-group', activeGroup)
+    } catch (error) {
+      console.warn('Failed to persist active settings group:', error)
     }
   }, [activeGroup])
 
@@ -861,7 +855,7 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
                                   value={currentProvider || undefined}
                                   open={dropdownState.providerOpen}
                                   onOpenChange={(open) => {
-                                    setSubAgentDropdown(subAgent.id, (current) => ({
+                                    setSubAgentDropdown(subAgent.id, (state) => ({
                                       providerOpen: open,
                                       modelOpen: open ? false : current.modelOpen
                                     }))
@@ -934,7 +928,7 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
                                       value={currentSettings.model}
                                       open={dropdownState.modelOpen}
                                       onOpenChange={(open) => {
-                                        setSubAgentDropdown(subAgent.id, (current) => ({
+                                        setSubAgentDropdown(subAgent.id, (state) => ({
                                           modelOpen: open,
                                           providerOpen: open ? false : current.providerOpen
                                         }))
