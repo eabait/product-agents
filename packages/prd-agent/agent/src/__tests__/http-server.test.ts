@@ -27,6 +27,33 @@ mockPRDOrchestratorAgent.agentName = 'PRD Generator Agent'
 mockPRDOrchestratorAgent.agentDescription = 'Generates Product Requirements Documents'
 mockPRDOrchestratorAgent.requiredCapabilities = ['structured_output']
 mockPRDOrchestratorAgent.defaultModel = 'anthropic/claude-3-5-sonnet'
+mockPRDOrchestratorAgent.getMetadata = jest.fn(() => ({
+  id: 'prd-orchestrator',
+  name: 'PRD Orchestrator Agent',
+  description: 'Generates PRDs',
+  version: 'test',
+  requiredCapabilities: ['structured_output'],
+  defaultSettings: {
+    model: 'anthropic/claude-3-5-sonnet',
+    temperature: 0.3,
+    maxTokens: 8000
+  },
+  subAgents: [
+    {
+      id: 'context-analyzer',
+      name: 'Context Analyzer',
+      description: 'Context analyzer',
+      kind: 'analyzer',
+      requiredCapabilities: ['structured_output'],
+      defaultSettings: {
+        model: 'anthropic/claude-3-5-sonnet',
+        temperature: 0.3,
+        maxTokens: 8000
+      },
+      configurableParameters: []
+    }
+  ]
+}))
 
 jest.mock('../prd-orchestrator-agent', () => ({
   PRDOrchestratorAgent: mockPRDOrchestratorAgent
@@ -44,7 +71,8 @@ jest.mock('../utilities', () => ({
     ...defaults,
     ...settings,
     model: (settings?.model || defaults?.model || 'anthropic/claude-3-5-sonnet'),
-    apiKey: (settings?.apiKey || defaults?.apiKey || 'test-key')
+    apiKey: (settings?.apiKey || defaults?.apiKey || 'test-key'),
+    subAgentSettings: settings?.subAgentSettings || defaults?.subAgentSettings
   }))
 }))
 
@@ -166,10 +194,13 @@ describe('HTTP Server REST API', () => {
       expect(data.defaultSettings).toHaveProperty('model')
       expect(data.defaultSettings).toHaveProperty('temperature')
       expect(data.defaultSettings).toHaveProperty('maxTokens')
+      expect(data.defaultSettings).toHaveProperty('subAgentSettings')
       expect(data.agentInfo).toHaveProperty('name')
       expect(data.agentInfo).toHaveProperty('description')
       expect(data.agentInfo).toHaveProperty('requiredCapabilities')
       expect(data.agentInfo).toHaveProperty('defaultModel')
+      expect(data.metadata).toBeDefined()
+      expect(Array.isArray(data.metadata.subAgents)).toBe(true)
     })
   })
 
@@ -205,17 +236,17 @@ describe('HTTP Server REST API', () => {
       }
 
       const response = await makeRequest('POST', '/prd', requestBody)
-      
+
       expect(response.statusCode).toBe(HTTP_STATUS.OK)
       expect(response.headers['content-type']).toBe('application/json')
-      
+
       const data = JSON.parse(response.body)
       expect(data.prd).toHaveProperty('solutionOverview')
       expect(data.prd).toHaveProperty('targetUsers')
       expect(data.prd).toHaveProperty('metadata')
       expect(data.prd.metadata).toHaveProperty('version')
       expect(data.prd.metadata).toHaveProperty('lastUpdated')
-      
+
       expect(mockGenerateSections).toHaveBeenCalledWith(
         expect.objectContaining({
           message: requestBody.message,
@@ -223,6 +254,35 @@ describe('HTTP Server REST API', () => {
           settings: requestBody.settings
         })
       )
+    })
+
+    test('POST /prd should forward sub-agent overrides to orchestrator', async () => {
+      const requestBody = {
+        message: 'Draft a PRD',
+        settings: {
+          apiKey: 'test-key',
+          model: 'anthropic/claude-3-5-sonnet',
+          temperature: 0.3,
+          maxTokens: 8000,
+          subAgentSettings: {
+            'target-users-writer': {
+              model: 'openai/gpt-4o-mini',
+              temperature: 0.6,
+              maxTokens: 6000
+            }
+          }
+        }
+      }
+
+      await makeRequest('POST', '/prd', requestBody)
+
+      expect(mockPRDOrchestratorAgent).toHaveBeenCalledTimes(1)
+      const constructorArgs = mockPRDOrchestratorAgent.mock.calls[0]?.[0]
+      expect(constructorArgs?.subAgentSettings?.['target-users-writer']).toMatchObject({
+        model: 'openai/gpt-4o-mini',
+        temperature: 0.6,
+        maxTokens: 6000
+      })
     })
 
     test('POST /prd should return 400 for missing message', async () => {

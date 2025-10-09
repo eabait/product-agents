@@ -1,11 +1,15 @@
 import { z } from 'zod'
 
-export interface AgentSettings {
+export interface AgentRuntimeSettings {
   model: string
   temperature: number
   maxTokens: number
   apiKey?: string
   advanced?: Record<string, any>
+}
+
+export interface AgentSettings extends AgentRuntimeSettings {
+  subAgentSettings?: Record<string, AgentRuntimeSettings>
 }
 
 export interface Message {
@@ -25,22 +29,61 @@ export abstract class BaseAgent {
   protected settings: AgentSettings
   
   constructor(settings: Partial<AgentSettings> = {}) {
+    const { subAgentSettings, ...rest } = settings || {}
     this.settings = {
       model: 'anthropic/claude-3-5-sonnet',
       temperature: 0.7,
       maxTokens: 2000,
-      ...settings
+      ...rest,
+      ...(subAgentSettings ? { subAgentSettings: { ...subAgentSettings } } : {})
     }
   }
   
   abstract chat(message: string, context?: any): Promise<any>
   
   updateSettings(newSettings: Partial<AgentSettings>) {
-    this.settings = { ...this.settings, ...newSettings }
+    const { subAgentSettings, ...rest } = newSettings || {}
+    this.settings = {
+      ...this.settings,
+      ...rest,
+      ...(subAgentSettings
+        ? {
+            subAgentSettings: {
+              ...(this.settings.subAgentSettings || {}),
+              ...Object.entries(subAgentSettings).reduce<Record<string, AgentRuntimeSettings>>(
+                (acc, [key, value]) => {
+                  acc[key] = {
+                    ...(this.settings.subAgentSettings?.[key] || {
+                      model: this.settings.model,
+                      temperature: this.settings.temperature,
+                      maxTokens: this.settings.maxTokens
+                    }),
+                    ...value
+                  }
+                  return acc
+                },
+                {}
+              )
+            }
+          }
+        : {})
+    }
   }
   
   getSettings(): AgentSettings {
-    return { ...this.settings }
+    return {
+      ...this.settings,
+      ...(this.settings.subAgentSettings
+        ? {
+            subAgentSettings: Object.entries(this.settings.subAgentSettings).reduce<
+              Record<string, AgentRuntimeSettings>
+            >((acc, [key, value]) => {
+              acc[key] = { ...value }
+              return acc
+            }, {})
+          }
+        : {})
+    }
   }
 }
 

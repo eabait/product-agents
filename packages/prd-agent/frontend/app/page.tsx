@@ -21,7 +21,7 @@ import {
   Trash2,
   Database,
 } from "lucide-react";
-import { Conversation, Message } from "@/types";
+import { Conversation, Message, AgentMetadata, AgentSettingsState, SubAgentSettingsMap } from "@/types";
 import { NewPRD } from "@/lib/prd-schema";
 import { ContextPanel } from "@/components/context";
 import { ContextUsageIndicator } from "@/components/context/ContextUsageIndicator";
@@ -35,19 +35,53 @@ import {
   TimingSettings
 } from "@/lib/ui-constants";
 
+type RuntimeOverrides = {
+  model?: string;
+  temperature?: number;
+  maxTokens?: number;
+  apiKey?: string;
+};
+
+function buildSubAgentSettings(
+  metadata: AgentMetadata | null,
+  defaults: SubAgentSettingsMap | undefined,
+  saved: SubAgentSettingsMap | undefined,
+  fallback: {
+    model: string;
+    temperature: number;
+    maxTokens: number;
+    apiKey?: string;
+  }
+): SubAgentSettingsMap {
+  const subAgents = metadata?.subAgents || [];
+
+  if (subAgents.length === 0) {
+    const source = saved || defaults || {};
+    return Object.entries(source).reduce<SubAgentSettingsMap>((acc, [key, value]) => {
+      acc[key] = { ...value };
+      return acc;
+    }, {});
+  }
+
+  return subAgents.reduce<SubAgentSettingsMap>((acc, subAgent) => {
+    const defaultEntry: RuntimeOverrides = defaults?.[subAgent.id] ?? subAgent.defaultSettings ?? {};
+    const savedEntry: RuntimeOverrides = saved?.[subAgent.id] ?? {};
+
+    acc[subAgent.id] = {
+      model: savedEntry.model ?? defaultEntry.model ?? fallback.model,
+      temperature: savedEntry.temperature ?? defaultEntry.temperature ?? fallback.temperature,
+      maxTokens: savedEntry.maxTokens ?? defaultEntry.maxTokens ?? fallback.maxTokens,
+      apiKey: savedEntry.apiKey ?? defaultEntry.apiKey ?? fallback.apiKey,
+    };
+
+    return acc;
+  }, {} as SubAgentSettingsMap);
+}
+
 // Streaming configuration constants
 const STREAM_TIMEOUT_MS = 300000; // 5 minutes
 // const STREAM_RETRY_COUNT = 3; // Reserved for future retry implementation
 // const STREAM_RETRY_DELAY_MS = 1000; // Reserved for future retry implementation
-// AgentSettings interface
-interface AgentSettings {
-  model: string;
-  temperature: number;
-  maxTokens: number;
-  apiKey?: string;
-  streaming?: boolean;
-}
-
 // Enhanced model interface from OpenRouter
 
 
@@ -67,13 +101,15 @@ function PRDAgentPageContent() {
   
   // Settings state  
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settings, setSettings] = useState<AgentSettings>({
+  const [settings, setSettings] = useState<AgentSettingsState>({
     model: "anthropic/claude-3-7-sonnet", // Will be updated with agent defaults
     temperature: 0.7, // Will be updated with agent defaults
     maxTokens: 8000, // Will be updated with agent defaults
     apiKey: undefined,
-    streaming: true // Enable streaming by default
+    streaming: true, // Enable streaming by default
+    subAgentSettings: {}
   });
+  const [agentMetadata, setAgentMetadata] = useState<AgentMetadata | null>(null);
   
   // Streaming state
   const [progressEvents, setProgressEvents] = useState<ProgressEvent[]>([]);
@@ -94,6 +130,7 @@ function PRDAgentPageContent() {
 
   // track initialization so we don't run sync effects before we've loaded from localStorage
   const isInitializedRef = useRef(false);
+  const initialSettingsRef = useRef(settings);
   
   // No cleanup needed since we handle streaming directly in the fetch response
   
@@ -233,6 +270,42 @@ function PRDAgentPageContent() {
   // Helper function to extract provider from model ID
 
   // Fetch agent defaults from backend
+  const pruneInvalidOverrides = useCallback((availableModels: string[]) => {
+    if (!availableModels || availableModels.length === 0) {
+      return;
+    }
+
+    const availableSet = new Set(availableModels);
+
+    setSettings(prev => {
+      const overrides = prev.subAgentSettings;
+      if (!overrides || Object.keys(overrides).length === 0) {
+        return prev;
+      }
+
+      let changed = false;
+      const filtered: SubAgentSettingsMap = {};
+
+      for (const [key, value] of Object.entries(overrides)) {
+        if (value?.model && availableSet.has(value.model)) {
+          filtered[key] = value;
+        } else {
+          changed = true;
+        }
+      }
+
+      if (!changed) {
+        return prev;
+      }
+
+      console.warn('Removing unavailable sub-agent overrides that are no longer in the model catalog');
+      return {
+        ...prev,
+        subAgentSettings: filtered
+      };
+    });
+  }, []);
+
   const fetchAgentDefaults = useCallback(async () => {
     try {
       console.log("Fetching agent defaults...");
@@ -242,21 +315,10 @@ function PRDAgentPageContent() {
         throw new Error(`Failed to fetch agent defaults: ${response.status}`);
       }
       
-      const defaults = await response.json();
-      console.log("Agent defaults received:", defaults);
-      
-      // Update settings with agent defaults (but preserve any existing apiKey)
-      setSettings(prev => ({
-        ...prev,
-        model: defaults.model || prev.model,
-        temperature: defaults.temperature || prev.temperature,
-        maxTokens: defaults.maxTokens || prev.maxTokens,
-        // Don't override apiKey from localStorage
-      }));
-      
-      // Immediately derive and set provider from default model
-      
-      return defaults;
+      const payload = await response.json();
+      console.log("Agent defaults received:", payload);
+      setAgentMetadata(payload.metadata || null);
+      return payload;
     } catch (error) {
       console.error("Failed to fetch agent defaults:", error);
       return null;
@@ -277,6 +339,7 @@ function PRDAgentPageContent() {
       const data = await response.json();
       if (data.models && Array.isArray(data.models)) {
         setModels(data.models); // Update context
+        pruneInvalidOverrides(data.models.map((m: any) => m.id));
         return data.models;
       } else {
         throw new Error('Invalid models data format');
@@ -286,7 +349,7 @@ function PRDAgentPageContent() {
       setModels([]); // Update context
       return [];
     }
-  }, [setModels]);
+  }, [setModels, pruneInvalidOverrides]);
 
   // Update model context when settings model changes
   useEffect(() => {
@@ -333,141 +396,153 @@ function PRDAgentPageContent() {
   }, [contextOpen, activeConversation]);
 
   useEffect(() => {
-    console.log("Initializing from localStorage...");
-    
-    // Declare variables with broader scope for use in finally block
-    let savedSettings: AgentSettings | null = null;
-    
-    try {
-      const raw = localStorage.getItem("prd-agent-conversations");
-      const activeRaw = localStorage.getItem("prd-agent-active-conversation");
-      const settingsRaw = localStorage.getItem("prd-agent-settings");
-      
-      console.log("Raw localStorage data:", { raw, activeRaw, settingsRaw });
+    let savedSettings: AgentSettingsState | null = null;
+    let isMounted = true;
 
-      // Load settings (will be merged with agent defaults later)
-      savedSettings = settingsRaw && settingsRaw.trim() && settingsRaw !== "undefined" && settingsRaw !== "null" 
-        ? (() => {
-            try {
-              const parsed = JSON.parse(settingsRaw) as AgentSettings;
-              console.log("Loaded settings from localStorage:", parsed);
-              return parsed;
-            } catch (parseErr) {
-              console.warn("Failed to parse settings from localStorage:", parseErr);
-              return null;
-            }
-          })()
-        : null;
+    const initializeStorage = () => {
+      console.log("Initializing from localStorage...");
 
+      try {
+        const rawConversations = localStorage.getItem("prd-agent-conversations");
+        const rawActiveId = localStorage.getItem("prd-agent-active-conversation");
+        const rawSettings = localStorage.getItem("prd-agent-settings");
 
-
-      let parsed: Conversation[] = [];
-      let needsInitialization = true;
-
-      // Only try to parse if we have actual data
-      if (raw && raw.trim() && raw !== "undefined" && raw !== "null") {
-        try {
-          parsed = JSON.parse(raw) as Conversation[];
-          // Validate the parsed data
-          if (Array.isArray(parsed) && parsed.length > 0 && parsed.every(c => c.id && c.title && Array.isArray(c.messages))) {
-            needsInitialization = false;
-            console.log("Successfully loaded conversations from localStorage:", parsed.length);
-          } else {
-            console.warn("Invalid conversation data structure, reinitializing");
-          }
-        } catch (parseErr) {
-          console.warn("Failed to parse conversations from localStorage:", parseErr);
-          // Don't throw - just reinitialize
-        }
-      } else {
-        console.log("No valid localStorage data found, creating initial conversation");
-      }
-
-      // Only create initial conversation if we truly need it
-      if (needsInitialization) {
-        const id = uuidv4();
-        const initial: Conversation = {
-          id,
-          title: "New PRD",
-          messages: [],
-          createdAt: new Date().toISOString(),
-        };
-        parsed = [initial];
-        console.log("Created new initial conversation:", id);
-      }
-
-      setConversations(parsed);
-
-      // Handle active conversation ID
-      let savedActiveId: string | null = null;
-      if (activeRaw && activeRaw.trim() && activeRaw !== "undefined" && activeRaw !== "null") {
-        try {
-          savedActiveId = JSON.parse(activeRaw) as string;
-        } catch (parseErr) {
-          console.warn("Failed to parse active conversation ID:", parseErr);
-        }
-      }
-
-      const activeConv = savedActiveId ? parsed.find((c) => c.id === savedActiveId) : parsed[0];
-      const useActive = activeConv || parsed[0];
-      setActiveId(useActive.id);
-      console.log("Set active conversation:", useActive.id);
-
-    } catch (err) {
-      console.error("Critical error during initialization:", err);
-      // Only create fallback if we hit a critical error
-      const id = uuidv4();
-      const initial: Conversation = {
-        id,
-        title: "New PRD",
-        messages: [],
-        createdAt: new Date().toISOString(),
-      };
-      setConversations([initial]);
-      setActiveId(id);
-    } finally {
-      // Allow other effects to run safely after initialization finishes
-      isInitializedRef.current = true;
-      console.log("Initialization complete");
-      
-      // Fetch agent defaults and then models after initialization
-      setTimeout(async () => {
-        const agentDefaults = await fetchAgentDefaults();
-        
-        let finalApiKey: string | undefined;
-        
-        // Merge agent defaults with localStorage settings (localStorage takes precedence for user customizations)
-        // Note: fetchAgentDefaults already updated settings and set provider, so we need to be careful not to override
-        if (agentDefaults && savedSettings) {
-          // Only update settings if localStorage has different values than what fetchAgentDefaults set
-          const currentModel = savedSettings.model || agentDefaults.model;
-          finalApiKey = savedSettings.apiKey;
-          setSettings(prev => ({
-            model: currentModel,
-            temperature: savedSettings.temperature !== undefined ? savedSettings.temperature : (agentDefaults.temperature || prev.temperature),
-            maxTokens: savedSettings.maxTokens || agentDefaults.maxTokens || prev.maxTokens,
-            apiKey: savedSettings.apiKey || prev.apiKey // Always prefer localStorage apiKey
-          }));
-          
-        } else if (savedSettings) {
-          // Only localStorage available
-          finalApiKey = savedSettings.apiKey;
-          setSettings(savedSettings);
-        }
-        // If only agentDefaults available, settings and provider are already updated by fetchAgentDefaults
-        
-        // Fetch models after settings are resolved
-        setTimeout(async () => {
+        if (rawSettings && rawSettings.trim() && rawSettings !== "undefined" && rawSettings !== "null") {
           try {
-            await fetchModels(finalApiKey);
-          } catch (error) {
-            console.error('Failed to fetch models during initialization:', error);
+            const parsed = JSON.parse(rawSettings) as AgentSettingsState;
+            parsed.subAgentSettings = parsed.subAgentSettings || {};
+            savedSettings = parsed;
+            console.log("Loaded settings from localStorage:", parsed);
+          } catch (parseErr) {
+            console.warn("Failed to parse settings from localStorage:", parseErr);
           }
-        }, TimingSettings.MODEL_FETCH_DELAY);
-        
-      }, TimingSettings.SETTINGS_FETCH_DELAY);
-    }
-  }, []);
+        }
+
+        let conversationsFromStorage: Conversation[] = [];
+        if (rawConversations && rawConversations.trim() && rawConversations !== "undefined" && rawConversations !== "null") {
+          try {
+            const parsed = JSON.parse(rawConversations) as Conversation[];
+            if (Array.isArray(parsed) && parsed.length > 0 && parsed.every(c => c.id && c.title && Array.isArray(c.messages))) {
+              conversationsFromStorage = parsed;
+            } else {
+              console.warn("Invalid conversation data structure, reinitializing");
+            }
+          } catch (parseErr) {
+            console.warn("Failed to parse conversations from localStorage:", parseErr);
+          }
+        }
+
+        if (conversationsFromStorage.length === 0) {
+          const id = uuidv4();
+          conversationsFromStorage = [{
+            id,
+            title: "New PRD",
+            messages: [],
+            createdAt: new Date().toISOString(),
+          }];
+        }
+
+        if (isMounted) {
+          setConversations(conversationsFromStorage);
+
+          let savedActiveId: string | null = null;
+          if (rawActiveId && rawActiveId.trim() && rawActiveId !== "undefined" && rawActiveId !== "null") {
+            try {
+              savedActiveId = JSON.parse(rawActiveId) as string;
+            } catch (parseErr) {
+              console.warn("Failed to parse active conversation ID:", parseErr);
+            }
+          }
+
+          const activeConv = savedActiveId ? conversationsFromStorage.find(c => c.id === savedActiveId) : conversationsFromStorage[0];
+          setActiveId((activeConv || conversationsFromStorage[0]).id);
+        }
+      } catch (err) {
+        console.error("Critical error during initialization:", err);
+        const id = uuidv4();
+        if (isMounted) {
+          setConversations([{
+            id,
+            title: "New PRD",
+            messages: [],
+            createdAt: new Date().toISOString(),
+          }]);
+          setActiveId(id);
+        }
+      }
+    };
+
+    const initialize = async () => {
+      initializeStorage();
+      isInitializedRef.current = true;
+
+      const defaultsPayload = await fetchAgentDefaults();
+      const defaultSettings = defaultsPayload?.settings as (AgentSettingsState | undefined);
+      const metadata = defaultsPayload?.metadata || null;
+
+      const baseSettings = initialSettingsRef.current;
+
+      const merged: AgentSettingsState = {
+        model: baseSettings.model,
+        temperature: baseSettings.temperature,
+        maxTokens: baseSettings.maxTokens,
+        apiKey: baseSettings.apiKey,
+        streaming: baseSettings.streaming,
+        subAgentSettings: baseSettings.subAgentSettings || {},
+      };
+
+      if (defaultSettings) {
+        merged.model = defaultSettings.model ?? merged.model;
+        merged.temperature = defaultSettings.temperature ?? merged.temperature;
+        merged.maxTokens = defaultSettings.maxTokens ?? merged.maxTokens;
+        merged.apiKey = defaultSettings.apiKey ?? merged.apiKey;
+        merged.subAgentSettings = defaultSettings.subAgentSettings || merged.subAgentSettings;
+      }
+
+      if (savedSettings) {
+        merged.model = savedSettings.model ?? merged.model;
+        merged.temperature = savedSettings.temperature ?? merged.temperature;
+        merged.maxTokens = savedSettings.maxTokens ?? merged.maxTokens;
+        merged.apiKey = savedSettings.apiKey ?? merged.apiKey;
+        merged.streaming = savedSettings.streaming ?? merged.streaming;
+      }
+
+      if (metadata || savedSettings?.subAgentSettings || defaultSettings?.subAgentSettings) {
+        merged.subAgentSettings = buildSubAgentSettings(
+          metadata,
+          defaultSettings?.subAgentSettings,
+          savedSettings?.subAgentSettings,
+          {
+            model: merged.model,
+            temperature: merged.temperature,
+            maxTokens: merged.maxTokens,
+            apiKey: merged.apiKey,
+          }
+        );
+      }
+
+      if (isMounted) {
+        setSettings(prev => ({
+          ...prev,
+          ...merged,
+        }));
+      }
+
+      const finalApiKey = savedSettings?.apiKey ?? defaultSettings?.apiKey ?? merged.apiKey;
+
+      try {
+        await fetchModels(finalApiKey);
+      } catch (error) {
+        console.error('Failed to fetch models during initialization:', error);
+      }
+    };
+
+    initialize();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [fetchAgentDefaults, fetchModels]);
 
 
   useEffect(() => {
@@ -1143,6 +1218,7 @@ function PRDAgentPageContent() {
           isOpen={settingsOpen}
           onClose={() => setSettingsOpen(false)}
           settings={settings}
+          metadata={agentMetadata}
           onSettingsChange={setSettings}
         />
       </div>

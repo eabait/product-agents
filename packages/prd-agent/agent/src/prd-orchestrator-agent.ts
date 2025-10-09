@@ -1,4 +1,4 @@
-import { BaseAgent } from '@product-agents/agent-core'
+import { BaseAgent, AgentSettings, AgentRuntimeSettings } from '@product-agents/agent-core'
 import { ModelCapability } from '@product-agents/model-compatibility'
 import { 
   PRD, 
@@ -27,6 +27,7 @@ import {
   ConstraintsSectionWriter,
   type SectionWriterInput
 } from './section-writers'
+import { PRD_AGENT_METADATA, getDefaultSubAgentSettings, AgentMetadata } from './agent-metadata'
 
 // Progress event types for streaming
 export interface ProgressEvent {
@@ -49,6 +50,18 @@ export class PRDOrchestratorAgent extends BaseAgent {
   static readonly agentName = 'PRD Orchestrator'
   static readonly agentDescription = 'Orchestrates PRD generation with modular section writers'
 
+  static getMetadata(): AgentMetadata {
+    return {
+      ...PRD_AGENT_METADATA,
+      defaultSettings: { ...PRD_AGENT_METADATA.defaultSettings },
+      subAgents: PRD_AGENT_METADATA.subAgents.map(subAgent => ({
+        ...subAgent,
+        defaultSettings: { ...subAgent.defaultSettings },
+        configurableParameters: subAgent.configurableParameters.map(param => ({ ...param }))
+      }))
+    }
+  }
+
   private sectionWriters: Map<string, any>
   private clarificationAnalyzer: ClarificationAnalyzer
   
@@ -56,21 +69,57 @@ export class PRDOrchestratorAgent extends BaseAgent {
   private contextAnalyzer: ContextAnalyzer
   private sectionDetectionAnalyzer: SectionDetectionAnalyzer
 
-  constructor(settings?: any) {
-    super(settings)
-    
+  constructor(settings?: Partial<AgentSettings>) {
+    super({
+      ...settings,
+      subAgentSettings: {
+        ...getDefaultSubAgentSettings(),
+        ...(settings?.subAgentSettings || {})
+      }
+    })
+
+    const orchestratorOverrides = this.settings.subAgentSettings?.['orchestrator-core']
+    if (orchestratorOverrides) {
+      super.updateSettings({
+        model: orchestratorOverrides.model,
+        temperature: orchestratorOverrides.temperature,
+        maxTokens: orchestratorOverrides.maxTokens,
+        apiKey: orchestratorOverrides.apiKey
+      })
+    }
+
     // Initialize simplified analyzers for centralized analysis
-    this.contextAnalyzer = new ContextAnalyzer(this.settings)
-    this.clarificationAnalyzer = new ClarificationAnalyzer(this.settings)
-    this.sectionDetectionAnalyzer = new SectionDetectionAnalyzer(this.settings)
-    
+    this.contextAnalyzer = new ContextAnalyzer(this.getSubAgentRuntimeSettings('context-analyzer'))
+    this.clarificationAnalyzer = new ClarificationAnalyzer(this.getSubAgentRuntimeSettings('clarification-analyzer'))
+    this.sectionDetectionAnalyzer = new SectionDetectionAnalyzer(this.getSubAgentRuntimeSettings('section-detection-analyzer'))
+
     // Initialize simplified section writers for 5-section PRD
     this.sectionWriters = new Map()
-    this.sectionWriters.set('targetUsers', new TargetUsersSectionWriter(this.settings))
-    this.sectionWriters.set('solution', new SolutionSectionWriter(this.settings))
-    this.sectionWriters.set('keyFeatures', new KeyFeaturesSectionWriter(this.settings))
-    this.sectionWriters.set('successMetrics', new SuccessMetricsSectionWriter(this.settings))
-    this.sectionWriters.set('constraints', new ConstraintsSectionWriter(this.settings))
+    this.sectionWriters.set('targetUsers', new TargetUsersSectionWriter(this.getSubAgentRuntimeSettings('target-users-writer')))
+    this.sectionWriters.set('solution', new SolutionSectionWriter(this.getSubAgentRuntimeSettings('solution-writer')))
+    this.sectionWriters.set('keyFeatures', new KeyFeaturesSectionWriter(this.getSubAgentRuntimeSettings('key-features-writer')))
+    this.sectionWriters.set('successMetrics', new SuccessMetricsSectionWriter(this.getSubAgentRuntimeSettings('success-metrics-writer')))
+    this.sectionWriters.set('constraints', new ConstraintsSectionWriter(this.getSubAgentRuntimeSettings('constraints-writer')))
+  }
+
+  private getSubAgentRuntimeSettings(subAgentId: string): AgentRuntimeSettings {
+    const overrides = this.settings.subAgentSettings?.[subAgentId]
+
+    const fallbackAdvanced = {
+      ...(this.settings.advanced || {}),
+      fallbackModel: this.settings.model
+    }
+
+    return {
+      model: overrides?.model || this.settings.model,
+      temperature: overrides?.temperature ?? this.settings.temperature,
+      maxTokens: overrides?.maxTokens ?? this.settings.maxTokens,
+      apiKey: overrides?.apiKey || this.settings.apiKey,
+      advanced: {
+        ...fallbackAdvanced,
+        ...(overrides?.advanced || {})
+      }
+    }
   }
 
   async chat(message: string, context?: any): Promise<PRD | ClarificationResult> {

@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Slider } from '@/components/ui/slider'
-import { Settings } from 'lucide-react'
+import { Settings, ChevronDown } from 'lucide-react'
 import { formatContextWindow } from '@/lib/context-utils'
 import { useModelContext, useContextSettings } from '@/contexts/AppStateProvider'
 import {
@@ -14,6 +14,22 @@ import {
   SLIDER_CONFIGS,
   ICON_SIZES
 } from '@/lib/ui-constants'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+import type { AgentMetadata, AgentSettingsState, SubAgentMetadata, SubAgentSettingsMap } from '@/types'
+
+type RuntimeOverrides = {
+  model?: string;
+  temperature?: number;
+  maxTokens?: number;
+  apiKey?: string;
+}
+
+type ResolvedRuntime = {
+  model: string;
+  temperature: number;
+  maxTokens: number;
+  apiKey?: string;
+}
 
 interface Model {
   id: string
@@ -22,6 +38,7 @@ interface Model {
   contextLength: number
   isTopProvider?: boolean
   isModerated?: boolean
+  capabilities?: string[]
   pricing: {
     promptFormatted: string
     completionFormatted: string
@@ -37,18 +54,13 @@ interface Provider {
 interface SettingsPanelProps {
   isOpen: boolean
   onClose: () => void
-  settings: {
-    model: string
-    temperature: number
-    maxTokens: number
-    apiKey?: string
-    streaming?: boolean
-  }
+  settings: AgentSettingsState
+  metadata: AgentMetadata | null
   // eslint-disable-next-line no-unused-vars
-  onSettingsChange: (settings: any) => void
+  onSettingsChange: (settings: AgentSettingsState) => void
 }
 
-export function SettingsPanel({ isOpen, onClose, settings, onSettingsChange }: SettingsPanelProps) {
+export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsChange }: SettingsPanelProps) {
   const [models, setModels] = useState<Model[]>([])
   const [modelsLoading, setModelsLoading] = useState(false)
   const [modelsError, setModelsError] = useState<string | null>(null)
@@ -78,8 +90,16 @@ export function SettingsPanel({ isOpen, onClose, settings, onSettingsChange }: S
 
   const modelsForProvider = models.filter(model => model.provider === selectedProvider)
 
-  const setSettings = (updater: (_prev: any) => any) => {
-    onSettingsChange(updater(settings))
+  const cloneSettings = (): AgentSettingsState => ({
+    ...settings,
+    subAgentSettings: Object.entries(settings.subAgentSettings || {}).reduce<SubAgentSettingsMap>((acc, [key, value]) => {
+      acc[key] = { ...value }
+      return acc
+    }, {})
+  })
+
+  const setSettings = (updater: (_prev: AgentSettingsState) => AgentSettingsState) => {
+    onSettingsChange(updater(cloneSettings()))
   }
 
   const fetchModels = async (apiKey?: string) => {
@@ -112,6 +132,85 @@ export function SettingsPanel({ isOpen, onClose, settings, onSettingsChange }: S
     } finally {
       setModelsLoading(false)
     }
+  }
+
+  const subAgents: SubAgentMetadata[] = metadata?.subAgents || []
+  const agentDefaults = metadata?.defaultSettings
+
+  const resolveBaselineForSubAgent = (subAgent: SubAgentMetadata) => ({
+    model: subAgent.defaultSettings?.model ?? agentDefaults?.model ?? settings.model,
+    temperature: subAgent.defaultSettings?.temperature ?? agentDefaults?.temperature ?? settings.temperature,
+    maxTokens: subAgent.defaultSettings?.maxTokens ?? agentDefaults?.maxTokens ?? settings.maxTokens
+  })
+
+  const resolveSubAgentSettings = (subAgent: SubAgentMetadata) => {
+    const baseline = resolveBaselineForSubAgent(subAgent)
+    const overrides = settings.subAgentSettings?.[subAgent.id]
+    return {
+      ...baseline,
+      ...overrides
+    }
+  }
+
+  const getCompatibleModels = (subAgent: SubAgentMetadata) => {
+    if (subAgent.requiredCapabilities.length === 0) {
+      return models
+    }
+    return models.filter(model => {
+      const caps = model.capabilities || []
+      return subAgent.requiredCapabilities.every(capability => caps.includes(capability))
+    })
+  }
+
+  const hasSubAgentOverride = (subAgent: SubAgentMetadata) => {
+    const baseline = resolveBaselineForSubAgent(subAgent)
+    const overrides = settings.subAgentSettings?.[subAgent.id]
+    if (!overrides) return false
+
+    return (
+      overrides.model !== baseline.model ||
+      overrides.temperature !== baseline.temperature ||
+      overrides.maxTokens !== baseline.maxTokens
+    )
+  }
+
+  const updateSubAgentSettings = (
+    subAgentId: string,
+    updater: (_current: ResolvedRuntime) => Partial<ResolvedRuntime>
+  ) => {
+    setSettings(prev => {
+      const next = { ...prev }
+      const currentOverrides: RuntimeOverrides = next.subAgentSettings?.[subAgentId] || {}
+      const baseline: ResolvedRuntime = {
+        model: currentOverrides.model ?? next.model,
+        temperature: currentOverrides.temperature ?? next.temperature,
+        maxTokens: currentOverrides.maxTokens ?? next.maxTokens,
+        apiKey: currentOverrides.apiKey ?? next.apiKey
+      }
+      const overrides = updater(baseline) || {}
+      next.subAgentSettings = {
+        ...next.subAgentSettings,
+        [subAgentId]: {
+          model: overrides.model ?? baseline.model,
+          temperature: overrides.temperature ?? baseline.temperature,
+          maxTokens: overrides.maxTokens ?? baseline.maxTokens,
+          apiKey: overrides.apiKey ?? baseline.apiKey
+        }
+      }
+      return next
+    })
+  }
+
+  const resetSubAgentSettings = (subAgent: SubAgentMetadata) => {
+    setSettings(prev => {
+      const next = { ...prev }
+      const baseline = resolveBaselineForSubAgent(subAgent)
+      next.subAgentSettings = {
+        ...next.subAgentSettings,
+        [subAgent.id]: { ...baseline }
+      }
+      return next
+    })
   }
 
   // Fetch models when panel opens or settings change
@@ -387,15 +486,165 @@ export function SettingsPanel({ isOpen, onClose, settings, onSettingsChange }: S
                     <label htmlFor="enableStreaming" className="text-sm font-medium">
                       Enable live progress updates (streaming)
                     </label>
-                  </div>
-                </div>
+              </div>
+            </div>
+          </div>
+
+          {metadata && subAgents.length > 0 && (
+            <div className="space-y-4">
+              <div className="text-xs text-muted-foreground uppercase tracking-wide">
+                Sub-agent Overrides
               </div>
 
-              {/* Context Settings */}
-              <div>
-                <div className="text-xs text-muted-foreground uppercase tracking-wide mb-3">
-                  Context Configuration
-                </div>
+              <p className="text-xs text-muted-foreground">
+                Override individual worker settings when you need specialized models or tuning. Defaults inherit from the orchestrator if left unchanged.
+              </p>
+
+              <div className="space-y-3">
+                {subAgents.map((subAgent) => {
+                  const currentSettings = resolveSubAgentSettings(subAgent)
+                  const baselineSettings = resolveBaselineForSubAgent(subAgent)
+                  const overrideActive = hasSubAgentOverride(subAgent)
+                  const compatibleModels = getCompatibleModels(subAgent)
+
+                  return (
+                    <Collapsible key={subAgent.id}>
+                      <CollapsibleTrigger className="flex w-full items-center justify-between rounded-md border px-3 py-2 text-left hover:bg-muted/50 focus:outline-none focus:ring-2 focus:ring-primary/20">
+                        <div className="flex flex-col gap-1">
+                          <span className="font-medium text-sm">
+                            {subAgent.name}
+                          </span>
+                          <span className="text-xs text-muted-foreground">
+                            {subAgent.description}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {overrideActive ? (
+                            <span className="text-xs font-medium text-blue-600">Override active</span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">Using defaults</span>
+                          )}
+                          <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform data-[state=open]:rotate-180" />
+                        </div>
+                      </CollapsibleTrigger>
+
+                      <CollapsibleContent className="mt-3">
+                        <div className="rounded-lg border bg-muted/10 p-4 space-y-4">
+                          <div className="grid gap-3">
+                            <div className="flex items-center justify-between">
+                              <span className="text-sm font-medium">Model</span>
+                              {overrideActive && (
+                                <button
+                                  type="button"
+                                  onClick={() => resetSubAgentSettings(subAgent)}
+                                  className="text-xs text-blue-500 hover:text-blue-700 underline"
+                                >
+                                  Reset to default
+                                </button>
+                              )}
+                            </div>
+
+                            {compatibleModels.length === 0 ? (
+                              <div className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
+                                No models available that satisfy {subAgent.requiredCapabilities.join(', ')}. Fetch models with a broader API key or adjust requirements.
+                              </div>
+                            ) : (
+                              <Select
+                                value={currentSettings.model}
+                                onValueChange={(value: string) =>
+                                  updateSubAgentSettings(subAgent.id, prev => ({
+                                    ...prev,
+                                    model: value
+                                  }))
+                                }
+                              >
+                                <SelectTrigger className="w-full">
+                                  <SelectValue placeholder="Select a model" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {compatibleModels.map(model => (
+                                    <SelectItem key={model.id} value={model.id}>
+                                      <div className="flex flex-col">
+                                        <span className="font-medium text-sm">{model.name}</span>
+                                        <span className="text-xs text-muted-foreground">{model.provider} • {formatContextWindow(model.contextLength)}</span>
+                                      </div>
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            )}
+                          </div>
+
+                          <div>
+                            <div className="flex items-center justify-between">
+                              <label className="block text-sm font-medium">
+                                Temperature: {currentSettings.temperature.toFixed(2)}
+                              </label>
+                              {baselineSettings.temperature !== currentSettings.temperature && (
+                                <span className="text-xs text-muted-foreground">Default {baselineSettings.temperature.toFixed(2)}</span>
+                              )}
+                            </div>
+                            <Slider
+                              value={[currentSettings.temperature]}
+                              onValueChange={([value]) =>
+                                updateSubAgentSettings(subAgent.id, prev => ({
+                                  ...prev,
+                                  temperature: value
+                                }))
+                              }
+                              max={SLIDER_CONFIGS.TEMPERATURE.MAX}
+                              min={SLIDER_CONFIGS.TEMPERATURE.MIN}
+                              step={SLIDER_CONFIGS.TEMPERATURE.STEP}
+                              className="w-full"
+                            />
+                            <div className="flex justify-between text-xs text-muted-foreground mt-1">
+                              <span>Precise</span>
+                              <span>Balanced</span>
+                              <span>Creative</span>
+                            </div>
+                          </div>
+
+                          <div>
+                            <div className="flex items-center justify-between">
+                              <label className="block text-sm font-medium">Max Tokens</label>
+                              {baselineSettings.maxTokens !== currentSettings.maxTokens && (
+                                <span className="text-xs text-muted-foreground">Default {baselineSettings.maxTokens}</span>
+                              )}
+                            </div>
+                            <Input
+                              type="number"
+                              value={currentSettings.maxTokens}
+                              min={256}
+                              step={256}
+                              onChange={(e) => {
+                                const value = Number.parseInt(e.target.value, 10)
+                                updateSubAgentSettings(subAgent.id, prev => ({
+                                  ...prev,
+                                  maxTokens: Number.isNaN(value) ? prev.maxTokens : value
+                                }))
+                              }}
+                            />
+                          </div>
+
+                          <div className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
+                            <div>
+                              Defaults: {baselineSettings.model} • Temp {baselineSettings.temperature.toFixed(2)} • {baselineSettings.maxTokens} tokens
+                            </div>
+                          </div>
+                        </div>
+                      </CollapsibleContent>
+                    </Collapsible>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Context Settings */}
+          <div>
+            <div className="text-xs text-muted-foreground uppercase tracking-wide mb-3">
+              Context Configuration
+            </div>
                 
                 <div className="space-y-4">
                   <div>

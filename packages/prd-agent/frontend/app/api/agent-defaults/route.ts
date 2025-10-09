@@ -20,22 +20,37 @@ export async function GET() {
     
     // Extract the default settings from the health endpoint response
     const defaults = data.defaultSettings || {};
+
+    const subAgentSettings = defaults.subAgentSettings
+      ? Object.entries(defaults.subAgentSettings).reduce<Record<string, any>>((acc, [key, value]: [string, any]) => {
+          acc[key] = { ...value };
+          return acc;
+        }, {})
+      : {};
     
     return NextResponse.json({
-      model: defaults.model,
-      temperature: defaults.temperature,
-      maxTokens: defaults.maxTokens,
-      agentInfo: data.agentInfo || null
+      settings: {
+        model: defaults.model,
+        temperature: defaults.temperature,
+        maxTokens: defaults.maxTokens,
+        subAgentSettings,
+      },
+      agentInfo: data.agentInfo || null,
+      metadata: data.metadata || null
     });
-    
+
   } catch (error) {
     console.error('Error fetching agent defaults:', error);
     
     // Return fallback defaults instead of undefined
     return NextResponse.json({
-      model: 'anthropic/claude-3-5-sonnet',
-      temperature: 0.3,
-      maxTokens: 8000,
+      settings: {
+        model: 'anthropic/claude-3-5-sonnet',
+        temperature: 0.3,
+        maxTokens: 8000,
+        subAgentSettings: {}
+      },
+      metadata: null,
       agentInfo: null
     });
   }

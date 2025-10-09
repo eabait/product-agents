@@ -44,6 +44,9 @@ async function fetchAgentCapabilities(): Promise<ModelCapability[]> {
 
     if (response.ok) {
       const data = await response.json();
+      if (data.metadata?.requiredCapabilities) {
+        return data.metadata.requiredCapabilities;
+      }
       return data.agentInfo?.requiredCapabilities || ['structured_output']; // fallback to structured_output only
     }
   } catch (error) {

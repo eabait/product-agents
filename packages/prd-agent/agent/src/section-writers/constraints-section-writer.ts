@@ -1,5 +1,4 @@
 import { z } from 'zod'
-import { OpenRouterClient } from '@product-agents/openrouter-client'
 import { BaseSectionWriter, SectionWriterInput, SectionWriterResult } from './base-section-writer'
 import { createConstraintsSectionPrompt } from '../prompts'
 import { 
@@ -29,11 +28,8 @@ export interface ConstraintsSection {
 }
 
 export class ConstraintsSectionWriter extends BaseSectionWriter {
-  private client: OpenRouterClient
-
   constructor(settings: any) {
     super(settings)
-    this.client = new OpenRouterClient(settings?.apiKey)
   }
 
   getSectionName(): string {
@@ -67,8 +63,7 @@ export class ConstraintsSectionWriter extends BaseSectionWriter {
 
     const prompt = this.createConstraintsPrompt(input, contextData)
     
-    const rawSection = await this.client.generateStructured({
-      model: this.settings.model,
+    const rawSection = await this.generateStructuredWithFallback({
       schema: ConstraintsSectionSchema,
       prompt,
       temperature: DEFAULT_TEMPERATURE

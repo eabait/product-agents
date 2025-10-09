@@ -64,33 +64,80 @@ export function buildPRDMetadata(options: {
  * Validates agent settings and provides defaults
  */
 export function validateAgentSettings(settings: any, defaults: any): any {
-  const effectiveSettings = {
+  const requestedSettings = settings || {}
+
+  const effectiveSettings: any = {
     ...defaults,
-    ...(settings || {}),
+    ...requestedSettings,
     // Use request API key if provided, otherwise fall back to environment
-    apiKey: settings?.apiKey || defaults.apiKey
+    apiKey: requestedSettings?.apiKey || defaults.apiKey
   }
-  
+
   // Validate critical settings
   if (!effectiveSettings.apiKey) {
     throw new Error(ERROR_MESSAGES.MISSING_API_KEY)
   }
-  
+
   if (!effectiveSettings.model) {
     throw new Error(ERROR_MESSAGES.INVALID_MODEL)
   }
-  
+
   // Validate numeric settings
   if (typeof effectiveSettings.temperature !== 'number' || effectiveSettings.temperature < 0 || effectiveSettings.temperature > 2) {
     console.warn(`Invalid temperature ${effectiveSettings.temperature}, using default ${defaults.temperature}`)
     effectiveSettings.temperature = defaults.temperature
   }
-  
+
   if (typeof effectiveSettings.maxTokens !== 'number' || effectiveSettings.maxTokens < 1) {
     console.warn(`Invalid maxTokens ${effectiveSettings.maxTokens}, using fallback ${FALLBACK_MAX_TOKENS}`)
     effectiveSettings.maxTokens = FALLBACK_MAX_TOKENS
   }
-  
+
+  const defaultSubAgentSettings = defaults.subAgentSettings || {}
+  const requestedSubAgentSettings = requestedSettings.subAgentSettings || {}
+
+  const mergedSubAgentSettings = Object.keys({
+    ...defaultSubAgentSettings,
+    ...requestedSubAgentSettings
+  }).reduce<Record<string, any>>((acc, subAgentId) => {
+    const baseDefaults = defaultSubAgentSettings[subAgentId] || {
+      model: effectiveSettings.model,
+      temperature: effectiveSettings.temperature,
+      maxTokens: effectiveSettings.maxTokens,
+      apiKey: effectiveSettings.apiKey,
+      advanced: effectiveSettings.advanced
+    }
+
+    const requested = requestedSubAgentSettings[subAgentId] || {}
+
+    const merged = {
+      ...baseDefaults,
+      ...requested,
+      apiKey: requested.apiKey || effectiveSettings.apiKey
+    }
+
+    if (!merged.model) {
+      merged.model = effectiveSettings.model
+    }
+
+    if (typeof merged.temperature !== 'number' || merged.temperature < 0 || merged.temperature > 2) {
+      console.warn(`Invalid temperature ${merged.temperature} for subAgent ${subAgentId}, falling back to ${baseDefaults.temperature}`)
+      merged.temperature = baseDefaults.temperature
+    }
+
+    if (typeof merged.maxTokens !== 'number' || merged.maxTokens < 1) {
+      console.warn(`Invalid maxTokens ${merged.maxTokens} for subAgent ${subAgentId}, falling back to ${baseDefaults.maxTokens}`)
+      merged.maxTokens = baseDefaults.maxTokens
+    }
+
+    acc[subAgentId] = merged
+    return acc
+  }, {})
+
+  if (Object.keys(mergedSubAgentSettings).length > 0) {
+    effectiveSettings.subAgentSettings = mergedSubAgentSettings
+  }
+
   return effectiveSettings
 }
 

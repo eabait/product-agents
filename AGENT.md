@@ -1,4 +1,4 @@
-# Product Agents - Claude Memory File
+# Product Agents - Agent Memory File
 
 ## Project Overview
 A monorepo containing multiple AI agent applications for various product development tasks. The project uses a turborepo structure with shared components and individual agent packages. Each agent follows a consistent tri-part architecture: frontend (Next.js), backend (HTTP server), and MCP server integration.

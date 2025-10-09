@@ -1,5 +1,4 @@
 import { z } from 'zod'
-import { OpenRouterClient } from '@product-agents/openrouter-client'
 import { BaseSectionWriter, SectionWriterInput, SectionWriterResult } from './base-section-writer'
 import { createKeyFeaturesSectionPrompt } from '../prompts'
 import { 
@@ -24,11 +23,8 @@ export interface KeyFeaturesSection {
 }
 
 export class KeyFeaturesSectionWriter extends BaseSectionWriter {
-  private client: OpenRouterClient
-
   constructor(settings: any) {
     super(settings)
-    this.client = new OpenRouterClient(settings?.apiKey)
   }
 
   getSectionName(): string {
@@ -62,8 +58,7 @@ export class KeyFeaturesSectionWriter extends BaseSectionWriter {
 
     const prompt = this.createKeyFeaturesPrompt(input, contextData)
     
-    const rawSection = await this.client.generateStructured({
-      model: this.settings.model,
+    const rawSection = await this.generateStructuredWithFallback({
       schema: KeyFeaturesSectionSchema,
       prompt,
       temperature: DEFAULT_TEMPERATURE

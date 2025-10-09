@@ -36,13 +36,29 @@ export abstract class BaseAnalyzer {
     temperature?: number
     arrayFields?: string[]
   }): Promise<T> {
-    return this.client.generateStructured({
-      model: this.settings.model,
-      schema: params.schema,
-      prompt: params.prompt,
-      temperature: params.temperature || this.settings.temperature,
-      arrayFields: params.arrayFields
-    })
+    try {
+      return await this.client.generateStructured({
+        model: this.settings.model,
+        schema: params.schema,
+        prompt: params.prompt,
+        temperature: params.temperature || this.settings.temperature,
+        arrayFields: params.arrayFields
+      })
+    } catch (error: any) {
+      const fallbackModel = this.settings.advanced?.fallbackModel
+      if (fallbackModel && fallbackModel !== this.settings.model && this.isModelNotFoundError(error)) {
+        console.warn(`Model ${this.settings.model} unavailable for analyzer, falling back to ${fallbackModel}`)
+        return this.client.generateStructured({
+          model: fallbackModel,
+          schema: params.schema,
+          prompt: params.prompt,
+          temperature: params.temperature || this.settings.temperature,
+          arrayFields: params.arrayFields
+        })
+      }
+
+      throw error
+    }
   }
 
   protected async generateText(params: {
@@ -54,5 +70,16 @@ export abstract class BaseAnalyzer {
       prompt: params.prompt,
       temperature: params.temperature || this.settings.temperature
     })
+  }
+
+  private isModelNotFoundError(error: any): boolean {
+    if (!error) return false
+    const statusCode = error.statusCode || error.response?.status
+    if (statusCode !== 404) {
+      return false
+    }
+    const message = typeof error.message === 'string' ? error.message : ''
+    const body = typeof error.responseBody === 'string' ? error.responseBody : ''
+    return message.includes('No endpoints found') || body.includes('No endpoints found')
   }
 }

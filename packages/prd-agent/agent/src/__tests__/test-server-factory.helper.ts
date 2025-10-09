@@ -16,18 +16,28 @@ import {
   CURRENT_PRD_VERSION
 } from '../constants'
 import { validateAgentSettings, safeParseJSON } from '../utilities'
+import { getDefaultSubAgentSettings } from '../agent-metadata'
 
 export const createTestServer = (): http.Server => {
   // Default settings for testing
-  const defaultSettings = {
+  const baseDefaultSettings = {
     apiKey: process.env.OPENROUTER_API_KEY || 'test-key',
     model: process.env.PRD_AGENT_MODEL || 'anthropic/claude-3-5-sonnet',
     temperature: parseFloat(process.env.PRD_AGENT_TEMPERATURE || DEFAULT_TEMPERATURE.toString()),
-    maxTokens: parseInt(process.env.PRD_AGENT_MAX_TOKENS || DEFAULT_MAX_TOKENS.toString())
+    maxTokens: parseInt(process.env.PRD_AGENT_MAX_TOKENS || DEFAULT_MAX_TOKENS.toString()),
+    subAgentSettings: getDefaultSubAgentSettings()
   }
 
+  const cloneDefaultSettings = () => ({
+    ...baseDefaultSettings,
+    subAgentSettings: Object.entries(baseDefaultSettings.subAgentSettings || {}).reduce<Record<string, any>>((acc, [key, value]) => {
+      acc[key] = { ...value }
+      return acc
+    }, {})
+  })
+
   const createAgent = async (requestSettings?: any) => {
-    const effectiveSettings = validateAgentSettings(requestSettings, defaultSettings)
+    const effectiveSettings = validateAgentSettings(requestSettings, cloneDefaultSettings())
     return new PRDOrchestratorAgent(effectiveSettings)
   }
 
@@ -65,17 +75,22 @@ export const createTestServer = (): http.Server => {
       res.setHeader('Content-Type', 'application/json')
       res.end(JSON.stringify({ 
         status: 'ok',
-        defaultSettings: {
-          model: defaultSettings.model,
-          temperature: defaultSettings.temperature,
-          maxTokens: defaultSettings.maxTokens
-        },
+        defaultSettings: (() => {
+          const defaults = cloneDefaultSettings()
+          return {
+            model: defaults.model,
+            temperature: defaults.temperature,
+            maxTokens: defaults.maxTokens,
+            subAgentSettings: defaults.subAgentSettings
+          }
+        })(),
         agentInfo: {
           name: PRDOrchestratorAgent.agentName,
           description: PRDOrchestratorAgent.agentDescription,
           requiredCapabilities: PRDOrchestratorAgent.requiredCapabilities,
           defaultModel: PRDOrchestratorAgent.defaultModel
-        }
+        },
+        metadata: PRDOrchestratorAgent.getMetadata()
       }))
       return
     }

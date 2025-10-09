@@ -1,5 +1,4 @@
 import { z } from 'zod'
-import { OpenRouterClient } from '@product-agents/openrouter-client'
 import { BaseSectionWriter, SectionWriterInput, SectionWriterResult } from './base-section-writer'
 import { createSolutionSectionPrompt } from '../prompts'
 import { 
@@ -24,11 +23,8 @@ export interface SolutionSection {
 }
 
 export class SolutionSectionWriter extends BaseSectionWriter {
-  private client: OpenRouterClient
-
   constructor(settings: any) {
     super(settings)
-    this.client = new OpenRouterClient(settings?.apiKey)
   }
 
   getSectionName(): string {
@@ -62,8 +58,7 @@ export class SolutionSectionWriter extends BaseSectionWriter {
 
     const prompt = this.createSolutionPrompt(input, contextData)
     
-    const rawSection = await this.client.generateStructured({
-      model: this.settings.model,
+    const rawSection = await this.generateStructuredWithFallback({
       schema: SolutionSectionSchema,
       prompt,
       temperature: 0.25 // Lower temperature for consistent solution approach

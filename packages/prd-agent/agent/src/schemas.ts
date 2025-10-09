@@ -80,6 +80,14 @@ export const SectionOperationSchema = z.object({
 export type SectionOperation = z.infer<typeof SectionOperationSchema>
 
 // Section routing request
+const SubAgentSettingsSchema = z.object({
+  model: z.string(),
+  temperature: z.number().optional(),
+  maxTokens: z.number().optional(),
+  apiKey: z.string().optional(),
+  advanced: z.record(z.any()).optional()
+})
+
 export const SectionRoutingRequestSchema = z.object({
   message: z.string(),
   context: z.object({
@@ -91,7 +99,8 @@ export const SectionRoutingRequestSchema = z.object({
     model: z.string(),
     temperature: z.number(),
     maxTokens: z.number(),
-    apiKey: z.string().optional()
+    apiKey: z.string().optional(),
+    subAgentSettings: z.record(z.string(), SubAgentSettingsSchema).optional()
   }).optional(),
   targetSections: z.array(z.string()).optional() // Specific sections to update
 })

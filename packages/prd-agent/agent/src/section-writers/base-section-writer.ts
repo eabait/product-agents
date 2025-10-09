@@ -1,4 +1,6 @@
 import { AgentSettings } from '@product-agents/agent-core'
+import { OpenRouterClient } from '@product-agents/openrouter-client'
+import { z } from 'zod'
 import { 
   BaseAnalyzer, 
   AnalyzerInput,
@@ -30,6 +32,7 @@ export interface SectionWriterInput {
 
 export abstract class BaseSectionWriter {
   protected settings: AgentSettings
+  protected client!: OpenRouterClient
   
   // Fallback analyzers (only used when shared analysis results are not available)
   protected contextAnalyzer?: ContextAnalyzer
@@ -37,9 +40,44 @@ export abstract class BaseSectionWriter {
 
   constructor(settings: AgentSettings) {
     this.settings = settings
+    this.client = new OpenRouterClient(settings?.apiKey)
     
     // Lazy initialization of analyzers - only created when needed for fallbacks
     // With centralized analysis, these are rarely used
+  }
+
+  protected async generateStructuredWithFallback<T>(params: {
+    schema: z.ZodSchema<T>
+    prompt: string
+    temperature?: number
+    maxTokens?: number
+    arrayFields?: string[]
+  }): Promise<T> {
+    try {
+      return await this.client.generateStructured({
+        model: this.settings.model,
+        schema: params.schema,
+        prompt: params.prompt,
+        temperature: params.temperature ?? this.settings.temperature,
+        maxTokens: params.maxTokens ?? this.settings.maxTokens,
+        arrayFields: params.arrayFields
+      })
+    } catch (error: any) {
+      const fallbackModel = this.settings.advanced?.fallbackModel
+      if (fallbackModel && fallbackModel !== this.settings.model && this.isModelNotFoundError(error)) {
+        console.warn(`Model ${this.settings.model} unavailable for section writer ${this.getSectionName()}, falling back to ${fallbackModel}`)
+        return this.client.generateStructured({
+          model: fallbackModel,
+          schema: params.schema,
+          prompt: params.prompt,
+          temperature: params.temperature ?? this.settings.temperature,
+          maxTokens: params.maxTokens ?? this.settings.maxTokens,
+          arrayFields: params.arrayFields
+        })
+      }
+
+      throw error
+    }
   }
 
   abstract writeSection(input: SectionWriterInput): Promise<SectionWriterResult>
@@ -137,5 +175,16 @@ export abstract class BaseSectionWriter {
       isValid: issues.length === 0,
       issues
     }
+  }
+
+  private isModelNotFoundError(error: any): boolean {
+    if (!error) return false
+    const statusCode = error.statusCode || error.response?.status
+    if (statusCode !== 404) {
+      return false
+    }
+    const message = typeof error.message === 'string' ? error.message : ''
+    const body = typeof error.responseBody === 'string' ? error.responseBody : ''
+    return message.includes('No endpoints found') || body.includes('No endpoints found')
   }
 }

@@ -19,6 +19,7 @@ import {
   createSuccessResponse,
   safeParseJSON
 } from './utilities'
+import { getDefaultSubAgentSettings } from './agent-metadata'
 
 // Simple .env file loader
 try {
@@ -43,21 +44,52 @@ const defaultApiKey = process.env.OPENROUTER_API_KEY
 console.log('Default OpenRouter API Key configured:', defaultApiKey ? `${defaultApiKey.substring(0, 8)}...` : 'NOT SET')
 
 // Default settings from environment variables
-const defaultSettings = {
+const baseDefaultSettings = {
   apiKey: defaultApiKey,
   model: process.env.PRD_AGENT_MODEL || PRDOrchestratorAgent.defaultModel,
   temperature: parseFloat(process.env.PRD_AGENT_TEMPERATURE || DEFAULT_TEMPERATURE.toString()),
-  maxTokens: parseInt(process.env.PRD_AGENT_MAX_TOKENS || DEFAULT_MAX_TOKENS.toString())
+  maxTokens: parseInt(process.env.PRD_AGENT_MAX_TOKENS || DEFAULT_MAX_TOKENS.toString()),
+  subAgentSettings: getDefaultSubAgentSettings()
 }
+
+const cloneDefaultSettings = () => ({
+  ...baseDefaultSettings,
+  subAgentSettings: Object.entries(baseDefaultSettings.subAgentSettings || {}).reduce<Record<string, any>>(
+    (acc, [key, value]) => {
+      acc[key] = { ...value }
+      return acc
+    },
+    {}
+  )
+})
 
 // Helper function to create agent with merged settings
 const createAgent = async (requestSettings?: any) => {
-  const effectiveSettings = validateAgentSettings(requestSettings, defaultSettings)
+  const effectiveSettings = validateAgentSettings(requestSettings, cloneDefaultSettings())
   
+  const subAgentEntries = Object.entries(effectiveSettings.subAgentSettings || {}) as Array<[
+    string,
+    {
+      model?: string
+      temperature?: number
+      maxTokens?: number
+    }
+  ]>
+
   console.log('Creating orchestrator agent with validated settings:', {
     model: effectiveSettings.model,
     temperature: effectiveSettings.temperature,
-    maxTokens: effectiveSettings.maxTokens
+    maxTokens: effectiveSettings.maxTokens,
+    subAgentOverrides: subAgentEntries.reduce<string[]>((acc, [key, value]) => {
+      const hasOverride = (value.model && value.model !== effectiveSettings.model) ||
+        (typeof value.temperature === 'number' && value.temperature !== effectiveSettings.temperature) ||
+        (typeof value.maxTokens === 'number' && value.maxTokens !== effectiveSettings.maxTokens)
+
+      if (hasOverride) {
+        acc.push(key)
+      }
+      return acc
+    }, [])
   })
   
   return new PRDOrchestratorAgent(effectiveSettings)
@@ -121,19 +153,22 @@ const server = http.createServer(async (req, res) => {
   if (method === 'GET' && url === '/health') {
     res.statusCode = HTTP_STATUS.OK
     res.setHeader('Content-Type', 'application/json')
+    const defaults = cloneDefaultSettings()
     res.end(JSON.stringify({ 
       status: 'ok',
       defaultSettings: {
-        model: defaultSettings.model,
-        temperature: defaultSettings.temperature,
-        maxTokens: defaultSettings.maxTokens
+        model: defaults.model,
+        temperature: defaults.temperature,
+        maxTokens: defaults.maxTokens,
+        subAgentSettings: defaults.subAgentSettings
       },
       agentInfo: {
         name: PRDOrchestratorAgent.agentName,
         description: PRDOrchestratorAgent.agentDescription,
         requiredCapabilities: PRDOrchestratorAgent.requiredCapabilities,
         defaultModel: PRDOrchestratorAgent.defaultModel
-      }
+      },
+      metadata: PRDOrchestratorAgent.getMetadata()
     }))
     return
   }

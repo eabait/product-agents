@@ -12,12 +12,20 @@ const MessageSchema = z.object({
   timestamp: z.union([z.string(), z.date()]).optional()
 });
 
+const SubAgentSettingsSchema = z.record(z.string(), z.object({
+  model: z.string(),
+  temperature: z.number().min(0).max(2).optional(),
+  maxTokens: z.number().min(1).max(100000).optional(),
+  apiKey: z.string().optional()
+})).optional()
+
 const SettingsSchema = z.object({
   model: z.string(),
   temperature: z.number().min(0).max(2),
   maxTokens: z.number().min(1).max(100000),
   apiKey: z.string().optional(),
-  streaming: z.boolean().optional()
+  streaming: z.boolean().optional(),
+  subAgentSettings: SubAgentSettingsSchema
 });
 
 const ChatRequestSchema = z.object({
