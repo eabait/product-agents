@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { Input } from '@/components/ui/input'
+import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Slider } from '@/components/ui/slider'
@@ -60,10 +61,59 @@ interface SettingsPanelProps {
   onSettingsChange: (settings: AgentSettingsState) => void
 }
 
+type SettingsGroupId = 'openrouter' | 'model' | 'streaming' | 'context'
+
+const DEFAULT_SETTINGS_GROUP: SettingsGroupId = 'openrouter'
+
+const SETTINGS_GROUPS: Array<{
+  id: SettingsGroupId
+  label: string
+  description: string
+}> = [
+  {
+    id: 'openrouter',
+    label: 'OpenRouter',
+    description: 'Configure credentials and keep model availability in sync.'
+  },
+  {
+    id: 'model',
+    label: 'Model',
+    description: 'Set orchestrator defaults and fine-tune sub-agent overrides.'
+  },
+  {
+    id: 'streaming',
+    label: 'Streaming',
+    description: 'Control real-time updates during runs.'
+  },
+  {
+    id: 'context',
+    label: 'Context',
+    description: 'Decide how much project context is injected into prompts.'
+  }
+]
+
+const SETTINGS_GROUP_IDS = new Set<SettingsGroupId>(SETTINGS_GROUPS.map(group => group.id))
+
+const isSettingsGroupId = (value: string): value is SettingsGroupId =>
+  SETTINGS_GROUP_IDS.has(value as SettingsGroupId)
+
 export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsChange }: SettingsPanelProps) {
   const [models, setModels] = useState<Model[]>([])
   const [modelsLoading, setModelsLoading] = useState(false)
   const [modelsError, setModelsError] = useState<string | null>(null)
+  const [providerDropdownOpen, setProviderDropdownOpen] = useState(false)
+  const [modelDropdownOpen, setModelDropdownOpen] = useState(false)
+  const [subAgentDropdownState, setSubAgentDropdownState] = useState<Record<string, { providerOpen: boolean; modelOpen: boolean }>>({})
+  const [activeGroup, setActiveGroup] = useState<SettingsGroupId>(() => {
+    if (typeof window === 'undefined') {
+      return DEFAULT_SETTINGS_GROUP
+    }
+    const hash = window.location.hash.replace('#', '')
+    return isSettingsGroupId(hash) ? hash : DEFAULT_SETTINGS_GROUP
+  })
+  const [lastModelRefresh, setLastModelRefresh] = useState<Date | null>(null)
+  const [lastFetchStatus, setLastFetchStatus] = useState<'success' | 'error' | null>(null)
+  const [lastFetchAction, setLastFetchAction] = useState<'refresh' | 'test' | null>(null)
   const [selectedProvider, setSelectedProvider] = useState<string>(() => {
     // Extract provider from current model
     return settings.model ? settings.model.split('/')[0] : ''
@@ -89,6 +139,29 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
   }, [])
 
   const modelsForProvider = models.filter(model => model.provider === selectedProvider)
+  const currentModel = settings.model ? models.find(model => model.id === settings.model) : undefined
+  const getSubAgentDropdownState = (id: string) =>
+    subAgentDropdownState[id] ?? { providerOpen: false, modelOpen: false }
+  const setSubAgentDropdown = (
+    id: string,
+    update:
+      | Partial<{ providerOpen: boolean; modelOpen: boolean }>
+      | ((current: { providerOpen: boolean; modelOpen: boolean }) => { providerOpen: boolean; modelOpen: boolean })
+  ) => {
+    setSubAgentDropdownState(prev => {
+      const current = getSubAgentDropdownState(id)
+      const next = typeof update === 'function'
+        ? update(current)
+        : {
+            providerOpen: update.providerOpen ?? current.providerOpen,
+            modelOpen: update.modelOpen ?? current.modelOpen
+          }
+      return {
+        ...prev,
+        [id]: next
+      }
+    })
+  }
 
   const cloneSettings = (): AgentSettingsState => ({
     ...settings,
@@ -102,10 +175,12 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
     onSettingsChange(updater(cloneSettings()))
   }
 
-  const fetchModels = async (apiKey?: string) => {
+  const fetchModels = async (apiKey?: string): Promise<boolean> => {
+    let didSucceed = false
     try {
       setModelsLoading(true)
       setModelsError(null)
+      setLastFetchStatus(null)
       
       const params = new URLSearchParams()
       if (apiKey) params.append('apiKey', apiKey)
@@ -121,6 +196,9 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
         setModels(data.models)
         // Update the model context as well
         setModelContextModels(data.models)
+        setLastFetchStatus('success')
+        setLastModelRefresh(new Date())
+        didSucceed = true
       } else {
         throw new Error('Invalid models data format')
       }
@@ -129,9 +207,11 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
       setModelsError(error instanceof Error ? error.message : 'Unknown error')
       // Use fallback models if needed
       setModels([])
+      setLastFetchStatus('error')
     } finally {
       setModelsLoading(false)
     }
+    return didSucceed
   }
 
   const subAgents: SubAgentMetadata[] = metadata?.subAgents || []
@@ -216,6 +296,7 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
   // Fetch models when panel opens or settings change
   useEffect(() => {
     if (isOpen) {
+      setLastFetchAction('refresh')
       fetchModels(settings.apiKey)
     }
   }, [isOpen, settings.apiKey])
@@ -228,352 +309,525 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
     }
   }, [settings.model])
 
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return undefined
+    }
 
-  return (
-    <Sheet open={isOpen} onOpenChange={onClose}>
-      <SheetContent side="right" className={`${UI_DIMENSIONS.SETTINGS_PANEL_WIDTH} p-0 overflow-hidden`}>
-        <div className="flex flex-col h-full">
-          <SheetHeader className="p-4 border-b">
-            <div className="flex items-center gap-2">
-              <Settings className={ICON_SIZES.MEDIUM} />
-              <SheetTitle>Settings</SheetTitle>
+    const handleHashChange = () => {
+      const hashValue = window.location.hash.replace('#', '')
+      if (isSettingsGroupId(hashValue)) {
+        setActiveGroup(hashValue)
+      }
+    }
+
+    handleHashChange()
+    window.addEventListener('hashchange', handleHashChange)
+
+    return () => {
+      window.removeEventListener('hashchange', handleHashChange)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+    const currentHash = window.location.hash.replace('#', '')
+    if (currentHash !== activeGroup) {
+      window.history.replaceState(null, '', `#${activeGroup}`)
+    }
+  }, [activeGroup])
+
+  const handleRefreshModels = () => {
+    setLastFetchAction('refresh')
+    void fetchModels(settings.apiKey)
+  }
+
+  const handleTestConnection = () => {
+    setLastFetchAction('test')
+    void fetchModels(settings.apiKey)
+  }
+
+  const activeGroupMeta =
+    SETTINGS_GROUPS.find(group => group.id === activeGroup) ?? SETTINGS_GROUPS[0]
+  const streamingEnabled = settings.streaming ?? true
+  const streamingSupported = currentModel?.capabilities?.includes('streaming') ?? false
+  const contextLimitTokens = currentModel
+    ? Math.floor(currentModel.contextLength * (contextSettings.tokenLimitPercentage / 100))
+    : null
+  const subAgentOverrideCount = subAgents.filter(hasSubAgentOverride).length
+  const availableProviderCount = availableProviders.length
+
+  const groupContent = (() => {
+    switch (activeGroup) {
+      case 'openrouter':
+        return (
+          <div className="space-y-6">
+            <div className="space-y-2">
+              <label htmlFor="openrouterApiKey" className="block text-sm font-medium">
+                OpenRouter API Key
+              </label>
+              <Input
+                id="openrouterApiKey"
+                type="password"
+                value={settings.apiKey || ''}
+                onChange={(e) => setSettings(prev => ({ ...prev, apiKey: e.target.value }))}
+                placeholder="sk-or-..."
+              />
+              <p className="text-xs text-muted-foreground">
+                Leave empty to use the environment variable during development or deployment.
+              </p>
             </div>
-          </SheetHeader>
 
-          <div className="flex-1 overflow-auto p-4">
-            <div className="space-y-6">
-              {/* Model Configuration */}
+            <div className="space-y-3 rounded-lg border bg-muted/40 p-4">
               <div>
-                <div className="text-xs text-muted-foreground uppercase tracking-wide mb-3">
-                  Model Configuration
+                <p className="text-sm font-medium">Model availability</p>
+                <p className="text-xs text-muted-foreground">
+                  {modelsLoading
+                    ? 'Fetching models from OpenRouter...'
+                    : modelsError
+                      ? `Unable to fetch models: ${modelsError}`
+                      : models.length > 0
+                        ? `Loaded ${models.length} model${models.length !== VALIDATION_LIMITS.SINGULAR_ITEM_COUNT ? 's' : ''} across ${availableProviderCount} provider${availableProviderCount !== VALIDATION_LIMITS.SINGULAR_ITEM_COUNT ? 's' : ''}.`
+                        : 'No models loaded yet. Enter an API key and refresh.'}
+                </p>
+                {lastModelRefresh && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Last checked: {lastModelRefresh.toLocaleString()}
+                  </p>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={handleRefreshModels}
+                  disabled={modelsLoading}
+                >
+                  Refresh models
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleTestConnection}
+                  disabled={modelsLoading}
+                >
+                  Test connection
+                </Button>
+              </div>
+
+              {lastFetchStatus === 'success' && !modelsError && (
+                <div className="text-xs text-green-600">
+                  {lastFetchAction === 'test'
+                    ? 'API key verified successfully.'
+                    : 'Model catalog refreshed.'}
                 </div>
-                
-                <div className="space-y-4">
-                  {/* Provider Selection */}
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <label className="block text-sm font-medium">Provider</label>
-                      <div className="flex items-center gap-2">
-                        {modelsLoading && (
-                          <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                            <div className={`${UI_DIMENSIONS.LOADING_INDICATOR_SIZE} border border-current border-t-transparent rounded-full animate-spin`} />
-                            Loading...
-                          </div>
-                        )}
-                        {modelsError && (
-                          <button
-                            onClick={() => fetchModels(settings.apiKey)}
-                            className="text-xs text-red-500 hover:text-red-700 underline"
-                          >
-                            Retry
-                          </button>
-                        )}
-                        {!modelsLoading && (
-                          <button
-                            onClick={() => fetchModels(settings.apiKey)}
-                            className="text-xs text-blue-500 hover:text-blue-700 underline"
-                            title="Refresh models"
-                          >
-                            Refresh
-                          </button>
-                        )}
+              )}
+              {lastFetchStatus === 'error' && modelsError && (
+                <div className="text-xs text-red-500">
+                  {lastFetchAction === 'test'
+                    ? 'API key test failed.'
+                    : 'Unable to refresh models.'}
+                </div>
+              )}
+            </div>
+
+            <div className="text-xs text-muted-foreground">
+              Provider and model pickers become interactive once models are fetched successfully.
+            </div>
+          </div>
+        )
+
+      case 'model':
+        return (
+          <div className="space-y-8">
+            <div className="space-y-4">
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-medium" htmlFor="providerSelect">
+                    Provider
+                  </label>
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    {modelsLoading && (
+                      <div className="flex items-center gap-1">
+                        <div className={`${UI_DIMENSIONS.LOADING_INDICATOR_SIZE} border border-current border-t-transparent rounded-full animate-spin`} />
+                        Loading...
                       </div>
-                    </div>
-                    <Select
-                      value={selectedProvider}
-                      onValueChange={(value: string) => {
-                        setSelectedProvider(value);
-                        // Reset model selection when provider changes
-                        const firstModel = models.find(model => model.provider === value);
-                        if (firstModel) {
-                          setSettings(prev => ({ ...prev, model: firstModel.id }));
-                        }
-                      }}
-                      disabled={modelsLoading}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder={modelsLoading ? "Loading providers..." : "Select a provider"} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {availableProviders.length === 0 && !modelsLoading ? (
-                          <div className="p-2 text-sm text-muted-foreground text-center">
-                            {modelsError 
-                              ? `Error: ${modelsError}` 
-                              : "No providers available. Click Refresh or add API key."
-                            }
+                    )}
+                    {!modelsLoading && modelsError && (
+                      <span className="text-red-500">Fetch error</span>
+                    )}
+                  </div>
+                </div>
+                <Select
+                  value={selectedProvider}
+                  open={providerDropdownOpen}
+                  onOpenChange={(open) => {
+                    setProviderDropdownOpen(open)
+                    if (open) {
+                      setModelDropdownOpen(false)
+                    }
+                  }}
+                  onValueChange={(value: string) => {
+                    setSelectedProvider(value)
+                    setProviderDropdownOpen(false)
+                    const firstModel = models.find(model => model.provider === value)
+                    if (firstModel) {
+                      setSettings(prev => ({ ...prev, model: firstModel.id }))
+                    }
+                  }}
+                  disabled={modelsLoading || availableProviderCount === 0}
+                >
+                  <SelectTrigger id="providerSelect">
+                    <SelectValue placeholder={modelsLoading ? 'Loading providers...' : 'Select a provider'} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableProviders.length === 0 && !modelsLoading ? (
+                      <div className="p-2 text-sm text-muted-foreground text-center">
+                        {modelsError
+                          ? `Error: ${modelsError}`
+                          : 'No providers available. Test your API key from the OpenRouter tab.'}
+                      </div>
+                    ) : (
+                      availableProviders.map((provider) => (
+                        <SelectItem key={provider.name} value={provider.name}>
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium capitalize">{provider.name}</span>
+                            {provider.isTopProvider && (
+                              <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded flex-shrink-0">
+                                ⭐ Top
+                              </span>
+                            )}
+                            <span className="text-xs text-muted-foreground">
+                              ({provider.count} model{provider.count !== VALIDATION_LIMITS.SINGULAR_ITEM_COUNT ? 's' : ''})
+                            </span>
                           </div>
-                        ) : (
-                          availableProviders.map((provider) => (
-                            <SelectItem key={provider.name} value={provider.name}>
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-2" htmlFor="modelSelect">
+                  Model
+                </label>
+                <Select
+                  value={settings.model}
+                  open={modelDropdownOpen}
+                  onOpenChange={(open) => {
+                    setModelDropdownOpen(open)
+                    if (open) {
+                      setProviderDropdownOpen(false)
+                    }
+                  }}
+                  onValueChange={(value: string) => {
+                    setSettings(prev => ({ ...prev, model: value }))
+                    updateModelFromId(value)
+                    setModelDropdownOpen(false)
+                  }}
+                  disabled={modelsLoading || !selectedProvider}
+                >
+                  <SelectTrigger id="modelSelect">
+                    <SelectValue placeholder={
+                      !selectedProvider ? 'Select a provider first' :
+                      modelsLoading ? 'Loading models...' :
+                      'Select a model'
+                    } />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {modelsForProvider.length === 0 && !modelsLoading && selectedProvider ? (
+                      <div className="p-2 text-sm text-muted-foreground text-center">
+                        No models available for {selectedProvider}
+                      </div>
+                    ) : (
+                      modelsForProvider.map((model) => (
+                        <SelectItem key={model.id} value={model.id}>
+                          <div className="flex items-start justify-between w-full min-w-0">
+                            <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2">
-                                <span className="font-medium capitalize">{provider.name}</span>
-                                {provider.isTopProvider && (
+                                <span className="font-medium break-words">{model.name}</span>
+                                {model.isTopProvider && (
                                   <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded flex-shrink-0">
                                     ⭐ Top
                                   </span>
                                 )}
-                                <span className="text-xs text-muted-foreground">
-                                  ({provider.count} model{provider.count !== VALIDATION_LIMITS.SINGULAR_ITEM_COUNT ? 's' : ''})
-                                </span>
+                                {model.isModerated && (
+                                  <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded flex-shrink-0">
+                                    🛡️ Safe
+                                  </span>
+                                )}
                               </div>
-                            </SelectItem>
-                          ))
-                        )}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  {/* Model Selection */}
-                  <div>
-                    <label className="block text-sm font-medium mb-2">Model</label>
-                    <Select
-                      value={settings.model}
-                      onValueChange={(value: string) => {
-                        setSettings(prev => ({ ...prev, model: value }))
-                        // Update the model context
-                        updateModelFromId(value)
-                      }}
-                      disabled={modelsLoading || !selectedProvider}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder={
-                          !selectedProvider ? "Select a provider first" : 
-                          modelsLoading ? "Loading models..." : 
-                          "Select a model"
-                        } />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {modelsForProvider.length === 0 && !modelsLoading && selectedProvider ? (
-                          <div className="p-2 text-sm text-muted-foreground text-center">
-                            No models available for {selectedProvider}
-                          </div>
-                        ) : (
-                          modelsForProvider.map((model) => (
-                            <SelectItem key={model.id} value={model.id}>
-                              <div className="flex items-start justify-between w-full min-w-0">
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-2">
-                                    <span className="font-medium break-words">{model.name}</span>
-                                    {model.isTopProvider && (
-                                      <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded flex-shrink-0">
-                                        ⭐ Top
-                                      </span>
-                                    )}
-                                    {model.isModerated && (
-                                      <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded flex-shrink-0">
-                                        🛡️ Safe
-                                      </span>
-                                    )}
-                                  </div>
-                                  <div className="text-xs text-muted-foreground mt-0.5 space-y-0.5">
-                                    <div className="flex items-center gap-3">
-                                      <span className="font-medium">{formatContextWindow(model.contextLength)} context</span>
-                                      <span>{model.pricing.promptFormatted}/{model.pricing.completionFormatted} per 1M</span>
-                                    </div>
-                                  </div>
+                              <div className="text-xs text-muted-foreground mt-0.5 space-y-0.5">
+                                <div className="flex flex-wrap items-center gap-3">
+                                  <span className="font-medium">{formatContextWindow(model.contextLength)} context</span>
+                                  <span>{model.pricing.promptFormatted}/{model.pricing.completionFormatted} per 1M</span>
                                 </div>
                               </div>
-                            </SelectItem>
-                          ))
-                        )}
-                      </SelectContent>
-                    </Select>
-                    {modelsError && (
-                      <p className="text-xs text-red-500 mt-1">
-                        {modelsError}. Using fallback models.
-                      </p>
-                    )}
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {selectedProvider ? 
-                        `${modelsForProvider.length} model${modelsForProvider.length !== VALIDATION_LIMITS.SINGULAR_ITEM_COUNT ? 's' : ''} available` :
-                        `${availableProviders.length} provider${availableProviders.length !== VALIDATION_LIMITS.SINGULAR_ITEM_COUNT ? 's' : ''} available`
-                      }
-                      {modelsLoading && ' (loading...)'}
-                    </p>
-                    
-                    {/* Current Model Information */}
-                    {settings.model && models.length > 0 && (() => {
-                      const currentModel = models.find(m => m.id === settings.model);
-                      if (currentModel) {
-                        const contextWindowSize = currentModel.contextLength;
-                        const tokenLimit = Math.floor(contextWindowSize * (contextSettings.tokenLimitPercentage / 100));
-                        
-                        return (
-                          <div className="mt-3 p-3 bg-muted/50 rounded-lg">
-                            <div className="text-xs font-medium text-muted-foreground mb-2">Selected Model Details</div>
-                            <div className="space-y-1 text-xs">
-                              <div className="flex justify-between">
-                                <span>Total Context Window:</span>
-                                <span className="font-medium font-mono">{formatContextWindow(contextWindowSize)} tokens</span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span>Your Context Limit:</span>
-                                <span className="font-medium font-mono">{formatContextWindow(tokenLimit)} tokens</span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span>Limit Percentage:</span>
-                                <span className="font-medium">{contextSettings.tokenLimitPercentage}% of model window</span>
-                              </div>
-                              <div className="flex justify-between text-muted-foreground">
-                                <span>Pricing (per 1M):</span>
-                                <span>{currentModel.pricing.promptFormatted} / {currentModel.pricing.completionFormatted}</span>
-                              </div>
                             </div>
                           </div>
-                        );
-                      }
-                      return null;
-                    })()}
-                  </div>
-                  
-                  {/* Temperature */}
-                  <div>
-                    <label className="block text-sm font-medium mb-2">
-                      Temperature: {settings.temperature}
-                    </label>
-                    <Slider
-                      value={[settings.temperature]}
-                      onValueChange={([value]) => setSettings(prev => ({ ...prev, temperature: value }))}
-                      max={SLIDER_CONFIGS.TEMPERATURE.MAX}
-                      min={SLIDER_CONFIGS.TEMPERATURE.MIN}
-                      step={SLIDER_CONFIGS.TEMPERATURE.STEP}
-                      className="w-full"
-                    />
-                    <div className="flex justify-between text-xs text-muted-foreground mt-1">
-                      <span>Precise</span>
-                      <span>Balanced</span>
-                      <span>Creative</span>
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+                {modelsError && (
+                  <p className="text-xs text-red-500 mt-1">
+                    {modelsError}. Using fallback models.
+                  </p>
+                )}
+                <p className="text-xs text-muted-foreground mt-1">
+                  {selectedProvider
+                    ? `${modelsForProvider.length} model${modelsForProvider.length !== VALIDATION_LIMITS.SINGULAR_ITEM_COUNT ? 's' : ''} available`
+                    : `${availableProviderCount} provider${availableProviderCount !== VALIDATION_LIMITS.SINGULAR_ITEM_COUNT ? 's' : ''} available`
+                  }
+                  {modelsLoading && ' (loading...)'}
+                </p>
+
+                {currentModel && (
+                  <div className="mt-3 p-3 bg-muted/50 rounded-lg">
+                    <div className="text-xs font-medium text-muted-foreground mb-2">Selected Model Details</div>
+                    <div className="space-y-1 text-xs">
+                      <div className="flex justify-between">
+                        <span>Total Context Window:</span>
+                        <span className="font-medium font-mono">{formatContextWindow(currentModel.contextLength)} tokens</span>
+                      </div>
+                      {contextLimitTokens !== null && (
+                        <div className="flex justify-between">
+                          <span>Your Context Limit:</span>
+                          <span className="font-medium font-mono">{formatContextWindow(contextLimitTokens)} tokens</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between">
+                        <span>Limit Percentage:</span>
+                        <span className="font-medium">{contextSettings.tokenLimitPercentage}% of model window</span>
+                      </div>
+                      <div className="flex justify-between text-muted-foreground">
+                        <span>Pricing (per 1M):</span>
+                        <span>{currentModel.pricing.promptFormatted} / {currentModel.pricing.completionFormatted}</span>
+                      </div>
                     </div>
                   </div>
-                  
-                  {/* Max Tokens */}
-                  <div>
-                    <label className="block text-sm font-medium mb-2">Max Tokens</label>
-                    <Input
-                      type="number"
-                      value={settings.maxTokens}
-                      onChange={(e) => setSettings(prev => ({ ...prev, maxTokens: parseInt(e.target.value) }))}
-                      className="w-full"
-                    />
-                  </div>
-                  
-                  {/* API Key */}
-                  <div>
-                    <label className="block text-sm font-medium mb-2">
-                      OpenRouter API Key (Optional)
-                    </label>
-                    <Input
-                      type="password"
-                      value={settings.apiKey || ''}
-                      onChange={(e) => setSettings(prev => ({ ...prev, apiKey: e.target.value }))}
-                      placeholder="sk-or-..."
-                      className="w-full"
-                    />
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Leave empty to use environment variable
-                    </p>
-                  </div>
-                  
-                  {/* Streaming Toggle */}
-                  <div className="flex items-center space-x-2">
-                    <input
-                      type="checkbox"
-                      id="enableStreaming"
-                      checked={settings.streaming || true}
-                      onChange={(e) => setSettings(prev => ({ ...prev, streaming: e.target.checked }))}
-                      className="rounded"
-                    />
-                    <label htmlFor="enableStreaming" className="text-sm font-medium">
-                      Enable live progress updates (streaming)
-                    </label>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-2">
+                  Temperature: {settings.temperature.toFixed(2)}
+                </label>
+                <Slider
+                  value={[settings.temperature]}
+                  onValueChange={([value]) => setSettings(prev => ({ ...prev, temperature: value }))}
+                  max={SLIDER_CONFIGS.TEMPERATURE.MAX}
+                  min={SLIDER_CONFIGS.TEMPERATURE.MIN}
+                  step={SLIDER_CONFIGS.TEMPERATURE.STEP}
+                  className="w-full"
+                />
+                <div className="flex justify-between text-xs text-muted-foreground mt-1">
+                  <span>Precise</span>
+                  <span>Balanced</span>
+                  <span>Creative</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-2" htmlFor="maxTokensInput">
+                  Max Tokens
+                </label>
+                <Input
+                  id="maxTokensInput"
+                  type="number"
+                  value={settings.maxTokens}
+                  onChange={(e) => setSettings(prev => ({ ...prev, maxTokens: Number.parseInt(e.target.value, 10) }))}
+                />
               </div>
             </div>
-          </div>
 
-          {metadata && subAgents.length > 0 && (
-            <div className="space-y-4">
-              <div className="text-xs text-muted-foreground uppercase tracking-wide">
-                Sub-agent Overrides
-              </div>
+            {metadata && subAgents.length > 0 && (
+              <div className="space-y-4">
+                <div>
+                  <div className="flex items-center justify-between">
+                    <div className="text-xs text-muted-foreground uppercase tracking-wide">
+                      Sub-agent Overrides
+                    </div>
+                    {subAgentOverrideCount > 0 && (
+                      <div className="text-xs text-blue-600">
+                        {subAgentOverrideCount} override{subAgentOverrideCount !== VALIDATION_LIMITS.SINGULAR_ITEM_COUNT ? 's' : ''} active
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Override individual worker settings when you need specialized models or tuning. Defaults inherit from the orchestrator if left unchanged.
+                  </p>
+                </div>
 
-              <p className="text-xs text-muted-foreground">
-                Override individual worker settings when you need specialized models or tuning. Defaults inherit from the orchestrator if left unchanged.
-              </p>
+                <div className="space-y-3">
+                  {subAgents.map((subAgent) => {
+                    const currentSettings = resolveSubAgentSettings(subAgent)
+                    const baselineSettings = resolveBaselineForSubAgent(subAgent)
+                    const overrideActive = hasSubAgentOverride(subAgent)
+                    const compatibleModels = getCompatibleModels(subAgent)
+                    const providerOptions = compatibleModels.reduce<Provider[]>((acc, model) => {
+                      const existingProvider = acc.find(provider => provider.name === model.provider)
+                      if (existingProvider) {
+                        existingProvider.count += 1
+                        if (model.isTopProvider) {
+                          existingProvider.isTopProvider = true
+                        }
+                      } else {
+                        acc.push({
+                          name: model.provider,
+                          count: 1,
+                          isTopProvider: model.isTopProvider
+                        })
+                      }
+                      return acc
+                    }, [])
+                    const currentProvider = currentSettings.model?.split('/')[0]
+                    const dropdownState = getSubAgentDropdownState(subAgent.id)
 
-              <div className="space-y-3">
-                {subAgents.map((subAgent) => {
-                  const currentSettings = resolveSubAgentSettings(subAgent)
-                  const baselineSettings = resolveBaselineForSubAgent(subAgent)
-                  const overrideActive = hasSubAgentOverride(subAgent)
-                  const compatibleModels = getCompatibleModels(subAgent)
-
-                  return (
-                    <Collapsible key={subAgent.id}>
-                      <CollapsibleTrigger className="flex w-full items-center justify-between rounded-md border px-3 py-2 text-left hover:bg-muted/50 focus:outline-none focus:ring-2 focus:ring-primary/20">
-                        <div className="flex flex-col gap-1">
-                          <span className="font-medium text-sm">
-                            {subAgent.name}
-                          </span>
-                          <span className="text-xs text-muted-foreground">
-                            {subAgent.description}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {overrideActive ? (
-                            <span className="text-xs font-medium text-blue-600">Override active</span>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">Using defaults</span>
-                          )}
-                          <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform data-[state=open]:rotate-180" />
-                        </div>
-                      </CollapsibleTrigger>
-
-                      <CollapsibleContent className="mt-3">
-                        <div className="rounded-lg border bg-muted/10 p-4 space-y-4">
-                          <div className="grid gap-3">
-                            <div className="flex items-center justify-between">
-                              <span className="text-sm font-medium">Model</span>
-                              {overrideActive && (
-                                <button
-                                  type="button"
-                                  onClick={() => resetSubAgentSettings(subAgent)}
-                                  className="text-xs text-blue-500 hover:text-blue-700 underline"
-                                >
-                                  Reset to default
-                                </button>
-                              )}
-                            </div>
-
-                            {compatibleModels.length === 0 ? (
-                              <div className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
-                                No models available that satisfy {subAgent.requiredCapabilities.join(', ')}. Fetch models with a broader API key or adjust requirements.
-                              </div>
-                            ) : (
-                              <Select
-                                value={currentSettings.model}
-                                onValueChange={(value: string) =>
-                                  updateSubAgentSettings(subAgent.id, prev => ({
-                                    ...prev,
-                                    model: value
-                                  }))
-                                }
-                              >
-                                <SelectTrigger className="w-full">
-                                  <SelectValue placeholder="Select a model" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {compatibleModels.map(model => (
-                                    <SelectItem key={model.id} value={model.id}>
-                                      <div className="flex flex-col">
-                                        <span className="font-medium text-sm">{model.name}</span>
-                                        <span className="text-xs text-muted-foreground">{model.provider} • {formatContextWindow(model.contextLength)}</span>
-                                      </div>
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            )}
+                    return (
+                      <Collapsible key={subAgent.id}>
+                        <CollapsibleTrigger className="flex w-full items-center justify-between rounded-md border px-3 py-2 text-left hover:bg-muted/50 focus:outline-none focus:ring-2 focus:ring-primary/20">
+                          <div className="flex flex-col gap-1">
+                            <span className="font-medium text-sm">
+                              {subAgent.name}
+                            </span>
+                            <span className="text-xs text-muted-foreground">
+                              {subAgent.description}
+                            </span>
                           </div>
+                          <div className="flex items-center gap-2">
+                            {overrideActive ? (
+                              <span className="text-xs text-blue-600 font-medium">Override active</span>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">Using defaults</span>
+                            )}
+                            <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                          </div>
+                        </CollapsibleTrigger>
+                        <CollapsibleContent className="mt-3 space-y-4 rounded-md border bg-background px-3 py-3">
+                          <div className="flex justify-between text-xs text-muted-foreground">
+                            <span>Baseline: {baselineSettings.model}</span>
+                            <button
+                              type="button"
+                              onClick={() => resetSubAgentSettings(subAgent)}
+                              className="text-blue-600 hover:underline"
+                            >
+                              Reset to default
+                            </button>
+                          </div>
+
+                          {compatibleModels.length === 0 ? (
+                            <div className="rounded-md bg-red-50 p-3 text-xs text-red-600">
+                              No models available that satisfy {subAgent.requiredCapabilities.join(', ')}. Fetch models with a broader API key or adjust requirements.
+                            </div>
+                          ) : (
+                            <>
+                              <div className="space-y-2">
+                                <label className="block text-sm font-medium">Provider</label>
+                                <Select
+                                  value={currentProvider || undefined}
+                                  open={dropdownState.providerOpen}
+                                  onOpenChange={(open) => {
+                                    setSubAgentDropdown(subAgent.id, (current) => ({
+                                      providerOpen: open,
+                                      modelOpen: open ? false : current.modelOpen
+                                    }))
+                                  }}
+                                  onValueChange={(value: string) => {
+                                    const modelForProvider = compatibleModels.find(model => model.provider === value)
+                                    if (modelForProvider) {
+                                      updateSubAgentSettings(subAgent.id, prev => ({
+                                        ...prev,
+                                        model: modelForProvider.id
+                                      }))
+                                      setSubAgentDropdown(subAgent.id, { providerOpen: false, modelOpen: false })
+                                    }
+                                  }}
+                                  disabled={modelsLoading}
+                                >
+                                  <SelectTrigger>
+                                    <SelectValue placeholder={modelsLoading ? 'Loading providers...' : 'Select a provider'} />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {providerOptions.map(provider => (
+                                      <SelectItem key={provider.name} value={provider.name}>
+                                        <div className="flex items-center justify-between gap-2">
+                                          <div className="flex items-center gap-2">
+                                            <span className="capitalize">{provider.name}</span>
+                                            {provider.isTopProvider && (
+                                              <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded">
+                                                ⭐ Top
+                                              </span>
+                                            )}
+                                          </div>
+                                          <span className="text-xs text-muted-foreground">
+                                            {provider.count} model{provider.count !== VALIDATION_LIMITS.SINGULAR_ITEM_COUNT ? 's' : ''}
+                                          </span>
+                                        </div>
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+
+                              <div>
+                                <label className="block text-sm font-medium mb-2">Model</label>
+                                {(() => {
+                                  const modelsForProvider = currentProvider
+                                    ? compatibleModels.filter(model => model.provider === currentProvider)
+                                    : compatibleModels
+
+                                  if (modelsForProvider.length === 0) {
+                                    return (
+                                      <div className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
+                                        Select a provider to view compatible models.
+                                      </div>
+                                    )
+                                  }
+
+                                  return (
+                                    <Select
+                                      value={currentSettings.model}
+                                      open={dropdownState.modelOpen}
+                                      onOpenChange={(open) => {
+                                        setSubAgentDropdown(subAgent.id, (current) => ({
+                                          modelOpen: open,
+                                          providerOpen: open ? false : current.providerOpen
+                                        }))
+                                      }}
+                                      onValueChange={(value: string) => {
+                                        updateSubAgentSettings(subAgent.id, prev => ({
+                                          ...prev,
+                                          model: value
+                                        }))
+                                        setSubAgentDropdown(subAgent.id, { modelOpen: false })
+                                      }}
+                                      disabled={modelsLoading}
+                                    >
+                                      <SelectTrigger>
+                                        <SelectValue placeholder="Select a model" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {modelsForProvider.map(model => (
+                                          <SelectItem key={model.id} value={model.id}>
+                                            <div className="flex flex-col">
+                                              <span className="font-medium text-sm">{model.name}</span>
+                                              <span className="text-xs text-muted-foreground">{model.provider} • {formatContextWindow(model.contextLength)}</span>
+                                            </div>
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  )
+                                })()}
+                              </div>
+                            </>
+                          )}
 
                           <div>
                             <div className="flex items-center justify-between">
@@ -631,60 +885,191 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
                               Defaults: {baselineSettings.model} • Temp {baselineSettings.temperature.toFixed(2)} • {baselineSettings.maxTokens} tokens
                             </div>
                           </div>
-                        </div>
-                      </CollapsibleContent>
-                    </Collapsible>
-                  )
+                        </CollapsibleContent>
+                      </Collapsible>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )
+
+      case 'streaming':
+        return (
+          <div className="space-y-6">
+            <div className="space-y-3 rounded-lg border bg-muted/40 p-4">
+              <div className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  id="enableStreaming"
+                  checked={streamingEnabled}
+                  onChange={(e) => setSettings(prev => ({ ...prev, streaming: e.target.checked }))}
+                  className="mt-1 rounded"
+                />
+                <div>
+                  <label htmlFor="enableStreaming" className="text-sm font-medium">
+                    Enable live progress updates
+                  </label>
+                  <p className="text-xs text-muted-foreground">
+                    Streams intermediate progress from the orchestrator so you can monitor long-running tasks.
+                  </p>
+                </div>
+              </div>
+
+              {streamingEnabled && !streamingSupported && currentModel && (
+                <div className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                  {currentModel.name} does not advertise streaming support. You may see delayed updates or fall back to batch responses.
+                </div>
+              )}
+            </div>
+
+            <div className="text-xs text-muted-foreground">
+              Streaming can slightly increase token consumption but surfaces results sooner. Disable it if you prefer consolidated outputs only.
+            </div>
+          </div>
+        )
+
+      case 'context':
+        return (
+          <div className="space-y-6">
+            <div>
+              <label className="block text-sm font-medium mb-2">
+                Context Token Limit: {contextSettings.tokenLimitPercentage}%
+              </label>
+              <Slider
+                value={[contextSettings.tokenLimitPercentage]}
+                onValueChange={([value]) => {
+                  updateContextSettings({ tokenLimitPercentage: value })
+                }}
+                max={SLIDER_CONFIGS.CONTEXT_TOKEN_LIMIT.MAX}
+                min={SLIDER_CONFIGS.CONTEXT_TOKEN_LIMIT.MIN}
+                step={SLIDER_CONFIGS.CONTEXT_TOKEN_LIMIT.STEP}
+                className="w-full"
+              />
+              <div className="flex justify-between text-xs text-muted-foreground mt-1">
+                <span>10% (Conservative)</span>
+                <span>30% (Balanced)</span>
+                <span>50% (Maximum)</span>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Percentage of the selected model&apos;s context window reserved for contextual documents.
+              </p>
+              {currentModel && contextLimitTokens !== null && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  Equivalent to {formatContextWindow(contextLimitTokens)} tokens out of {formatContextWindow(currentModel.contextLength)} available for {currentModel.name}.
+                </p>
+              )}
+            </div>
+
+            <div className="flex items-start gap-3">
+              <input
+                type="checkbox"
+                id="autoIncludePRD"
+                checked={contextSettings.autoIncludeCurrentPRD}
+                onChange={(e) => updateContextSettings({
+                  autoIncludeCurrentPRD: e.target.checked
                 })}
+                className="mt-1 rounded"
+              />
+              <div>
+                <label htmlFor="autoIncludePRD" className="text-sm font-medium">
+                  Auto-include current PRD in context
+                </label>
+                <p className="text-xs text-muted-foreground">
+                  When enabled, the latest PRD draft is injected automatically so agents can ground their responses.
+                </p>
               </div>
             </div>
-          )}
+          </div>
+        )
 
-          {/* Context Settings */}
-          <div>
-            <div className="text-xs text-muted-foreground uppercase tracking-wide mb-3">
-              Context Configuration
+      default:
+        return null
+    }
+  })()
+
+
+  return (
+    <Sheet open={isOpen} onOpenChange={onClose}>
+      <SheetContent side="right" size="wide" className={`${UI_DIMENSIONS.SETTINGS_PANEL_WIDTH} p-0 overflow-hidden`}>
+        <div className="flex h-full flex-col">
+          <SheetHeader className="border-b p-4">
+            <div className="flex items-center gap-2">
+              <Settings className={ICON_SIZES.MEDIUM} />
+              <SheetTitle>Settings</SheetTitle>
             </div>
-                
-                <div className="space-y-4">
+          </SheetHeader>
+
+          <div className="flex flex-1 overflow-hidden">
+            <nav className="hidden w-60 shrink-0 flex-col gap-1 border-r bg-muted/40 p-4 md:flex">
+              {SETTINGS_GROUPS.map(group => {
+                const isActive = group.id === activeGroup
+                const baseClasses =
+                  'flex items-center justify-between rounded-md px-3 py-2 text-sm font-medium transition-colors'
+                const activeClasses = 'bg-primary/10 text-primary'
+                const inactiveClasses = 'text-muted-foreground hover:bg-muted'
+                let indicator: JSX.Element | null = null
+
+                if (group.id === 'openrouter' && modelsError) {
+                  indicator = <span className="text-xs font-semibold text-red-500">!</span>
+                } else if (group.id === 'model' && subAgentOverrideCount > 0) {
+                  indicator = (
+                    <span className="text-xs font-semibold text-blue-600">
+                      {subAgentOverrideCount}
+                    </span>
+                  )
+                } else if (group.id === 'streaming' && streamingEnabled && !streamingSupported) {
+                  indicator = <span className="text-xs font-semibold text-amber-600">!</span>
+                }
+
+                return (
+                  <button
+                    key={group.id}
+                    type="button"
+                    onClick={() => setActiveGroup(group.id)}
+                    className={`${baseClasses} ${isActive ? activeClasses : inactiveClasses}`}
+                  >
+                    <span>{group.label}</span>
+                    {indicator}
+                  </button>
+                )
+              })}
+            </nav>
+
+            <div className="flex flex-1 flex-col">
+              <div className="border-b p-3 md:hidden">
+                <Select
+                  value={activeGroup}
+                  onValueChange={(value: string) => {
+                    if (isSettingsGroupId(value)) {
+                      setActiveGroup(value)
+                    }
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select settings group" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SETTINGS_GROUPS.map(group => (
+                      <SelectItem key={group.id} value={group.id}>
+                        {group.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex-1 overflow-auto">
+                <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 p-4 md:p-6">
                   <div>
-                    <label className="block text-sm font-medium mb-2">
-                      Context Token Limit: {contextSettings.tokenLimitPercentage}%
-                    </label>
-                    <Slider
-                      value={[contextSettings.tokenLimitPercentage]}
-                      onValueChange={([value]) => {
-                        updateContextSettings({ tokenLimitPercentage: value });
-                      }}
-                      max={SLIDER_CONFIGS.CONTEXT_TOKEN_LIMIT.MAX}
-                      min={SLIDER_CONFIGS.CONTEXT_TOKEN_LIMIT.MIN}
-                      step={SLIDER_CONFIGS.CONTEXT_TOKEN_LIMIT.STEP}
-                      className="w-full"
-                    />
-                    <div className="flex justify-between text-xs text-muted-foreground mt-1">
-                      <span>10% (Conservative)</span>
-                      <span>30% (Balanced)</span>
-                      <span>50% (Maximum)</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Percentage of model context window to allocate for context items.
+                    <h2 className="text-lg font-semibold">{activeGroupMeta.label}</h2>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {activeGroupMeta.description}
                     </p>
                   </div>
 
-                  <div className="flex items-center space-x-2">
-                    <input
-                      type="checkbox"
-                      id="autoIncludePRD"
-                      checked={contextSettings.autoIncludeCurrentPRD}
-                      onChange={(e) => updateContextSettings({ 
-                        autoIncludeCurrentPRD: e.target.checked 
-                      })}
-                      className="rounded"
-                    />
-                    <label htmlFor="autoIncludePRD" className="text-sm font-medium">
-                      Auto-include current PRD in context
-                    </label>
-                  </div>
+                  {groupContent}
                 </div>
               </div>
             </div>

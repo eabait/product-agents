@@ -13,7 +13,7 @@
 export const UI_DIMENSIONS = {
   // Panel widths (Tailwind classes)
   CONTEXT_PANEL_WIDTH: 'w-96',
-  SETTINGS_PANEL_WIDTH: 'w-96',
+  SETTINGS_PANEL_WIDTH: 'w-full sm:w-[90vw] xl:w-[1120px] max-w-[1120px]',
   SIDEBAR_COLLAPSED_WIDTH: 'w-16',
   SIDEBAR_EXPANDED_WIDTH: 'w-80',
   
