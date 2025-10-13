@@ -76,7 +76,9 @@ export class KeyFeaturesSectionWriter extends BaseSectionWriter {
       temperature: DEFAULT_TEMPERATURE
     })
 
-    const mergedFeatures = applyKeyFeaturesPlan(existingFeatures, plan)
+    const normalizedPlan = normalizeKeyFeaturesPlan(plan)
+
+    const mergedFeatures = applyKeyFeaturesPlan(existingFeatures, normalizedPlan)
 
     const finalSection: KeyFeaturesSection = {
       keyFeatures: mergedFeatures
@@ -98,14 +100,14 @@ export class KeyFeaturesSectionWriter extends BaseSectionWriter {
       name: this.getSectionName(),
       content: finalSection,
       confidence: confidenceAssessment,
-      metadata: {
+      metadata: this.composeMetadata({
         key_features_count: finalSection.keyFeatures.length,
         validation_issues: validation.issues,
         source_analyzers: ['contextAnalysis'],
-        plan_mode: plan.mode,
-        operations_applied: plan.operations?.length ?? 0,
-        proposed_features: plan.proposedFeatures?.length ?? 0
-      },
+        plan_mode: normalizedPlan.mode,
+        operations_applied: normalizedPlan.operations.length,
+        proposed_features: normalizedPlan.proposedFeatures.length
+      }),
       shouldRegenerate: true
     }
   }
@@ -166,7 +168,8 @@ export class KeyFeaturesSectionWriter extends BaseSectionWriter {
   }
 }
 
-type KeyFeaturesPlan = z.infer<typeof KeyFeaturesSectionPlanSchema>
+type KeyFeaturesPlanInput = z.input<typeof KeyFeaturesSectionPlanSchema>
+type KeyFeaturesPlan = z.output<typeof KeyFeaturesSectionPlanSchema>
 
 const sanitizeFeatures = (features: any[]): string[] =>
   features
@@ -202,13 +205,27 @@ const findFeatureIndex = (features: string[], reference?: string): number => {
   return features.findIndex(feature => getFeatureKey(feature) === refKey)
 }
 
+const normalizeKeyFeaturesPlan = (plan: KeyFeaturesPlanInput): KeyFeaturesPlan => ({
+  mode: plan.mode ?? 'smart_merge',
+  operations: (plan.operations ?? []).map(operation => ({
+    action: operation.action ?? 'add',
+    referenceFeature: operation.referenceFeature,
+    feature: operation.feature,
+    rationale: operation.rationale
+  })),
+  proposedFeatures: plan.proposedFeatures ?? [],
+  summary: plan.summary
+})
+
 export const applyKeyFeaturesPlan = (
   existingFeatures: string[],
-  plan: KeyFeaturesPlan
+  plan: KeyFeaturesPlanInput
 ): string[] => {
+  const normalizedPlan = normalizeKeyFeaturesPlan(plan)
+
   let workingFeatures = sanitizeFeatures(existingFeatures)
 
-  for (const operation of plan.operations ?? []) {
+  for (const operation of normalizedPlan.operations ?? []) {
     const action = operation.action ?? 'add'
     const reference = operation.referenceFeature ?? operation.feature
     const index = findFeatureIndex(workingFeatures, reference)
@@ -240,9 +257,9 @@ export const applyKeyFeaturesPlan = (
     }
   }
 
-  const sanitizedProposed = sanitizeFeatures(plan.proposedFeatures ?? [])
+  const sanitizedProposed = sanitizeFeatures(normalizedPlan.proposedFeatures ?? [])
 
-  if (plan.mode === 'replace') {
+  if (normalizedPlan.mode === 'replace') {
     workingFeatures = sanitizedProposed.length > 0 ? sanitizedProposed : workingFeatures
   } else {
     for (const feature of sanitizedProposed) {

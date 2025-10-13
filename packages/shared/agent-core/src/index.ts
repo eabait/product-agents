@@ -154,4 +154,5 @@ export class ParallelAgent extends BaseAgent {
   }
 }
 
+export * from './usage'
 export * from 'zod'

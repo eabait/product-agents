@@ -1,3 +1,5 @@
+import { UsageSummary } from '@product-agents/agent-core'
+
 export interface Message {
   id: string;
   role: 'user' | 'assistant' | 'system';
@@ -8,6 +10,13 @@ export interface Message {
     tokens?: number;
     duration?: number;
     confidence?: number;
+    usage?: UsageSummary;
+    cost?: number;
+    currency?: string;
+    costSource?: 'provider' | 'estimated';
+    promptTokens?: number;
+    completionTokens?: number;
+    totalTokens?: number;
   };
 }
 

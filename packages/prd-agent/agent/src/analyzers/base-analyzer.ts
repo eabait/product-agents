@@ -64,12 +64,34 @@ export abstract class BaseAnalyzer {
   protected async generateText(params: {
     prompt: string
     temperature?: number
+    maxTokens?: number
   }): Promise<string> {
     return this.client.generateText({
       model: this.settings.model,
       prompt: params.prompt,
-      temperature: params.temperature || this.settings.temperature
+      temperature: params.temperature || this.settings.temperature,
+      maxTokens: params.maxTokens
     })
+  }
+
+  protected composeMetadata(baseMetadata?: Record<string, any>): Record<string, any> | undefined {
+    const usage = this.client.getLastUsage()
+    if (!usage) {
+      return baseMetadata
+    }
+
+    const existingUsage =
+      baseMetadata && typeof baseMetadata.usage === 'object'
+        ? baseMetadata.usage
+        : undefined
+
+    return {
+      ...(baseMetadata || {}),
+      usage: {
+        ...(existingUsage || {}),
+        ...usage
+      }
+    }
   }
 
   private isModelNotFoundError(error: any): boolean {

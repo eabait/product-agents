@@ -86,7 +86,14 @@ export class ConstraintsSectionWriter extends BaseSectionWriter {
       temperature: DEFAULT_TEMPERATURE
     })
 
-    const merged = applyConstraintsPlan(existingConstraints, existingAssumptions, plan)
+    const normalizedPlan: ConstraintsPlan = {
+      mode: plan.mode ?? 'smart_merge',
+      constraints: normalizeStringListPlan(plan.constraints),
+      assumptions: normalizeStringListPlan(plan.assumptions),
+      summary: plan.summary
+    }
+
+    const merged = applyConstraintsPlan(existingConstraints, existingAssumptions, normalizedPlan)
 
     const finalSection: ConstraintsSection = {
       constraints: merged.constraints,
@@ -109,15 +116,15 @@ export class ConstraintsSectionWriter extends BaseSectionWriter {
       name: this.getSectionName(),
       content: finalSection,
       confidence: confidenceAssessment,
-      metadata: {
+      metadata: this.composeMetadata({
         constraints_count: finalSection.constraints.length,
         assumptions_count: finalSection.assumptions.length,
         validation_issues: validation.issues,
         source_analyzers: ['contextAnalysis'],
-        plan_mode: plan.mode,
-        constraint_operations: plan.constraints?.operations?.length ?? 0,
-        assumption_operations: plan.assumptions?.operations?.length ?? 0
-      },
+        plan_mode: normalizedPlan.mode,
+        constraint_operations: normalizedPlan.constraints.operations.length,
+        assumption_operations: normalizedPlan.assumptions.operations.length
+      }),
       shouldRegenerate: true
     }
   }
@@ -181,7 +188,10 @@ export class ConstraintsSectionWriter extends BaseSectionWriter {
   }
 }
 
-type ConstraintsPlan = z.infer<typeof ConstraintsSectionPlanSchema>
+type StringListPlanInput = z.input<typeof StringListPlanSchema>
+type StringListPlan = z.output<typeof StringListPlanSchema>
+type ConstraintsPlanInput = z.input<typeof ConstraintsSectionPlanSchema>
+type ConstraintsPlan = z.output<typeof ConstraintsSectionPlanSchema>
 
 const sanitizeEntries = (entries: any[]): string[] =>
   entries
@@ -208,10 +218,22 @@ const findEntryIndex = (entries: string[], reference?: string): number => {
   return entries.findIndex(entry => entry.trim().toLowerCase() === ref)
 }
 
-const applyStringListPlan = (existing: string[], plan: z.infer<typeof StringListPlanSchema>): string[] => {
+const normalizeStringListPlan = (plan?: StringListPlanInput): StringListPlan => ({
+  operations: (plan?.operations ?? []).map(operation => ({
+    action: operation.action ?? 'add',
+    reference: operation.reference,
+    value: operation.value,
+    rationale: operation.rationale
+  })),
+  proposed: plan?.proposed ?? []
+})
+
+const applyStringListPlan = (existing: string[], plan: StringListPlanInput): string[] => {
+  const normalizedPlan = normalizeStringListPlan(plan)
+
   let working = sanitizeEntries(existing)
 
-  for (const operation of plan.operations ?? []) {
+  for (const operation of normalizedPlan.operations ?? []) {
     const action = operation.action ?? 'add'
     const reference = operation.reference ?? operation.value
     const index = findEntryIndex(working, reference)
@@ -242,7 +264,7 @@ const applyStringListPlan = (existing: string[], plan: z.infer<typeof StringList
     }
   }
 
-  const sanitizedProposed = sanitizeEntries(plan.proposed ?? [])
+  const sanitizedProposed = sanitizeEntries(normalizedPlan.proposed ?? [])
 
   if (sanitizedProposed.length > 0) {
     for (const entry of sanitizedProposed) {
@@ -261,14 +283,21 @@ const applyStringListPlan = (existing: string[], plan: z.infer<typeof StringList
 export const applyConstraintsPlan = (
   existingConstraints: string[],
   existingAssumptions: string[],
-  plan: ConstraintsPlan
+  plan: ConstraintsPlanInput
 ): { constraints: string[]; assumptions: string[] } => {
-  const constraints = applyStringListPlan(existingConstraints, plan.constraints ?? { operations: [], proposed: [] })
-  const assumptions = applyStringListPlan(existingAssumptions, plan.assumptions ?? { operations: [], proposed: [] })
+  const normalizedPlan: ConstraintsPlan = {
+    mode: plan.mode ?? 'smart_merge',
+    constraints: normalizeStringListPlan(plan.constraints),
+    assumptions: normalizeStringListPlan(plan.assumptions),
+    summary: plan.summary
+  }
 
-  if (plan.mode === 'replace') {
-    const proposedConstraints = sanitizeEntries(plan.constraints?.proposed ?? [])
-    const proposedAssumptions = sanitizeEntries(plan.assumptions?.proposed ?? [])
+  const constraints = applyStringListPlan(existingConstraints, normalizedPlan.constraints)
+  const assumptions = applyStringListPlan(existingAssumptions, normalizedPlan.assumptions)
+
+  if (normalizedPlan.mode === 'replace') {
+    const proposedConstraints = sanitizeEntries(normalizedPlan.constraints.proposed ?? [])
+    const proposedAssumptions = sanitizeEntries(normalizedPlan.assumptions.proposed ?? [])
 
     return {
       constraints: proposedConstraints.length > 0 ? proposedConstraints : constraints,

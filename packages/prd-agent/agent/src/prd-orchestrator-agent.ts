@@ -1,4 +1,4 @@
-import { BaseAgent, AgentSettings, AgentRuntimeSettings } from '@product-agents/agent-core'
+import { BaseAgent, AgentSettings, AgentRuntimeSettings, UsageEntry, UsageCategory, summarizeUsage } from '@product-agents/agent-core'
 import { ModelCapability } from '@product-agents/model-compatibility'
 import { 
   PRD, 
@@ -10,7 +10,8 @@ import {
 import { combineConfidenceAssessments } from './utils/confidence-assessment'
 import { 
   SECTION_NAMES,
-  ALL_SECTION_NAMES
+  ALL_SECTION_NAMES,
+  type SectionName
 } from './constants'
 import { buildPRDMetadata } from './utilities'
 import { 
@@ -155,6 +156,7 @@ export class PRDOrchestratorAgent extends BaseAgent {
 
   async generateSectionsWithProgress(request: SectionRoutingRequest, onProgress?: ProgressCallback): Promise<SectionRoutingResponse> {
     const startTime = Date.now()
+    const usageEntries: UsageEntry[] = []
     
     // Emit initial status
     this.emitProgress(onProgress, {
@@ -171,7 +173,7 @@ export class PRDOrchestratorAgent extends BaseAgent {
       message: 'Checking if more information is needed...'
     })
 
-    const clarificationCheck = await this.checkClarificationNeeded(request, startTime)
+    const clarificationCheck = await this.checkClarificationNeeded(request, startTime, usageEntries)
     if (clarificationCheck) {
       this.emitProgress(onProgress, {
         type: 'worker_complete',
@@ -206,7 +208,7 @@ export class PRDOrchestratorAgent extends BaseAgent {
       message: 'Analyzing themes and requirements...'
     })
 
-    const sharedAnalysisResults = await this.runCentralizedAnalysis(request)
+    const sharedAnalysisResults = await this.runCentralizedAnalysis(request, usageEntries)
     
     this.emitProgress(onProgress, {
       type: 'worker_complete',
@@ -218,10 +220,16 @@ export class PRDOrchestratorAgent extends BaseAgent {
     
     // PHASE 2: Process sections in parallel with progress tracking
     const { sectionResults, confidenceAssessments, allIssues, allWarnings } = 
-      await this.processSectionsInParallelWithProgress(request, sectionsToProcess, sharedAnalysisResults, onProgress)
+      await this.processSectionsInParallelWithProgress(request, sectionsToProcess, sharedAnalysisResults, usageEntries, onProgress)
 
     const response = this.buildSectionResponse(
-      sectionResults, confidenceAssessments, allIssues, allWarnings, sectionsToProcess, startTime
+      sectionResults,
+      confidenceAssessments,
+      allIssues,
+      allWarnings,
+      sectionsToProcess,
+      usageEntries,
+      startTime
     )
 
     // Emit final completion
@@ -259,7 +267,8 @@ export class PRDOrchestratorAgent extends BaseAgent {
     // Apply section updates to existing PRD
     const updatedPRD = this.applySectionUpdates(
       request.context?.existingPRD, 
-      sectionResponse.sections
+      sectionResponse.sections,
+      sectionResponse.metadata
     )
 
     return updatedPRD
@@ -274,7 +283,8 @@ export class PRDOrchestratorAgent extends BaseAgent {
         needsClarification: true,
         confidence: sectionResponse.metadata.overall_confidence,
         missingCritical: sectionResponse.validation.issues,
-        questions: sectionResponse.validation.warnings
+        questions: sectionResponse.validation.warnings,
+        usage: sectionResponse.metadata.usage
       } as ClarificationResult
     }
 
@@ -297,7 +307,8 @@ export class PRDOrchestratorAgent extends BaseAgent {
         sectionsGenerated: sectionResponse.metadata.sections_updated,
         confidenceAssessments: sectionResponse.metadata.confidence_assessments,
         overallConfidence: sectionResponse.metadata.overall_confidence,
-        processingTimeMs: sectionResponse.metadata.processing_time_ms
+        processingTimeMs: sectionResponse.metadata.processing_time_ms,
+        usageSummary: sectionResponse.metadata.usage
       }),
 
       // Validation
@@ -307,10 +318,10 @@ export class PRDOrchestratorAgent extends BaseAgent {
     return prd
   }
 
-  private determineSectionsToProcess(request: SectionRoutingRequest): string[] {
+  private determineSectionsToProcess(request: SectionRoutingRequest): SectionName[] {
     // If specific sections are targeted, use those
     if (request.targetSections && request.targetSections.length > 0) {
-      return request.targetSections
+      return request.targetSections as SectionName[]
     }
 
     // If no existing PRD, generate all sections
@@ -320,7 +331,7 @@ export class PRDOrchestratorAgent extends BaseAgent {
 
     // For updates, analyze the message to determine affected sections
     const messageWords = request.message.toLowerCase().split(' ')
-    const affectedSections: string[] = []
+    const affectedSections: SectionName[] = []
 
     // Simple keyword-based section detection for new structure
     if (messageWords.some(word => ['user', 'persona', 'audience', 'customer', 'who'].includes(word))) {
@@ -345,12 +356,12 @@ export class PRDOrchestratorAgent extends BaseAgent {
       : ALL_SECTION_NAMES
   }
 
-  private getSectionProcessingOrder(sections: string[]): string[] {
+  private getSectionProcessingOrder(sections: SectionName[]): SectionName[] {
     // All sections are independent and can run in parallel (all use shared context analysis)
     return ALL_SECTION_NAMES.filter(section => sections.includes(section))
   }
 
-  private async detectAffectedSections(message: string, existingPRD: any): Promise<string[]> {
+  private async detectAffectedSections(message: string, existingPRD: any): Promise<SectionName[]> {
     try {
       // Use LLM-powered section detection for accurate results
       const detectionResult = await this.sectionDetectionAnalyzer.analyze({
@@ -359,9 +370,19 @@ export class PRDOrchestratorAgent extends BaseAgent {
         context: { existingPRD }
       })
       
-      console.log(`SectionDetection: ${detectionResult.data.affectedSections.join(', ')} (confidence: ${detectionResult.data.confidence})`)
+      const detected = (detectionResult.data.affectedSections ?? []) as SectionName[]
+      const heuristic = this.determineSectionsToProcess({
+        message,
+        context: { existingPRD }
+      })
+      const combined = Array.from(new Set<SectionName>([...detected, ...heuristic]))
+
+      console.log(`SectionDetection: ${detected.join(', ') || 'none'} (confidence: ${detectionResult.data.confidence})`)
+      if (heuristic.length > 0) {
+        console.log(`SectionDetection heuristics added: ${heuristic.filter(section => !detected.includes(section)).join(', ') || 'none'}`)
+      }
       
-      return detectionResult.data.affectedSections
+      return combined
     } catch (error) {
       console.warn('Section detection analyzer failed, using fallback logic:', error)
       // Fallback to conservative keyword-based detection
@@ -372,7 +393,18 @@ export class PRDOrchestratorAgent extends BaseAgent {
     }
   }
 
-  private applySectionUpdates(existingPRD: PRD, updatedSections: any): PRD {
+  private applySectionUpdates(existingPRD: PRD, updatedSections: any, responseMetadata: SectionRoutingResponse['metadata']): PRD {
+    const sectionsGenerated = responseMetadata?.sections_updated?.length
+      ? responseMetadata.sections_updated
+      : Object.keys(updatedSections)
+
+    const confidenceAssessments = responseMetadata?.confidence_assessments || existingPRD.metadata?.confidence_assessments || {}
+    const overallConfidence = responseMetadata?.overall_confidence || existingPRD.metadata?.overall_confidence || {
+      level: 'medium',
+      reasons: ['Updated sections without detailed confidence data'],
+      factors: {}
+    }
+
     return {
       ...existingPRD,
       sections: {
@@ -380,22 +412,27 @@ export class PRDOrchestratorAgent extends BaseAgent {
         ...updatedSections
       },
       metadata: buildPRDMetadata({
-        sectionsGenerated: Object.keys(updatedSections),
-        confidenceAssessments: {},
-        overallConfidence: { level: 'medium', reasons: [], factors: {} },
+        sectionsGenerated,
+        confidenceAssessments,
+        overallConfidence,
+        processingTimeMs: responseMetadata?.processing_time_ms,
+        usageSummary: responseMetadata?.usage,
         existingMetadata: existingPRD.metadata
       })
     }
   }
 
   // Helper methods extracted from generateSections for better readability
-  private async checkClarificationNeeded(request: SectionRoutingRequest, startTime: number): Promise<SectionRoutingResponse | null> {
+  private async checkClarificationNeeded(request: SectionRoutingRequest, startTime: number, usageEntries: UsageEntry[]): Promise<SectionRoutingResponse | null> {
     const clarificationResult = await this.clarificationAnalyzer.analyze({
       message: request.message,
       context: request.context
     })
 
+    this.captureUsageEntry('clarification', 'clarification', clarificationResult.metadata, usageEntries)
+
     if (clarificationResult.data.needsClarification) {
+      const usageSummary = usageEntries.length > 0 ? summarizeUsage(usageEntries) : undefined
       return {
         sections: {},
         metadata: {
@@ -407,7 +444,8 @@ export class PRDOrchestratorAgent extends BaseAgent {
             factors: {}
           },
           processing_time_ms: Date.now() - startTime,
-          should_regenerate_prd: false
+          should_regenerate_prd: false,
+          ...(usageSummary ? { usage: usageSummary } : {})
         },
         validation: {
           is_valid: false,
@@ -419,7 +457,7 @@ export class PRDOrchestratorAgent extends BaseAgent {
     return null
   }
 
-  private async runCentralizedAnalysis(request: SectionRoutingRequest): Promise<Map<string, any>> {
+  private async runCentralizedAnalysis(request: SectionRoutingRequest, usageEntries: UsageEntry[]): Promise<Map<string, any>> {
     console.log('Running simplified analysis phase...')
     const sharedAnalysisResults = new Map<string, any>()
     
@@ -434,6 +472,7 @@ export class PRDOrchestratorAgent extends BaseAgent {
     try {
       const contextResult = await this.contextAnalyzer.analyze(analyzerInput)
       sharedAnalysisResults.set('contextAnalysis', contextResult)
+      this.captureUsageEntry('contextAnalysis', 'analyzer', contextResult.metadata, usageEntries)
       console.log('✓ Context analysis completed')
     } catch (error) {
       console.warn('Context analysis failed:', error)
@@ -444,8 +483,9 @@ export class PRDOrchestratorAgent extends BaseAgent {
 
   private async processSectionsInParallelWithProgress(
     request: SectionRoutingRequest, 
-    sectionsToProcess: string[], 
+    sectionsToProcess: SectionName[], 
     sharedAnalysisResults: Map<string, any>,
+    usageEntries: UsageEntry[],
     onProgress?: ProgressCallback
   ): Promise<{
     sectionResults: Map<string, any>
@@ -490,6 +530,7 @@ export class PRDOrchestratorAgent extends BaseAgent {
         console.log(`Starting parallel processing for section: ${sectionName}`)
         const result = await writer.writeSection(sectionInput)
         console.log(`✓ Completed section: ${sectionName}`)
+        this.captureUsageEntry(sectionName, 'section', result.metadata, usageEntries)
         
         // Emit section completion
         this.emitProgress(onProgress, {
@@ -548,15 +589,37 @@ export class PRDOrchestratorAgent extends BaseAgent {
 
   private async processSectionsInParallel(
     request: SectionRoutingRequest, 
-    sectionsToProcess: string[], 
-    sharedAnalysisResults: Map<string, any>
+    sectionsToProcess: SectionName[], 
+    sharedAnalysisResults: Map<string, any>,
+    usageEntries: UsageEntry[]
   ): Promise<{
     sectionResults: Map<string, any>
     confidenceAssessments: Map<string, ConfidenceAssessment>
     allIssues: string[]
     allWarnings: string[]
   }> {
-    return this.processSectionsInParallelWithProgress(request, sectionsToProcess, sharedAnalysisResults)
+    return this.processSectionsInParallelWithProgress(request, sectionsToProcess, sharedAnalysisResults, usageEntries)
+  }
+
+  private captureUsageEntry(
+    name: string,
+    category: UsageCategory,
+    metadata: Record<string, any> | undefined,
+    usageEntries: UsageEntry[]
+  ): void {
+    if (!metadata || typeof metadata !== 'object') {
+      return
+    }
+    const usageData = metadata.usage
+    if (!usageData || typeof usageData !== 'object') {
+      return
+    }
+
+    usageEntries.push({
+      name,
+      category,
+      usage: { ...usageData }
+    })
   }
 
   private extractConfidenceScore(confidence: ConfidenceAssessment | undefined): number | undefined {
@@ -576,7 +639,8 @@ export class PRDOrchestratorAgent extends BaseAgent {
     confidenceAssessments: Map<string, ConfidenceAssessment>,
     allIssues: string[],
     allWarnings: string[],
-    sectionsToProcess: string[],
+    sectionsToProcess: SectionName[],
+    usageEntries: UsageEntry[],
     startTime: number
   ): SectionRoutingResponse {
     const overallConfidence = confidenceAssessments.size > 0 
@@ -587,6 +651,8 @@ export class PRDOrchestratorAgent extends BaseAgent {
           factors: {}
         }
 
+    const usageSummary = usageEntries.length > 0 ? summarizeUsage(usageEntries) : undefined
+
     return {
       sections: Object.fromEntries(sectionResults),
       metadata: {
@@ -594,7 +660,8 @@ export class PRDOrchestratorAgent extends BaseAgent {
         confidence_assessments: Object.fromEntries(confidenceAssessments),
         overall_confidence: overallConfidence,
         processing_time_ms: Date.now() - startTime,
-        should_regenerate_prd: sectionsToProcess.length > 0
+        should_regenerate_prd: sectionsToProcess.length > 0,
+        ...(usageSummary ? { usage: usageSummary } : {})
       },
       validation: {
         is_valid: allIssues.length === 0,

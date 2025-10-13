@@ -47,6 +47,7 @@ export function buildPRDMetadata(options: {
   overallConfidence: ConfidenceAssessment
   processingTimeMs?: number
   existingMetadata?: any
+  usageSummary?: any
 }): any {
   return {
     ...options.existingMetadata,
@@ -56,7 +57,8 @@ export function buildPRDMetadata(options: {
     sections_generated: options.sectionsGenerated,
     confidence_assessments: options.confidenceAssessments,
     overall_confidence: options.overallConfidence,
-    ...(options.processingTimeMs && { processing_time_ms: options.processingTimeMs })
+    ...(options.processingTimeMs && { processing_time_ms: options.processingTimeMs }),
+    ...(options.usageSummary ? { usage: options.usageSummary } : {})
   }
 }
 

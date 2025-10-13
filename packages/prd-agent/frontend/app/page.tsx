@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState, useCallback } from "react";
+import { UsageSummary } from "@product-agents/agent-core";
 import { v4 as uuidv4 } from "uuid";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -84,6 +85,48 @@ const STREAM_TIMEOUT_MS = 300000; // 5 minutes
 // const STREAM_RETRY_DELAY_MS = 1000; // Reserved for future retry implementation
 // Enhanced model interface from OpenRouter
 
+const coerceNumber = (value: unknown): number | undefined => {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : undefined;
+  }
+  if (typeof value === 'string') {
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+};
+
+const formatCostValue = (amount: number, currency: string): string => {
+  if (!Number.isFinite(amount)) return '';
+  const normalizedCurrency = currency && currency.length > 0 ? currency.toUpperCase() : 'USD';
+  const precision = amount >= 1 ? 2 : 4;
+  try {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: normalizedCurrency,
+      minimumFractionDigits: precision,
+      maximumFractionDigits: precision
+    }).format(amount);
+  } catch {
+    return `${normalizedCurrency} ${amount.toFixed(precision)}`;
+  }
+};
+
+type ConversationCostEntry = {
+  id: string;
+  label: string;
+  cost: number;
+  currency: string;
+  source: 'provider' | 'estimated';
+};
+
+type ConversationCostSummary = {
+  total: number;
+  currency: string;
+  entries: ConversationCostEntry[];
+  hasEstimated: boolean;
+};
+
 
 function PRDAgentPageContent() {
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
@@ -92,7 +135,7 @@ function PRDAgentPageContent() {
   const [copied, setCopied] = useState<string | null>(null);
 
   // Use reactive contexts
-  const { setModels, updateModelFromId } = useModelContext();
+  const { models, setModels, updateModelFromId } = useModelContext();
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -131,13 +174,263 @@ function PRDAgentPageContent() {
   // track initialization so we don't run sync effects before we've loaded from localStorage
   const isInitializedRef = useRef(false);
   const initialSettingsRef = useRef(settings);
-  
+
+  const pricingByModel = React.useMemo(() => {
+    const map = new Map<string, { promptPerToken: number; completionPerToken: number }>();
+    models.forEach(model => {
+      map.set(model.id, {
+        promptPerToken: model.pricing.promptPerToken ?? 0,
+        completionPerToken: model.pricing.completionPerToken ?? 0
+      });
+    });
+    return map;
+  }, [models]);
+
+  const buildAssistantMetadata = React.useCallback(
+    (usageSummary: any | null | undefined, modelId?: string | null, rawMetadata?: any): Message['metadata'] | undefined => {
+      const metadata: Message['metadata'] = {};
+
+      if (modelId) {
+        metadata.model = modelId;
+      }
+
+      const confidenceLevel = rawMetadata?.overall_confidence?.level;
+      if (confidenceLevel) {
+        metadata.confidence =
+          confidenceLevel === 'high'
+            ? 0.9
+            : confidenceLevel === 'medium'
+              ? 0.7
+              : confidenceLevel === 'low'
+                ? 0.4
+                : metadata.confidence;
+      }
+
+      const usage = usageSummary || rawMetadata?.usage;
+      if (usage) {
+        const promptTokens = coerceNumber(
+          usage.promptTokens ?? usage.prompt_tokens ?? usage.inputTokens ?? usage.input_tokens ?? usage.inputTextTokens ?? usage.input_text_tokens
+        );
+        const completionTokens = coerceNumber(
+          usage.completionTokens ?? usage.completion_tokens ?? usage.outputTokens ?? usage.output_tokens ?? usage.outputTextTokens ?? usage.output_text_tokens
+        );
+        let totalTokens = coerceNumber(
+          usage.totalTokens ?? usage.total_tokens ?? usage.tokens ?? usage.token_count
+        );
+
+        if (totalTokens === undefined && (promptTokens !== undefined || completionTokens !== undefined)) {
+          totalTokens = (promptTokens || 0) + (completionTokens || 0);
+        }
+
+        const promptCost = coerceNumber(
+          usage.promptCost ?? usage.prompt_cost ?? usage.cost?.prompt ?? usage.prompt_cost_usd ?? usage.prompt?.cost
+        );
+        const completionCost = coerceNumber(
+          usage.completionCost ?? usage.completion_cost ?? usage.cost?.completion ?? usage.completion_cost_usd ?? usage.completion?.cost
+        );
+        let totalCost = coerceNumber(
+          usage.totalCost ?? usage.total_cost ?? usage.cost?.total ?? usage.cost_usd ?? usage.total_cost_usd
+        );
+
+        const rawCurrency =
+          usage.currency ??
+          usage.cost?.currency ??
+          usage.usage?.currency ??
+          rawMetadata?.currency;
+        const normalizedCurrency =
+          typeof rawCurrency === 'string' && rawCurrency.trim().length > 0
+            ? rawCurrency.trim().toUpperCase()
+            : undefined;
+
+        const entries = Array.isArray(usage.entries)
+          ? (usage.entries as UsageSummary['entries'])
+          : [];
+
+        const normalizedUsage: UsageSummary = {
+          promptTokens,
+          completionTokens,
+          totalTokens,
+          promptCost,
+          completionCost,
+          totalCost,
+          currency: normalizedCurrency,
+          entries
+        };
+
+        let costSource: 'provider' | 'estimated' | undefined;
+
+        if (typeof totalCost === 'number' && Number.isFinite(totalCost)) {
+          costSource = 'provider';
+        } else if (typeof promptCost === 'number' || typeof completionCost === 'number') {
+          totalCost = (promptCost || 0) + (completionCost || 0);
+          normalizedUsage.totalCost = totalCost;
+          costSource = 'provider';
+        } else {
+          const pricing = modelId ? pricingByModel.get(modelId) : undefined;
+          if (pricing) {
+            const promptRate = pricing.promptPerToken ?? 0;
+            const completionRate = pricing.completionPerToken ?? 0;
+            if ((promptTokens || completionTokens) && (promptRate || completionRate)) {
+              const estimatedCost =
+                (promptTokens || 0) * promptRate +
+                (completionTokens || 0) * completionRate;
+              if (Number.isFinite(estimatedCost) && estimatedCost > 0) {
+                totalCost = estimatedCost;
+                normalizedUsage.promptCost = normalizedUsage.promptCost ?? (promptTokens || 0) * promptRate;
+                normalizedUsage.completionCost = normalizedUsage.completionCost ?? (completionTokens || 0) * completionRate;
+                normalizedUsage.totalCost = estimatedCost;
+                costSource = 'estimated';
+              }
+            }
+          }
+        }
+
+        if (!normalizedUsage.currency) {
+          normalizedUsage.currency = 'USD';
+        }
+
+        metadata.usage = normalizedUsage;
+
+        if (typeof totalTokens === 'number') {
+          metadata.tokens = totalTokens;
+          metadata.totalTokens = totalTokens;
+        }
+        if (typeof promptTokens === 'number') {
+          metadata.promptTokens = promptTokens;
+        }
+        if (typeof completionTokens === 'number') {
+          metadata.completionTokens = completionTokens;
+        }
+        if (typeof totalCost === 'number' && Number.isFinite(totalCost)) {
+          metadata.cost = totalCost;
+          metadata.currency = normalizedUsage.currency || 'USD';
+          metadata.costSource = costSource || 'provider';
+        }
+      }
+
+      return Object.keys(metadata).length > 0 ? metadata : undefined;
+    },
+    [pricingByModel]
+  );
+
   // No cleanup needed since we handle streaming directly in the fetch response
   
 
   // Computed helpers for working with active conversation
   const activeConversation = conversations.find(c => c.id === activeId);
   const activeMessages = React.useMemo(() => activeConversation?.messages || [], [activeConversation]);
+
+  const conversationCost = React.useMemo<ConversationCostSummary | null>(() => {
+    if (!activeConversation) {
+      return null;
+    }
+
+    let assistantIndex = 0;
+    const entries: ConversationCostEntry[] = [];
+
+    for (const message of activeConversation.messages) {
+      if (message.role !== 'assistant') continue;
+      assistantIndex += 1;
+      const metadata = message.metadata;
+      if (!metadata) continue;
+
+      const usage = metadata.usage;
+      const currencyRaw = metadata.currency || usage?.currency || 'USD';
+      const entryCurrency =
+        typeof currencyRaw === 'string' && currencyRaw.trim().length > 0
+          ? currencyRaw.trim().toUpperCase()
+          : 'USD';
+
+      let cost = coerceNumber(metadata.cost);
+      let source: 'provider' | 'estimated' | undefined =
+        metadata.costSource === 'provider' || metadata.costSource === 'estimated'
+          ? metadata.costSource
+          : undefined;
+
+      if ((cost === undefined || !Number.isFinite(cost)) && usage) {
+        const usageTotalCost = coerceNumber(usage.totalCost);
+        if (usageTotalCost !== undefined) {
+          cost = usageTotalCost;
+          source = 'provider';
+        } else {
+          const usagePromptCost = coerceNumber(usage.promptCost);
+          const usageCompletionCost = coerceNumber(usage.completionCost);
+          if (usagePromptCost !== undefined || usageCompletionCost !== undefined) {
+            cost = (usagePromptCost || 0) + (usageCompletionCost || 0);
+            source = 'provider';
+          }
+        }
+      }
+
+      if (cost === undefined || !Number.isFinite(cost)) {
+        const promptTokens = coerceNumber(metadata.promptTokens ?? usage?.promptTokens);
+        const completionTokens = coerceNumber(metadata.completionTokens ?? usage?.completionTokens);
+        const modelId = metadata.model || settings.model || null;
+        const pricing = modelId ? pricingByModel.get(modelId) : undefined;
+        if (pricing && (promptTokens || completionTokens)) {
+          const estimatedCost =
+            (promptTokens || 0) * (pricing.promptPerToken ?? 0) +
+            (completionTokens || 0) * (pricing.completionPerToken ?? 0);
+          if (Number.isFinite(estimatedCost) && estimatedCost > 0) {
+            cost = estimatedCost;
+            source = 'estimated';
+          }
+        }
+      }
+
+      if (cost === undefined || !Number.isFinite(cost)) {
+        continue;
+      }
+
+      const usageLabels =
+        Array.isArray(usage?.entries) && usage.entries.length > 0
+          ? usage.entries.map((entry: any) => entry?.name).filter(Boolean)
+          : [];
+
+      const label = usageLabels.length > 0 ? usageLabels.join(', ') : `Assistant #${assistantIndex}`;
+
+      entries.push({
+        id: message.id,
+        label,
+        cost,
+        currency: entryCurrency,
+        source: source || 'provider'
+      });
+    }
+
+    if (entries.length === 0) {
+      return null;
+    }
+
+    const canonicalCurrency = entries[0].currency;
+    const total = entries
+      .filter(entry => entry.currency === canonicalCurrency)
+      .reduce((sum, entry) => sum + entry.cost, 0);
+
+    if (!Number.isFinite(total)) {
+      return null;
+    }
+
+    return {
+      total,
+      currency: canonicalCurrency,
+      entries,
+      hasEstimated: entries.some(entry => entry.source === 'estimated')
+    };
+  }, [activeConversation?.messages, pricingByModel, settings.model]);
+
+  const formattedConversationCost = React.useMemo(() => {
+    if (!conversationCost) {
+      return null;
+    }
+
+    const formatted = formatCostValue(conversationCost.total, conversationCost.currency);
+    if (!formatted) {
+      return null;
+    }
+
+    return `${formatted}${conversationCost.hasEstimated ? ' (est.)' : ''}`;
+  }, [conversationCost]);
 
 
   // Helper to update the active conversation
@@ -741,6 +1034,9 @@ function PRDAgentPageContent() {
       }
 
       const decoder = new TextDecoder();
+      let streamedUsageSummary: any = null;
+      let streamedMetadata: any = null;
+      let streamedModel: string | null = settings.model ?? null;
       let buffer = '';
       const assistantMessageId = uuidv4();
 
@@ -781,6 +1077,20 @@ function PRDAgentPageContent() {
             
             try {
               const eventData = JSON.parse(dataStr);
+              if (eventData.metadata) {
+                streamedMetadata = eventData.metadata;
+                if (eventData.metadata?.usage) {
+                  streamedUsageSummary = eventData.metadata.usage;
+                }
+              }
+
+              if (eventData.usage) {
+                streamedUsageSummary = eventData.usage;
+              }
+
+              if (typeof eventData.model === 'string') {
+                streamedModel = eventData.model;
+              }
               
               // Handle different event types
               if (eventData.type) {
@@ -791,12 +1101,18 @@ function PRDAgentPageContent() {
               } else if (eventData.problemStatement || eventData.sections || eventData.solutionOverview) {
                 // Direct PRD object response
                 const messageContent = JSON.stringify(eventData, null, 2);
+                const assistantMetadata = buildAssistantMetadata(
+                  streamedUsageSummary,
+                  streamedModel,
+                  streamedMetadata || eventData.metadata
+                );
                 
                 const assistantMessage: Message = {
                   id: assistantMessageId,
                   role: "assistant",
                   content: messageContent,
                   timestamp: new Date(),
+                  ...(assistantMetadata ? { metadata: assistantMetadata } : {})
                 };
 
                 const finalMessages = [...newMessages, assistantMessage];
@@ -808,6 +1124,8 @@ function PRDAgentPageContent() {
                     title: shouldUpdateTitle ? generateTitleFromMessage(userMessage.content) : conv.title
                   };
                 });
+                streamedUsageSummary = null;
+                streamedMetadata = null;
               } else if (eventData.prd || eventData.content) {
                 // Final result
                 const messageContent = eventData.prd 
@@ -815,12 +1133,18 @@ function PRDAgentPageContent() {
                   : (typeof eventData.content === 'object' 
                       ? JSON.stringify(eventData.content, null, 2)
                       : eventData.content);
+                const assistantMetadata = buildAssistantMetadata(
+                  streamedUsageSummary ?? eventData.usage,
+                  streamedModel,
+                  streamedMetadata || eventData.metadata
+                );
                 
                 const assistantMessage: Message = {
                   id: assistantMessageId,
                   role: "assistant",
                   content: messageContent,
                   timestamp: new Date(),
+                  ...(assistantMetadata ? { metadata: assistantMetadata } : {})
                 };
 
                 const finalMessages = [...newMessages, assistantMessage];
@@ -832,6 +1156,8 @@ function PRDAgentPageContent() {
                     title: shouldUpdateTitle ? generateTitleFromMessage(userMessage.content) : conv.title
                   };
                 });
+                streamedUsageSummary = null;
+                streamedMetadata = null;
               } else if (eventData.needsClarification) {
                 // Handle clarification request
                 const questionsText = eventData.questions?.map((q: string, index: number) => 
@@ -839,12 +1165,18 @@ function PRDAgentPageContent() {
                 ).join('\n\n');
                 
                 const content = `I need more information to create a comprehensive PRD. Please help me understand:\n\n${questionsText}\n\nPlease provide as much detail as possible for each area.`;
+                const assistantMetadata = buildAssistantMetadata(
+                  streamedUsageSummary ?? eventData.usage,
+                  streamedModel,
+                  streamedMetadata || eventData.metadata || (eventData.confidence ? { overall_confidence: eventData.confidence } : undefined)
+                );
                 
                 const assistantMessage: Message = {
                   id: assistantMessageId,
                   role: "assistant",
                   content: content,
                   timestamp: new Date(),
+                  ...(assistantMetadata ? { metadata: assistantMetadata } : {})
                 };
 
                 const finalMessages = [...newMessages, assistantMessage];
@@ -856,6 +1188,8 @@ function PRDAgentPageContent() {
                     title: shouldUpdateTitle ? generateTitleFromMessage(userMessage.content) : conv.title
                   };
                 });
+                streamedUsageSummary = null;
+                streamedMetadata = null;
               }
             } catch (parseError) {
               console.warn('Failed to parse SSE data:', dataStr, parseError);
@@ -911,11 +1245,17 @@ function PRDAgentPageContent() {
       messageContent = data.content || "No response";
     }
 
+    const responseUsage = data.usage ?? data.metadata?.usage ?? null;
+    const responseMetadata = data.metadata ?? (data.confidence ? { overall_confidence: data.confidence } : undefined);
+    const responseModel = data.model ?? settings.model ?? null;
+    const assistantMetadata = buildAssistantMetadata(responseUsage, responseModel, responseMetadata);
+
     const assistantMessage: Message = {
       id: uuidv4(),
       role: "assistant",
       content: messageContent,
       timestamp: new Date(),
+      ...(assistantMetadata ? { metadata: assistantMetadata } : {})
     };
 
     const finalMessages = [...newMessages, assistantMessage];
@@ -947,6 +1287,25 @@ function PRDAgentPageContent() {
             <div className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded">
               {contextSummary}
             </div>
+          )}
+          {formattedConversationCost && conversationCost && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded cursor-default">
+                  Spend: {formattedConversationCost}
+                </div>
+              </TooltipTrigger>
+              <TooltipContent>
+                <div className="space-y-1 text-xs">
+                  {conversationCost.entries.map(entry => (
+                    <div key={entry.id}>
+                      {entry.label}: {formatCostValue(entry.cost, entry.currency)}
+                      {entry.source === 'estimated' ? ' (est.)' : ''}
+                    </div>
+                  ))}
+                </div>
+              </TooltipContent>
+            </Tooltip>
           )}
           <ContextUsageIndicator
             currentMessages={activeMessages}

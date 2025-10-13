@@ -6,6 +6,7 @@
  */
 
 import { z } from 'zod'
+import { GenerationUsage } from '@product-agents/agent-core'
 
 export interface MockResponse {
   workerName: string
@@ -26,6 +27,8 @@ export interface PromptTrace {
 export class MockOpenRouterClient {
   private responses: Map<string, any> = new Map()
   public traces: PromptTrace[] = []
+  private usageOverrides: Map<string, GenerationUsage> = new Map()
+  private lastUsage?: GenerationUsage
 
   constructor(private apiKey?: string) {}
 
@@ -41,6 +44,14 @@ export class MockOpenRouterClient {
     })
   }
 
+  setMockUsage(workerName: string, usage: GenerationUsage) {
+    this.usageOverrides.set(workerName, usage)
+  }
+
+  getLastUsage(): GenerationUsage | undefined {
+    return this.lastUsage ? { ...this.lastUsage } : undefined
+  }
+
   async generateStructured<T>(params: {
     model: string
     schema: z.ZodSchema<T>
@@ -50,6 +61,7 @@ export class MockOpenRouterClient {
   }): Promise<T> {
     // Determine worker name from prompt patterns
     const workerName = this.determineWorkerFromPrompt(params.prompt)
+    this.lastUsage = undefined
     
     // Record the trace
     this.traces.push({
@@ -77,6 +89,7 @@ export class MockOpenRouterClient {
       throw new Error(`Mock response doesn't match schema for ${workerName}: ${validated.error.message}`)
     }
 
+    this.recordUsage(workerName, params.model)
     return validated.data
   }
 
@@ -88,6 +101,7 @@ export class MockOpenRouterClient {
   }): Promise<string> {
     // Determine worker name from prompt patterns
     const workerName = this.determineWorkerFromPrompt(params.prompt)
+    this.lastUsage = undefined
     
     // Record the trace
     this.traces.push({
@@ -112,6 +126,7 @@ export class MockOpenRouterClient {
       throw new Error(`Text generation requires string response for ${workerName}`)
     }
 
+    this.recordUsage(workerName, params.model)
     return mockResponse
   }
 
@@ -190,5 +205,58 @@ export class MockOpenRouterClient {
       console.log(`   Response Type: ${typeof trace.response}`)
     })
     console.log(`\nTotal traces: ${this.traces.length}`)
+  }
+
+  private recordUsage(workerName: string, model: string) {
+    const override = this.usageOverrides.get(workerName)
+
+    const hasPromptTokens = override ? Object.prototype.hasOwnProperty.call(override, 'promptTokens') : false
+    const promptTokens = override
+      ? (hasPromptTokens ? override.promptTokens : undefined)
+      : 10
+
+    const hasCompletionTokens = override ? Object.prototype.hasOwnProperty.call(override, 'completionTokens') : false
+    const completionTokens = override
+      ? (hasCompletionTokens ? override.completionTokens : undefined)
+      : 20
+
+    const hasTotalTokens = override ? Object.prototype.hasOwnProperty.call(override, 'totalTokens') : false
+    const totalTokens =
+      override && hasTotalTokens
+        ? override.totalTokens
+        : (promptTokens !== undefined || completionTokens !== undefined
+            ? (promptTokens ?? 0) + (completionTokens ?? 0)
+            : undefined)
+
+    const hasPromptCost = override ? Object.prototype.hasOwnProperty.call(override, 'promptCost') : false
+    const promptCost = override
+      ? (hasPromptCost ? override.promptCost : undefined)
+      : undefined
+
+    const hasCompletionCost = override ? Object.prototype.hasOwnProperty.call(override, 'completionCost') : false
+    const completionCost = override
+      ? (hasCompletionCost ? override.completionCost : undefined)
+      : undefined
+
+    const hasTotalCost = override ? Object.prototype.hasOwnProperty.call(override, 'totalCost') : false
+    const totalCost =
+      override && hasTotalCost
+        ? override.totalCost
+        : (promptCost !== undefined || completionCost !== undefined
+            ? (promptCost ?? 0) + (completionCost ?? 0)
+            : undefined)
+
+    this.lastUsage = {
+      model: (override && Object.prototype.hasOwnProperty.call(override, 'model') ? override.model : undefined) || model,
+      provider: override && Object.prototype.hasOwnProperty.call(override, 'provider') ? override.provider : undefined,
+      promptTokens,
+      completionTokens,
+      totalTokens,
+      promptCost,
+      completionCost,
+      totalCost,
+      currency: override && Object.prototype.hasOwnProperty.call(override, 'currency') ? override.currency : undefined,
+      rawUsage: override?.rawUsage
+    }
   }
 }

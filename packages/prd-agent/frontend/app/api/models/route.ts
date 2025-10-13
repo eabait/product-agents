@@ -150,16 +150,24 @@ export async function GET(request: NextRequest) {
       }) // Filter by agent capabilities using OpenRouter data
       .map(model => {
         const capabilities = Array.from(new Set(mapOpenRouterToAgentCapabilities(model)));
+        const promptPerTokenValue = Number.parseFloat(model.pricing.prompt);
+        const completionPerTokenValue = Number.parseFloat(model.pricing.completion);
+        const promptPerToken = Number.isFinite(promptPerTokenValue) ? promptPerTokenValue : 0;
+        const completionPerToken = Number.isFinite(completionPerTokenValue) ? completionPerTokenValue : 0;
+        const promptPerMillion = promptPerToken * 1000000;
+        const completionPerMillion = completionPerToken * 1000000;
         return {
           id: model.id,
           name: model.name,
           description: model.description,
           contextLength: model.context_length,
           pricing: {
-            prompt: parseFloat(model.pricing.prompt) * 1000000, // Convert to per 1M tokens
-            completion: parseFloat(model.pricing.completion) * 1000000, // Convert to per 1M tokens
-            promptFormatted: `$${(parseFloat(model.pricing.prompt) * 1000000).toFixed(2)}`,
-            completionFormatted: `$${(parseFloat(model.pricing.completion) * 1000000).toFixed(2)}`,
+            prompt: promptPerMillion,
+            completion: completionPerMillion,
+            promptPerToken,
+            completionPerToken,
+            promptFormatted: `$${promptPerMillion.toFixed(2)}`,
+            completionFormatted: `$${completionPerMillion.toFixed(2)}`,
           },
           isTopProvider: !!model.top_provider,
           maxCompletionTokens: model.top_provider?.max_completion_tokens,

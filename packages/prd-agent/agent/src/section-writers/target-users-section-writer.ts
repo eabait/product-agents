@@ -75,7 +75,9 @@ export class TargetUsersSectionWriter extends BaseSectionWriter {
       temperature: DEFAULT_TEMPERATURE
     })
 
-    const mergedUsers = applyTargetUsersPlan(existingUsers, plan)
+    const normalizedPlan = normalizeTargetUsersPlan(plan)
+
+    const mergedUsers = applyTargetUsersPlan(existingUsers, normalizedPlan)
 
     const finalSection: TargetUsersSection = {
       targetUsers: mergedUsers
@@ -97,14 +99,14 @@ export class TargetUsersSectionWriter extends BaseSectionWriter {
       name: this.getSectionName(),
       content: finalSection,
       confidence: confidenceAssessment,
-      metadata: {
+      metadata: this.composeMetadata({
         target_users_count: finalSection.targetUsers.length,
         validation_issues: validation.issues,
         source_analyzers: ['contextAnalysis'],
-        plan_mode: plan.mode,
-        operations_applied: plan.operations?.length ?? 0,
-        proposed_users: plan.proposedUsers?.length ?? 0
-      },
+        plan_mode: normalizedPlan.mode,
+        operations_applied: normalizedPlan.operations.length,
+        proposed_users: normalizedPlan.proposedUsers.length
+      }),
       shouldRegenerate: true
     }
   }
@@ -154,7 +156,8 @@ export class TargetUsersSectionWriter extends BaseSectionWriter {
   }
 }
 
-type TargetUsersPlan = z.infer<typeof TargetUsersSectionPlanSchema>
+type TargetUsersPlanInput = z.input<typeof TargetUsersSectionPlanSchema>
+type TargetUsersPlan = z.output<typeof TargetUsersSectionPlanSchema>
 
 const sanitizeUsers = (users: any[]): string[] =>
   users
@@ -181,13 +184,27 @@ const findUserIndex = (users: string[], reference?: string): number => {
   return users.findIndex(user => user.trim().toLowerCase() === ref)
 }
 
+const normalizeTargetUsersPlan = (plan: TargetUsersPlanInput): TargetUsersPlan => ({
+  mode: plan.mode ?? 'smart_merge',
+  operations: (plan.operations ?? []).map(operation => ({
+    action: operation.action ?? 'add',
+    referenceUser: operation.referenceUser,
+    user: operation.user,
+    rationale: operation.rationale
+  })),
+  proposedUsers: plan.proposedUsers ?? [],
+  summary: plan.summary
+})
+
 export const applyTargetUsersPlan = (
   existingUsers: string[],
-  plan: TargetUsersPlan
+  plan: TargetUsersPlanInput
 ): string[] => {
+  const normalizedPlan = normalizeTargetUsersPlan(plan)
+
   let workingUsers = sanitizeUsers(existingUsers)
 
-  for (const operation of plan.operations ?? []) {
+  for (const operation of normalizedPlan.operations ?? []) {
     const action = operation.action ?? 'add'
     const reference = operation.referenceUser ?? operation.user
     const index = findUserIndex(workingUsers, reference)
@@ -219,9 +236,9 @@ export const applyTargetUsersPlan = (
     }
   }
 
-  const sanitizedProposed = sanitizeUsers(plan.proposedUsers ?? [])
+  const sanitizedProposed = sanitizeUsers(normalizedPlan.proposedUsers ?? [])
 
-  if (plan.mode === 'replace') {
+  if (normalizedPlan.mode === 'replace') {
     workingUsers = sanitizedProposed.length > 0 ? sanitizedProposed : workingUsers
   } else {
     for (const user of sanitizedProposed) {

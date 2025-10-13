@@ -93,10 +93,10 @@ export class SectionDetectionAnalyzer extends BaseAnalyzer {
             contentSpecificity: 'low'
           }
         },
-        metadata: {
+        metadata: this.composeMetadata({
           sections_count: fallbackSections.length,
           used_fallback: true
-        }
+        })
       }
     }
 
@@ -107,11 +107,11 @@ export class SectionDetectionAnalyzer extends BaseAnalyzer {
         reasoning: normalizeReasoning(result.reasoning)
       },
       confidence: confidenceAssessment,
-      metadata: {
+      metadata: this.composeMetadata({
         sections_count: result.affectedSections.length,
         ai_confidence: result.confidence,
         used_fallback: false
-      }
+      })
     }
   }
 }

@@ -63,11 +63,11 @@ export class ClarificationAnalyzer extends BaseAnalyzer {
       name: 'clarification',
       data: result,
       confidence: confidenceAssessment,
-      metadata: {
+      metadata: this.composeMetadata({
         missing_critical_count: result.missingCritical.length,
         missing_helpful_count: result.questions.length,
         original_ai_confidence: rawResult.confidence
-      }
+      })
     }
   }
 }

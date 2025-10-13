@@ -1,6 +1,95 @@
 import { createOpenRouter } from '@openrouter/ai-sdk-provider'
 import { generateObject, generateText, streamText, streamObject } from 'ai'
 import { z } from 'zod'
+import { GenerationUsage } from '@product-agents/agent-core'
+
+// ---- Pricing & helpers ----
+type ModelPrice = { inputPerMTok: number; outputPerMTok: number }
+const MILLION = 1_000_000
+
+// Key by the *served* model string from the header, e.g. "anthropic/claude-3-5-sonnet"
+const PRICING: Record<string, ModelPrice> = {
+  'anthropic/claude-3-5-sonnet': { inputPerMTok: 3.0, outputPerMTok: 15.0 },
+  'anthropic/claude-3-7-sonnet': { inputPerMTok: 3.0, outputPerMTok: 15.0 },
+  'anthropic/claude-3-haiku': { inputPerMTok: 0.25, outputPerMTok: 1.25 },
+  'anthropic/claude-3-opus': { inputPerMTok: 15.0, outputPerMTok: 75.0 },
+  'mistralai/mistral-large': { inputPerMTok: 2.0, outputPerMTok: 6.0 },
+  'mistralai/mistral-large-2407': { inputPerMTok: 2.0, outputPerMTok: 6.0 },
+  'mistralai/mistral-large-2411': { inputPerMTok: 2.0, outputPerMTok: 6.0 },
+  'openai/gpt-3.5-turbo': { inputPerMTok: 0.5, outputPerMTok: 1.5 },
+  'openai/gpt-3.5-turbo-0613': { inputPerMTok: 1.0, outputPerMTok: 2.0 },
+  'openai/gpt-3.5-turbo-16k': { inputPerMTok: 3.0, outputPerMTok: 4.0 },
+  'openai/gpt-4': { inputPerMTok: 30.0, outputPerMTok: 60.0 },
+  'openai/gpt-4-0314': { inputPerMTok: 30.0, outputPerMTok: 60.0 },
+  'openai/gpt-4-turbo': { inputPerMTok: 10.0, outputPerMTok: 30.0 },
+  'openai/gpt-4-turbo-preview': { inputPerMTok: 10.0, outputPerMTok: 30.0 },
+  'openai/gpt-4-1106-preview': { inputPerMTok: 10.0, outputPerMTok: 30.0 },
+  'openai/gpt-4o': { inputPerMTok: 2.5, outputPerMTok: 10.0 },
+  'openai/gpt-4o-2024-05-13': { inputPerMTok: 5.0, outputPerMTok: 15.0 },
+  'openai/gpt-4o-2024-08-06': { inputPerMTok: 2.5, outputPerMTok: 10.0 },
+  'openai/gpt-4o-2024-11-20': { inputPerMTok: 2.5, outputPerMTok: 10.0 },
+  'openai/gpt-4o-mini': { inputPerMTok: 0.15, outputPerMTok: 0.6 },
+  'openai/gpt-4o-mini-2024-07-18': { inputPerMTok: 0.15, outputPerMTok: 0.6 },
+  'openai/gpt-4o-audio-preview': { inputPerMTok: 2.5, outputPerMTok: 10.0 },
+  'openai/gpt-4o:extended': { inputPerMTok: 6.0, outputPerMTok: 18.0 },
+  'openai/gpt-4.1': { inputPerMTok: 2.0, outputPerMTok: 8.0 },
+  'openai/gpt-4.1-mini': { inputPerMTok: 0.4, outputPerMTok: 1.6 },
+  'openai/gpt-4.1-nano': { inputPerMTok: 0.1, outputPerMTok: 0.4 }
+}
+
+function computeCost(promptTokens: number | undefined, completionTokens: number | undefined, p: ModelPrice) {
+  const promptCost = promptTokens !== undefined ? (promptTokens / MILLION) * p.inputPerMTok : undefined
+  const completionCost = completionTokens !== undefined ? (completionTokens / MILLION) * p.outputPerMTok : undefined
+  const totalCost =
+    promptCost !== undefined || completionCost !== undefined
+      ? (promptCost ?? 0) + (completionCost ?? 0)
+      : undefined
+  return { promptCost, completionCost, totalCost, currency: 'USD' as const }
+}
+
+function extractOpenRouterIdentity(resp?: Response) {
+  if (!resp) return { model: undefined as string | undefined, provider: undefined as string | undefined }
+
+  const getHeader = (headerName: string): string | undefined => {
+    const headers: any = (resp as any).headers
+    if (!headers) return undefined
+    if (typeof headers.get === 'function') {
+      const value = headers.get(headerName)
+      return value ?? headers.get(headerName.toLowerCase()) ?? undefined
+    }
+    if (headers instanceof Map) {
+      const value = headers.get(headerName) ?? headers.get(headerName.toLowerCase())
+      return typeof value === 'string' ? value : undefined
+    }
+    if (Array.isArray(headers)) {
+      const item = headers.find(
+        (entry: any) => Array.isArray(entry) && typeof entry[0] === 'string' && entry[0].toLowerCase() === headerName.toLowerCase()
+      )
+      return item && typeof item[1] === 'string' ? item[1] : undefined
+    }
+    if (typeof headers === 'object') {
+      const key = Object.keys(headers).find((k) => k.toLowerCase() === headerName.toLowerCase())
+      const value = key ? headers[key] : undefined
+      return typeof value === 'string' ? value : undefined
+    }
+    return undefined
+  }
+
+  const model = getHeader('x-openrouter-model') || undefined        // e.g. "anthropic/claude-3-5-sonnet"
+  const provider = getHeader('x-openrouter-provider') || (model ? model.split('/')[0] : undefined)
+  return { model, provider }
+}
+
+async function resolveMaybePromise<T>(value: T | Promise<T> | undefined): Promise<T | undefined> {
+  if (value && typeof (value as any).then === 'function') {
+    try {
+      return await value
+    } catch {
+      return undefined
+    }
+  }
+  return value
+}
 
 /**
  * OpenRouter client for AI model interactions with streaming support
@@ -8,6 +97,7 @@ import { z } from 'zod'
  */
 export class OpenRouterClient {
   private provider: any
+  private lastUsage?: GenerationUsage
   
   /**
    * Initialize OpenRouter client
@@ -16,12 +106,137 @@ export class OpenRouterClient {
   constructor(apiKey?: string) {
     this.provider = createOpenRouter({
       apiKey: apiKey || process.env.OPENROUTER_API_KEY || '',
-      baseURL: 'https://openrouter.ai/api/v1'
+      baseURL: 'https://openrouter.ai/api/v1',
+      compatibility: 'strict',
+      extraBody: {
+        usage: {
+          include: true
+        }
+      }
     })
   }
   
   getModel(modelName: string = 'anthropic/claude-3-5-sonnet') {
     return this.provider(modelName)
+  }
+
+  getLastUsage(): GenerationUsage | undefined {
+    if (!this.lastUsage) {
+      return undefined
+    }
+    return { ...this.lastUsage }
+  }
+
+  private resetUsage(): void {
+    this.lastUsage = undefined
+  }
+
+  private captureUsage(requestedModel: string, usage: any, resp?: Response, providerMetadata?: any): void {
+    if (!usage) { this.lastUsage = undefined; return }
+
+    const promptTokens = this.coerceNumber(
+      usage.promptTokens ?? usage.prompt_tokens ?? usage.inputTokens ?? usage.input_tokens ?? usage.inputTextTokens ?? usage.input_text_tokens
+    )
+
+    const completionTokens = this.coerceNumber(
+      usage.completionTokens ?? usage.completion_tokens ?? usage.outputTokens ?? usage.output_tokens ?? usage.outputTextTokens ?? usage.output_text_tokens
+    )
+
+    let totalTokens = this.coerceNumber(
+      usage.totalTokens ?? usage.total_tokens ?? usage.tokens ?? usage.token_count
+    )
+    if (totalTokens === undefined) {
+      if (promptTokens !== undefined || completionTokens !== undefined) {
+        totalTokens = (promptTokens ?? 0) + (completionTokens ?? 0)
+      }
+    }
+
+    // Identify the actual served model/provider from OpenRouter headers; fall back to usage.model/requestedModel
+    const { model: servedModelHdr, provider: servedProviderHdr } = extractOpenRouterIdentity(resp)
+    const servedModel = servedModelHdr ?? (typeof usage.model === 'string' ? usage.model : requestedModel)
+    const servedProvider = servedProviderHdr ?? (servedModel ? servedModel.split('/')[0] : undefined)
+
+    // Compute cost from our pricing table (OpenRouter does not return prices in usage)
+    const price = servedModel ? PRICING[servedModel] : undefined
+    const cost = price ? computeCost(promptTokens, completionTokens, price) : undefined
+
+    // Keep your providerMetadata fallback (optional)
+    const providerFromMetadata = this.extractProvider(providerMetadata)
+    const currencyFromMeta =
+      this.normalizeCurrency(usage.currency) ??
+      this.normalizeCurrency(usage.cost?.currency) ??
+      this.normalizeCurrency(providerMetadata?.currency) ??
+      this.normalizeCurrency(providerMetadata?.usage?.currency) ??
+      this.normalizeCurrency(providerMetadata?.openrouter?.usage?.currency)
+
+    this.lastUsage = {
+      model: servedModel,
+      provider: servedProvider ?? providerFromMetadata,
+      promptTokens,
+      completionTokens,
+      totalTokens,
+      promptCost: cost?.promptCost,
+      completionCost: cost?.completionCost,
+      totalCost: cost?.totalCost,
+      currency: cost?.currency ?? currencyFromMeta ?? 'USD',
+      rawUsage: usage
+    }
+
+    this.logUsage(servedModel, this.lastUsage)
+  }
+
+  private coerceNumber(value: unknown): number | undefined {
+    if (typeof value === 'number') {
+      return Number.isFinite(value) ? value : undefined
+    }
+    if (typeof value === 'string') {
+      const parsed = parseFloat(value)
+      return Number.isFinite(parsed) ? parsed : undefined
+    }
+    return undefined
+  }
+
+  private normalizeCurrency(value: unknown): string | undefined {
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value.trim().toUpperCase()
+    }
+    return undefined
+  }
+
+  private extractProvider(metadata: any): string | undefined {
+    if (!metadata) return undefined
+    const provider =
+      metadata.provider ||
+      metadata.id ||
+      metadata.name ||
+      metadata?.openrouter?.provider ||
+      metadata?.openrouter?.id
+
+    return typeof provider === 'string' ? provider : undefined
+  }
+
+  private logUsage(model: string | undefined, usage: GenerationUsage | undefined): void {
+    if (!usage) return
+
+    const promptCost = usage.promptCost
+    const completionCost = usage.completionCost
+    const totalCost =
+      usage.totalCost ??
+      (promptCost !== undefined || completionCost !== undefined
+        ? (promptCost ?? 0) + (completionCost ?? 0)
+        : undefined)
+
+    console.log('[OpenRouterUsage]', {
+      model,
+      provider: usage.provider,
+      promptTokens: usage.promptTokens ?? null,
+      completionTokens: usage.completionTokens ?? null,
+      totalTokens: usage.totalTokens ?? null,
+      promptCost: promptCost ?? null,
+      completionCost: completionCost ?? null,
+      totalCost: totalCost ?? null,
+      currency: usage.currency ?? 'USD'
+    })
   }
   
   async generateStructured<T>(params: {
@@ -32,16 +247,19 @@ export class OpenRouterClient {
     maxTokens?: number
     arrayFields?: string[] // Optional array fields for post-processing fallback
   }): Promise<T> {
+    this.resetUsage()
     try {
-      const { object } = await generateObject({
+      const response = await generateObject({
         model: this.getModel(params.model),
         schema: params.schema,
         prompt: params.prompt,
         temperature: params.temperature || 0.3,
         maxTokens: params.maxTokens || 8000
       })
-      
-      return object
+      const resp = await resolveMaybePromise<Response>((response as any)?.response)
+      const providerMetadata = await resolveMaybePromise<any>((response as any)?.providerMetadata)
+      this.captureUsage(params.model, response.usage, resp, providerMetadata)
+      return response.object
     } catch (error: any) {
       // Enhanced fallback handling for various response malformation issues
       const shouldAttemptFallback = error.message?.includes('validation') || 
@@ -55,8 +273,8 @@ export class OpenRouterClient {
         
         try {
           // Generate without schema validation to get raw response
-          const { text } = await generateText({
-            model: this.getModel(params.model),
+          const text = await this.generateText({
+            model: params.model,
             prompt: params.prompt + '\n\nCRITICAL: Return ONLY valid JSON. No XML tags, parameter names, or additional text.',
             temperature: params.temperature || 0.3,
             maxTokens: params.maxTokens || 8000
@@ -305,14 +523,19 @@ export class OpenRouterClient {
     temperature?: number
     maxTokens?: number
   }): Promise<string> {
-    const { text } = await generateText({
+    this.resetUsage()
+    const response = await generateText({
       model: this.getModel(params.model),
       prompt: params.prompt,
       temperature: params.temperature || 0.7,
       maxTokens: params.maxTokens || 2000
     })
+
+    const resp = await resolveMaybePromise<Response>((response as any)?.response)
+    const providerMetadata = await resolveMaybePromise<any>((response as any)?.providerMetadata)
+    this.captureUsage(params.model, response.usage, resp, providerMetadata)
     
-    return text
+    return response.text
   }
   
   async *streamText(params: {
@@ -320,15 +543,23 @@ export class OpenRouterClient {
     prompt: string
     temperature?: number
   }) {
-    const { textStream } = await streamText({
+    this.resetUsage()
+    const stream = await streamText({
       model: this.getModel(params.model),
       prompt: params.prompt,
       temperature: params.temperature || 0.7
     })
+
+    const respPromise = resolveMaybePromise<Response>((stream as any)?.response)
+    const usagePromise = resolveMaybePromise<any>((stream as any)?.usage)
+    const providerMetadataPromise = resolveMaybePromise<any>((stream as any)?.providerMetadata)
     
-    for await (const chunk of textStream) {
+    for await (const chunk of stream.textStream) {
       yield chunk
     }
+
+    const [usage, providerMetadata, resp] = await Promise.all([usagePromise, providerMetadataPromise, respPromise])
+    this.captureUsage(params.model, usage, resp, providerMetadata)
   }
 
   /**
@@ -355,16 +586,20 @@ export class OpenRouterClient {
     object: Partial<T> | T
   }> {
     try {
-      const { partialObjectStream, object: finalObject } = await streamObject({
+      this.resetUsage()
+      const stream = await streamObject({
         model: this.getModel(params.model),
         schema: params.schema,
         prompt: params.prompt,
         temperature: params.temperature || 0.3,
         maxTokens: params.maxTokens || 8000
       })
+      const respPromise = resolveMaybePromise<Response>((stream as any)?.response)
+      const usagePromise = resolveMaybePromise<any>((stream as any)?.usage)
+      const providerMetadataPromise = resolveMaybePromise<any>((stream as any)?.providerMetadata)
 
       // Stream partial objects as they arrive
-      for await (const partialObject of partialObjectStream) {
+      for await (const partialObject of stream.partialObjectStream) {
         const streamItem = {
           type: 'partial' as const,
           object: partialObject as Partial<T>
@@ -379,7 +614,10 @@ export class OpenRouterClient {
       }
 
       // Yield the final complete object
-      const finalResult = await finalObject
+      const finalResult = await stream.object
+      const [usage, providerMetadata, resp] = await Promise.all([usagePromise, providerMetadataPromise, respPromise])
+      this.captureUsage(params.model, usage, resp, providerMetadata)
+
       const finalItem = {
         type: 'complete' as const,
         object: finalResult

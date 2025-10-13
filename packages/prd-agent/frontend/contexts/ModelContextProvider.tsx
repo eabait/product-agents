@@ -13,6 +13,10 @@ interface Model {
   isRecommended?: boolean
   recommendedReason?: string
   pricing: {
+    prompt: number
+    completion: number
+    promptPerToken: number
+    completionPerToken: number
     promptFormatted: string
     completionFormatted: string
   }

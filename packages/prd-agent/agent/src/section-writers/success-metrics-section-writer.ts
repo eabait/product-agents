@@ -86,7 +86,9 @@ export class SuccessMetricsSectionWriter extends BaseSectionWriter {
       temperature: 0.25 // Lower temperature for consistent metrics
     })
 
-    const mergedMetrics = applySuccessMetricsPlan(existingMetrics, plan)
+    const normalizedPlan = normalizeSuccessMetricsPlan(plan)
+
+    const mergedMetrics = applySuccessMetricsPlan(existingMetrics, normalizedPlan)
 
     const finalSection: SuccessMetricsSection = {
       successMetrics: mergedMetrics
@@ -108,14 +110,14 @@ export class SuccessMetricsSectionWriter extends BaseSectionWriter {
       name: this.getSectionName(),
       content: finalSection,
       confidence: confidenceAssessment,
-      metadata: {
+      metadata: this.composeMetadata({
         success_metrics_count: finalSection.successMetrics.length,
         validation_issues: validation.issues,
         source_analyzers: ['contextAnalysis'],
-        plan_mode: plan.mode,
-        operations_applied: plan.operations?.length ?? 0,
-        proposed_metrics: plan.proposedMetrics?.length ?? 0
-      },
+        plan_mode: normalizedPlan.mode,
+        operations_applied: normalizedPlan.operations.length,
+        proposed_metrics: normalizedPlan.proposedMetrics.length
+      }),
       shouldRegenerate: true
     }
   }
@@ -129,30 +131,17 @@ export class SuccessMetricsSectionWriter extends BaseSectionWriter {
 
     if (Array.isArray(existingSection)) {
       return existingSection
-        .map(this.sanitizeMetric)
-        .filter((metric): metric is NonNullable<ReturnType<typeof this.sanitizeMetric>> => Boolean(metric))
+        .map(sanitizeMetric)
+        .filter((metric: SuccessMetric | null): metric is SuccessMetric => Boolean(metric))
     }
 
     if (existingSection.successMetrics && Array.isArray(existingSection.successMetrics)) {
       return existingSection.successMetrics
-        .map(this.sanitizeMetric)
-        .filter((metric): metric is NonNullable<ReturnType<typeof this.sanitizeMetric>> => Boolean(metric))
+        .map(sanitizeMetric)
+        .filter((metric: SuccessMetric | null): metric is SuccessMetric => Boolean(metric))
     }
 
     return []
-  }
-
-  private sanitizeMetric = (metric: any) => {
-    if (!metric) return null
-    const cleaned = {
-      metric: typeof metric.metric === 'string' ? metric.metric.trim() : '',
-      target: typeof metric.target === 'string' ? metric.target.trim() : '',
-      timeline: typeof metric.timeline === 'string' ? metric.timeline.trim() : ''
-    }
-    if (cleaned.metric && cleaned.target && cleaned.timeline) {
-      return cleaned
-    }
-    return null
   }
 
   private validateSuccessMetricsSection(section: SuccessMetricsSection): { isValid: boolean; issues: string[] } {
@@ -201,7 +190,8 @@ export class SuccessMetricsSectionWriter extends BaseSectionWriter {
 }
 
 type SuccessMetric = SuccessMetricsSection['successMetrics'][number]
-type SuccessMetricsPlan = z.infer<typeof SuccessMetricsPlanSchema>
+type SuccessMetricsPlanInput = z.input<typeof SuccessMetricsPlanSchema>
+type SuccessMetricsPlan = z.output<typeof SuccessMetricsPlanSchema>
 
 const sanitizeMetric = (metric: SuccessMetric | null | undefined): SuccessMetric | null => {
   if (!metric) return null
@@ -240,21 +230,37 @@ const findMetricIndex = (metrics: SuccessMetric[], name?: string): number => {
   return metrics.findIndex(m => m.metric.trim().toLowerCase() === targetName)
 }
 
+const normalizeSuccessMetricsPlan = (plan: SuccessMetricsPlanInput): SuccessMetricsPlan => ({
+  mode: plan.mode ?? 'smart_merge',
+  operations: (plan.operations ?? []).map(operation => ({
+    action: operation.action ?? 'add',
+    referenceMetric: operation.referenceMetric,
+    metric: operation.metric,
+    target: operation.target,
+    timeline: operation.timeline,
+    rationale: operation.rationale
+  })),
+  proposedMetrics: plan.proposedMetrics ?? [],
+  summary: plan.summary
+})
+
 export const applySuccessMetricsPlan = (
   existingMetrics: SuccessMetric[],
-  plan: SuccessMetricsPlan
+  plan: SuccessMetricsPlanInput
 ): SuccessMetric[] => {
+  const normalizedPlan = normalizeSuccessMetricsPlan(plan)
+
   const sanitizedExisting = existingMetrics
     .map(sanitizeMetric)
     .filter((metric): metric is SuccessMetric => metric !== null)
 
-  const sanitizedProposed = plan.proposedMetrics
+  const sanitizedProposed = normalizedPlan.proposedMetrics
     ?.map(sanitizeMetric)
     .filter((metric): metric is SuccessMetric => metric !== null) ?? []
 
   let workingMetrics = [...sanitizedExisting]
 
-  for (const operation of plan.operations ?? []) {
+  for (const operation of normalizedPlan.operations ?? []) {
     const action = operation.action ?? 'add'
     const reference = operation.referenceMetric ?? operation.metric
     const index = findMetricIndex(workingMetrics, reference)
@@ -305,7 +311,7 @@ export const applySuccessMetricsPlan = (
     }
   }
 
-  if (plan.mode === 'replace') {
+  if (normalizedPlan.mode === 'replace') {
     workingMetrics = sanitizedProposed.length > 0 ? sanitizedProposed : workingMetrics
   } else {
     for (const metric of sanitizedProposed) {

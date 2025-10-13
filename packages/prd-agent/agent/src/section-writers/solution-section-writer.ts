@@ -80,12 +80,12 @@ export class SolutionSectionWriter extends BaseSectionWriter {
       name: this.getSectionName(),
       content: rawSection as SolutionSection,
       confidence: confidenceAssessment,
-      metadata: {
+      metadata: this.composeMetadata({
         solution_overview_length: rawSection.solutionOverview.length,
         approach_length: rawSection.approach.length,
         validation_issues: validation.issues,
         source_analyzers: ['contextAnalysis']
-      },
+      }),
       shouldRegenerate: true
     }
   }

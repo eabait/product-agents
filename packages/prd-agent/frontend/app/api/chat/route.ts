@@ -245,7 +245,13 @@ export async function POST(request: NextRequest) {
         questionsCount: data.questions.length
       });
       
-      return NextResponse.json({ content, clarificationQuestions: data.questions });
+      return NextResponse.json({
+        content,
+        clarificationQuestions: data.questions,
+        usage: data.usage || null,
+        confidence: data.confidence || null,
+        model: settings?.model ?? null
+      });
     }
 
     // Handle PRD edit responses (which return the PRD object directly)
@@ -261,7 +267,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ 
         content: data, // Return the entire PRD object
         isStructured: true, // Flag to indicate this is structured data
-        isPRD: true // Additional flag for PRD identification
+        isPRD: true, // Additional flag for PRD identification
+        usage: data.metadata?.usage || null,
+        metadata: data.metadata || null,
+        model: settings?.model ?? null
       });
     }
 
@@ -305,9 +314,13 @@ export async function POST(request: NextRequest) {
       contentPreview: typeof content === 'string' ? content.substring(0, 100) : JSON.stringify(content).substring(0, 100)
     });
     
+    const usageSummary = data?.metadata?.usage || data?.usage || null;
     const finalResponse = { 
       content,
-      isStructured // Include flag so frontend can handle properly
+      isStructured, // Include flag so frontend can handle properly
+      usage: usageSummary,
+      metadata: data?.metadata ?? null,
+      model: settings?.model ?? null
     };
     
     console.log(`[${requestId}] Final API response being sent to frontend:`, {

@@ -113,12 +113,12 @@ export class ContextAnalyzer extends BaseAnalyzer {
       name: 'contextAnalysis',
       data: normalized,
       confidence: confidenceAssessment,
-      metadata: {
+      metadata: this.composeMetadata({
         themes_count: normalized.themes.length,
         functional_requirements_count: normalized.requirements.functional.length,
         technical_requirements_count: normalized.requirements.technical.length,
         constraints_count: normalized.constraints.length
-      }
+      })
     }
   }
 }

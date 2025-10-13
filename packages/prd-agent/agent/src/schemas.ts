@@ -17,6 +17,37 @@ export const ConfidenceAssessmentSchema = z.object({
 })
 export type ConfidenceAssessment = z.infer<typeof ConfidenceAssessmentSchema>
 
+const UsageMetricsSchema = z.object({
+  promptTokens: z.number().optional(),
+  completionTokens: z.number().optional(),
+  totalTokens: z.number().optional(),
+  promptCost: z.number().optional(),
+  completionCost: z.number().optional(),
+  totalCost: z.number().optional(),
+  currency: z.string().optional(),
+  model: z.string().optional(),
+  provider: z.string().optional(),
+  rawUsage: z.record(z.any()).optional()
+})
+
+const UsageEntrySchema = z.object({
+  name: z.string(),
+  category: z.enum(['analyzer', 'section', 'orchestrator', 'clarification', 'other']),
+  usage: UsageMetricsSchema,
+  metadata: z.record(z.any()).optional()
+})
+
+const UsageSummarySchema = z.object({
+  promptTokens: z.number().optional(),
+  completionTokens: z.number().optional(),
+  totalTokens: z.number().optional(),
+  promptCost: z.number().optional(),
+  completionCost: z.number().optional(),
+  totalCost: z.number().optional(),
+  currency: z.string().optional(),
+  entries: z.array(UsageEntrySchema)
+})
+
 // Modern PRD Schema focused on section-based structure
 export const PRDSchema = z.object({
   // Core sections (simplified 5-section structure)
@@ -115,7 +146,8 @@ export const SectionRoutingResponseSchema = z.object({
     confidence_assessments: z.record(ConfidenceAssessmentSchema),
     overall_confidence: ConfidenceAssessmentSchema,
     processing_time_ms: z.number(),
-    should_regenerate_prd: z.boolean()
+    should_regenerate_prd: z.boolean(),
+    usage: UsageSummarySchema.optional()
   }),
   validation: z.object({
     is_valid: z.boolean(),
@@ -131,7 +163,8 @@ export const ClarificationResultSchema = z.object({
   needsClarification: z.boolean(),
   confidence: ConfidenceAssessmentSchema,
   missingCritical: z.array(z.string()),
-  questions: z.array(z.string())
+  questions: z.array(z.string()),
+  usage: UsageSummarySchema.optional()
 })
 
 export type ClarificationResult = z.infer<typeof ClarificationResultSchema>

@@ -151,6 +151,26 @@ export abstract class BaseSectionWriter {
     }
   }
 
+  protected composeMetadata(baseMetadata?: Record<string, any>): Record<string, any> | undefined {
+    const usage = this.client.getLastUsage()
+    if (!usage) {
+      return baseMetadata
+    }
+
+    const existingUsage =
+      baseMetadata && typeof baseMetadata.usage === 'object'
+        ? baseMetadata.usage
+        : undefined
+
+    return {
+      ...(baseMetadata || {}),
+      usage: {
+        ...(existingUsage || {}),
+        ...usage
+      }
+    }
+  }
+
   /**
    * Validates that the generated section content meets quality standards
    */
