@@ -98,26 +98,26 @@ OpenRouter is the configurability engine. The frontend hits OpenRouter’s model
 flowchart LR
     subgraph V0[Iteration 0 – Initial Architecture]
         A0[User Prompt] --> B0[Orchestrator<br/>Fixed sequence]
-        B0 --> C0[Analyzers<br/>(Personas, Pain Points, Research)]
+        B0 --> C0[Analyzers<br/>Personas / Pain Points / Research]
         C0 --> D0[Change Worker<br/>Apply patches to PRD template]
         D0 --> E0[Monolithic PRD Output]
     end
 
     subgraph V1[Iteration 1 – Context Awareness]
-        A1[User Prompt + Inputs] --> B1[Clarification Analyzer<br/>(0–3 clarification loops)]
+        A1[User Prompt + Inputs] --> B1[Clarification Analyzer<br/>0–3 clarification loops]
         B1 --> C1[Context Analyzer<br/>Structured summaries via Zod]
         C1 --> D1[Shared Analysis Bundle]
-        D1 --> E1[Section Writers v1<br/>(Regenerate full PRD)]
+        D1 --> E1[Section Writers v1<br/>Regenerate full PRD]
         E1 --> F1[Assembled PRD + Metadata]
     end
 
     subgraph V2[Iteration 2 – UX-driven Agent]
-        A2[User Prompt / Edit Request] --> B2[Clarification Analyzer<br/>(loop until confident)]
-        A2 -.existing PRD.- C2[Editing Intent Classifier<br/>(Section detection)]
+        A2[User Prompt / Edit Request] --> B2[Clarification Analyzer<br/>Loop until confident]
+        A2 -.existing PRD.- C2[Editing Intent Classifier<br/>Section detection]
         B2 --> D2[Context Analyzer]
         D2 --> E2[Shared Analysis Bundle]
         C2 --> G2[Targeted Section List]
-        E2 --> H2[Section Writers v2<br/>(Target Users, Solution, Features, Metrics, Constraints)]
+        E2 --> H2[Section Writers v2<br/>Target Users / Solution / Features / Metrics / Constraints]
         G2 --> H2
         H2 --> I2[Section Outputs + Confidence]
         I2 --> J2[Orchestrator Merge]
