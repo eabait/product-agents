@@ -121,7 +121,7 @@ flowchart LR
         G2 --> H2
         H2 --> I2[Section Outputs + Confidence]
         I2 --> J2[Orchestrator Merge]
-        J2 --> K2[Final PRD + Audit Trail<br/>(usage, costs, context snapshot)]
+        J2 --> K2[Final PRD + Audit Trail<br/>Usage / Costs / Context Snapshot]
     end
 
     V0 -->|"Pain points discovered"| V1
