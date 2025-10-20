@@ -184,7 +184,7 @@ Planned explorations:
 5. **UX and orchestration must co-evolve.** One cannot be downstream of the other.
 
 ---
-
+```mermaid
 graph TD
 
     %% Failure Nodes
@@ -212,7 +212,7 @@ graph TD
     C --> G --> P3
     D --> H --> P4
     D --> I --> P4
-
+```
 ---
 
 ## References
