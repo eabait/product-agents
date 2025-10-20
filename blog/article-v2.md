@@ -1,15 +1,10 @@
 # Building a PRD Agent: Iterating on Orchestration, Context, and UX
 
-Modern AI products don’t fail only because of weak prompts or shallow orchestration. They also fail because of **UX blind spots**: hidden context, opaque latency, “walls of text,” and no clear affordances for what the system can do. When AI has to think, users must still *understand* what is happening. That realization turned this project—from a narrow agentic experiment—into a larger exploration: **What does it take to build a useful, transparent, artifact-producing AI agent that people can trust?**
+Many challenges in AI products don’t originate only from weak prompting or orchestration gaps. A recurring pattern appears at the **UX layer**: hidden context, unclear system capabilities, opaque wait times, and large undifferentiated text outputs. I first ran into these issues while using ChatGPT to draft and maintain PRDs for my own work — reusing variations of the same prompt, manually managing context, and repeatedly tweaking outputs to keep them aligned. The workflow “worked,” but it felt labor-intensive and brittle.
 
-This post documents that journey through three major themes:  
-1. **Orchestration patterns** to manage complexity  
-2. **Context engineering** to reduce hallucinations and rework  
-3. **UX principles** that make agent behavior visible, legible, and controllable
+That experience led to a broader question: **What would it take for an agent to produce and maintain a complex artifact like a PRD without so much manual prompting, context oversight, and guesswork?** And more specifically, how would changes in agent architecture and UX design influence the usability and predictability of such a system?
 
-The domain was a Product Requirements Document (PRD) agent, but the lessons apply to **any multi-step, long-running, artifact-generating AI workflow**.
-
-Nothing here is production-validated yet. This is a **lab notebook for Staff-plus AI builders** who care about orchestration *and* UX, not just model calls.
+This write-up documents the technical and UX explorations behind building a PRD-focused agent — not as a product, but as a laboratory. The domain is narrow on purpose: PRDs require structure, iteration, memory, and precision, making them a useful testbed for studying **orchestration patterns, context engineering, and agent UX**. Although the work remains experimental, the lessons seem relevant to **any multi-step, artifact-producing AI workflow**.
 
 ---
 
@@ -20,10 +15,9 @@ Nothing here is production-validated yet. This is a **lab notebook for Staff-plu
 - [Iteration 2 – UX-Driven Agenting](#iteration-2--ux-driven-agenting)
   - [Key UX Principles and Screens](#key-ux-principles-and-screens)
   - [Architectural Shifts Backing the UX](#architectural-shifts-backing-the-ux)
+  - [Agent UX Principles (Working Draft)](#agent-ux-principles-working-draft)
 - [Creation vs. Editing](#creation-vs-editing)
-- [Custom UI Components](#custom-ui-components)
-- [Platform Foundations and Routing](#platform-foundations-and-routing)
-- [Orchestration Gaps and Next Steps](#orchestration-gaps-and-next-steps)
+- [Conclusion](#conclusion)
 - [Working Hypotheses](#working-hypotheses)
 - [References](#references)
 
@@ -31,187 +25,185 @@ Nothing here is production-validated yet. This is a **lab notebook for Staff-plu
 
 ## Audience and Stack
 
-- **Audience:** Staff-level AI engineers, architects, and product builders designing multi-step or artifact-producing AI systems.
+- **Audience:** AI engineers, architects, product designers, and UX practitioners working on multi-step or long-running agent systems.
 - **Stack:** TypeScript monorepo, Vercel AI SDK, Zod schemas, Next.js frontend, OpenRouter integration.
-- **Foundational influences:**  
+- **Influences:**  
   Anthropic on orchestration and context engineering,<sup>[1](https://www.anthropic.com/engineering/building-effective-agents), [2](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents)</sup>  
   Breunig on context failures and curation,<sup>[3](https://www.dbreunig.com/2025/06/22/how-contexts-fail-and-how-to-fix-them.html), [4](https://www.dbreunig.com/2025/06/26/how-to-fix-your-context.html)</sup>  
-  Luke Wroblewski on AI UX pitfalls,<sup>[5](https://lukew.com/ff/entry.asp?2107), [6](https://lukew.com/ff/entry.asp?2113)</sup>  
-  Jakob Nielsen on “Slow AI” and wait-time UX.<sup>[7](https://jakobnielsenphd.substack.com/p/slow-ai)</sup>
+  Luke Wroblewski on UX patterns in AI,<sup>[5](https://lukew.com/ff/entry.asp?2107), [6](https://lukew.com/ff/entry.asp?2113)</sup>  
+  Jakob Nielsen on wait-time transparency and “Slow AI.”<sup>[7](https://jakobnielsenphd.substack.com/p/slow-ai)</sup>
 
 ---
 
 ## Iteration 0 – Initial Architecture
 
-The first implementation followed a simple pattern:
+The first version used a straightforward pattern:
 
-1. Orchestrator (fixed sequence)
-2. Analyzers (personas, pain points, research)
-3. Writer (generates a full PRD from a template)
+1. Orchestrator in a fixed order  
+2. Analyzer subagents  
+3. A single PRD writer
 
-This worked for trivial drafts, but three structural problems emerged:
+This produced basic outputs, but surfaced early issues:
 
-- **Context blindness** — too much raw input passed forward
-- **Rigid rewriting** — any change triggered a full-document regeneration
-- **Opaque UX** — UI acted like a spinner-covered black box, the exact problem Luke Wroblewski highlights: *users don’t know what the system knows, used, or is doing.*<sup>[5](https://lukew.com/ff/entry.asp?2107)</sup>
+- **All context flowed forward** → expensive and harder to reason about  
+- **Any change regenerated the full document** → wasteful and slow  
+- **UI hid system behavior** → users waited behind a spinner, with no visibility
 
-The architecture needed discipline, and the UX needed transparency.
+These UX and architecture issues were entangled, not separate.
+
+```mermaid
+flowchart LR
+    subgraph V0[Iteration 0 – Initial Architecture]
+        A0[User Prompt] --> B0[Orchestrator<br/>Fixed sequence]
+        B0 --> C0[Analyzers<br/>Personas / Pain Points / Research]
+        C0 --> D0[Change Worker<br/>Apply patches to PRD template]
+        D0 --> E0[Monolithic PRD Output]
+    end
+```
 
 ---
 
 ## Iteration 1 – Context Awareness
 
-Guided by Anthropic and Breunig, I restructured the agent to **plan cognition** and **curate context** instead of dumping text.
+Applying ideas from Anthropic and Breunig, the agent evolved toward **planned cognition and curated context**:
 
-**Key changes**
-- A **clarification phase** before drafting
-- **Zod-validated structured summaries** stored in a Shared Analysis Bundle
-- **Separated creation vs. editing context**
-- **Controlled context flow** between subagents
+- Added a clarification phase  
+- Introduced Zod-validated structured summaries  
+- Split **creation context vs. editing context**  
+- Restricted context propagation
 
-This stabilized grounding and reduced hallucinations, but editing was still inefficient—and the UX still created unnecessary uncertainty.
+These adjustments improved grounding and editability, but UX limitations remained — especially around transparency and control.
+
+```mermaid
+flowchart LR
+    subgraph V1[Iteration 1 – Context Awareness]
+        A1[User Prompt + Inputs] --> B1[Clarification Analyzer<br/>0–3 clarification loops]
+        B1 --> C1[Context Analyzer<br/>Structured summaries via Zod]
+        C1 --> D1[Shared Analysis Bundle]
+        D1 --> E1[Section Writers v1<br/>Regenerate full PRD]
+        E1 --> F1[Assembled PRD + Metadata]
+    end
+```
 
 ---
 
 ## Iteration 2 – UX-Driven Agenting
 
-The breakthrough came when I treated UX not as output decoration, but as **part of the agent system architecture**. Wroblewski identifies three recurring UI failures in AI products—lack of **context awareness**, **capability awareness**, and **readability**.<sup>[5](https://lukew.com/ff/entry.asp?2107), [6](https://lukew.com/ff/entry.asp?2113)</sup> Nielsen adds a fourth: **wait-time opacity in “Slow AI.”**<sup>[7](https://jakobnielsenphd.substack.com/p/slow-ai)</sup>
+At this point, the work shifted toward **system legibility**. Wroblewski highlights recurring UX gaps in AI around **context awareness, capability awareness, and readability**,<sup>[5](https://lukew.com/ff/entry.asp?2107)</sup> and Nielsen emphasizes transparency around wait time for “Slow AI.”<sup>[7](https://jakobnielsenphd.substack.com/p/slow-ai)</sup>
 
-So v2 directly targeted those four UX failure modes.
+These insights suggested that UX requirements should shape orchestration decisions, not just react to them.
+
+```mermaid
+flowchart LR
+    subgraph V2[Iteration 2 – UX-driven Agent]
+        A2[User Prompt / Edit Request] --> B2[Clarification Analyzer<br/>Loop until confident]
+        A2 -.existing PRD.- C2[Editing Intent Classifier<br/>Section detection]
+        B2 --> D2[Context Analyzer]
+        D2 --> E2[Shared Analysis Bundle]
+        C2 --> G2[Targeted Section List]
+        E2 --> H2[Section Writers v2<br/>Target Users / Solution / Features / Metrics / Constraints]
+        G2 --> H2
+        H2 --> I2[Section Outputs + Confidence]
+        I2 --> J2[Orchestrator Merge]
+        J2 --> K2[Final PRD + Audit Trail<br/>Usage / Costs / Context Snapshot]
+    end
+```
 
 ### Key UX Principles and Screens
 
-**1. Visible Capabilities & Transparency via Streaming (to address “Slow AI”)**  
-Pre-shown affordances help users understand what the agent can do before they type. Once the user starts prompting, long-running orchestration steps stream to the UI using AI SDK + Next.js, reducing user anxiety.
+**1. Visible Capabilities + Streaming (addressing “Slow AI”)**
 
 ![Streaming agent steps UI](Starter-and-Clarification.gif)  
-*Pre-shown affordances. Real-time streaming reveals each orchestration step, preventing “black-box waiting” and aligning with Nielsen’s Slow AI guidance.*
+*Starter affordances clarify what the agent can do. Streaming exposes long-running steps to reduce ambiguity.*
 
-**2. Context Awareness and Control**  
-The UI exposes which messages and documents will be passed as context, and allows pin/remove actions.
+**2. Context Awareness and Control**
 
 ![Context inspector UI](context-management.gif)  
-*Explicit context curation prevents invisible hallucination sources and matches Wroblewski’s “context awareness” principle.*
+*Users can inspect, pin, or exclude context items before generation.*
 
-**3. Structured PRD Rendering (no walls of text)**  
-PRDs render as structured sections with field controls, metadata, and inline comments.
+**3. Structured Output Instead of “Walls of Text”**
 
 ![Structured PRD renderer](PRD-form.gif)  
-*Replacing undifferentiated blobs with structured components solves the “wall of text” UX failure.* 
+*Structured components allow partial edits and reduce cognitive load.*
 
 **4. Inspectability and Control (Configuration Drawer)**
 
-![Configuration drawer UI](Configuration.gif)  
-*Users can inspect or override model, temperature, and analyzer settings without leaving the flow.*
+![Configuration drawer UI](Configuration.gif)
 
-**5. Surgical Editing, Not Full Regeneration**
+**5. Localized Updates (Section-level Editing)**
 
-![Section-level editing UI](PRD-Edition.gif)  
-*Only the affected section regenerates—reducing cost, latency, and regression risk.*
+![Section-level editing UI](PRD-Edition.gif)
 
 **6. Cost Visibility**
 
-![Token cost meter UI](context-and-cost.png)  
-*Token and cost transparency enables responsible iteration.*
+![Token cost meter UI](context-and-cost.png)
 
 ### Architectural Shifts Backing the UX
-These UX goals required the agent architecture to change:
 
-- Replaced monolithic writer → **section writers**
-- Added **editing intent classifier**
-- Added **orchestrator hooks for intermediate artifacts**
-- Added **audit logs and metadata history**
+The UI work only “clicked” once the agent runtime supported it. Every visible affordance required a corresponding architectural move:
 
-**UX and architecture now evolved together**—not as separate layers.
+| UX Need | Architecture Change | How It Works in Code |
+|---|---|---|
+| Localized edits | Section-level writers | `packages/prd-agent/agent/src/prd-orchestrator-agent.ts` maintains dedicated writers (Target Users, Solution, Features, Metrics, Constraints) so the orchestrator can regenerate only the affected sections. The editing classifier routes user intents (“update personas”) to the right writer instead of rebuilding the entire PRD. |
+| Explainability | Orchestrator hooks for intermediate artifacts | The orchestrator emits progress events and returns analyzer payloads before final assembly. These hooks drive the status stream (`worker_start`, `worker_complete`) that the frontend renders as visible steps, making the agent’s cognition legible. |
+| Streaming transparency | Event-based UI updates | Progress callbacks stream over Server-Sent Events, letting the frontend update the timeline and status indicators as each subagent completes—no more opaque spinner while the model works. |
+| Inspectable context | Shared analysis bundle + context registry | Analyzer outputs are cached in a shared bundle and merged with the user-maintained context registry (`packages/prd-agent/frontend/lib/context-storage.ts`). That bundle powers the context inspector UI where users can pin, mute, or delete items before the writers consume them. |
+| Repeatability | Audit logs and metadata | Every run captures usage metrics, cost estimates, and section-level metadata. The frontend replays that audit trail so users can trace what changed, which model handled it, and how many tokens it cost. |
+
+Together these shifts align the system’s internal representations with what the UI promises—when the interface says “only this section will change” or “here’s the context you’re about to send,” the architecture makes that statement true.
+
+---
+
+### Agent UX Principles (Working Draft)
+
+> These exploratory principles emerged while iterating on the agent — not as final conclusions, but as patterns that *seemed to improve usability*:
+> 
+> 1. **Expose System Cognition** — When the agent thinks, show its phases (streaming, intermediate artifacts).  
+> 2. **Let Users Curate Context** — Treat context as a user-visible surface.  
+> 3. **Structure the Artifact** — Use sections and diffs, not monolithic text.  
+> 4. **Localize Change** — Architect so edits update only what changed.  
+> 5. **Make Capabilities Legible** — Provide affordances and visible configuration.  
+> 6. **Reduce Waiting Ambiguity** — If the system must be slow, it should not be silent.
 
 ---
 
 ## Creation vs. Editing
 
-This project now treats **creation** and **editing** as distinct workflows:
+There’s no toggle between “create” and “edit” in the UI. Instead, the orchestrator inspects the request—and the presence (or absence) of an existing PRD—to decide whether it should synthesize an entire document or focus on specific sections. That inference is handled by the same subagents we’ve already seen: the clarification analyzer checks if the agent has enough information to write anything, and the section-detection analyzer decides which slices of the artifact need attention.
 
-| Mode | Context | UX Priority | Behavior |
+| Detected Workflow | System Behavior | UX Goal | Typical UX Affordances |
 |---|---|---|---|
-| **Creation** | High-context synthesis | Transparency | Multi-step drafting |
-| **Editing** | Localized updates | Precision | Section-level regeneration |
+| Full PRD generation | Multi-step synthesis across every section | Transparency | Clarification loop (up to three passes), context preview, streaming timeline, cost meter |
+| Targeted update | Regenerate only the sections flagged by the analyzer | Precision | Section highlights, diff view, rollback controls, warnings when edits ripple into adjacent sections |
 
-This separation reduced errors and token waste, and made the workflow more legible for users.
+### How the Orchestrator Makes the Call
 
----
+- **Clarification acts as a gatekeeper:** When no prior PRD exists, the orchestrator will loop with the clarifier (up to three times) to gather personas, goals, and constraints before any section writers run. If the user supplies an existing PRD, the clarifier usually stands down because the grounding context is already available.
+- **Section detection scopes the work:** The `section-detection-analyzer` infers intent (“update the LATAM personas”) and hands the orchestrator a targeted section list. Only those section writers get invoked unless the analyzer indicates the request touches multiple areas.
+- **Shared analysis keeps context in sync:** Both scenarios reuse cached analyzer outputs whenever possible. A targeted update will draw from the existing analysis bundle and current PRD text instead of regenerating everything from scratch.
+- **Audit logs reflect the path taken:** When the orchestrator opts for full generation, the audit trail captures every section output and the clarifier’s reasoning. For targeted updates it records before/after diffs, confidence scores, and the sections that actually changed—mirroring what the UI presents.
 
-## Custom UI Components
-
-Generic chat UIs are insufficient for complex agent outputs. The system now includes:
-
-- PRD Section Renderer  
-- Context Inspector  
-- Configuration Drawer  
-- Cost Meter  
-- Inline diff / comments support  
-- Streaming progress panel
-
-Each UI element exists to *prevent a known AI UX failure*.
+So while users don’t flip between modes, the system has a working theory about which workflow they expect. Making that inference explicit—and surfacing it through the UX affordances—has reduced surprises when moving between drafting and maintenance tasks.
 
 ---
 
-## Platform Foundations and Routing
+## Conclusion
 
-Brief highlights:
+This exploration began with a practical frustration described in the introduction: using general-purpose agents like ChatGPT to create and maintain PRDs required repeating prompts, managing context by hand, and working through long, opaque generation cycles. The core friction wasn’t just in the model, but in the *UX around the workflow* — hidden state, unclear progress, and outputs that were difficult to iterate on.
 
-- Monorepo with shared packages (`agent-core`, `ui-components`, `openrouter-client`)
-- Capability-based model routing
-- Serverless-friendly orchestration primitives
+Building a domain-specific PRD agent became a way to investigate whether orchestration patterns, context design, and UX choices could reduce that friction. The current version now includes structured outputs, context controls, streaming transparency, and targeted editing — enough functionality that, for this specific use case, it feels like a more effective alternative to a general-purpose chat interface.
 
----
-
-## Orchestration Gaps and Next Steps
-
-Planned explorations:
-
-- Policy-based dynamic routing
-- Verification agents for consistency checks
-- Automatic context pruning heuristics
-- Broader UX testing with PMs and engineers
+The project is still in motion, and the outcomes are not final. But the journey so far suggests that **domain-specific UX and architecture — designed together, from the start — may meaningfully improve how people collaborate with AI on complex, evolving artifacts**. The next steps will likely focus on validating these ideas with real users, refining the orchestration, and testing additional mechanisms for consistency and context evolution.
 
 ---
 
 ## Working Hypotheses
 
-1. **Context is a user-facing product surface.** Expose it.  
-2. **Streaming is not cosmetic.** It is trust-preserving UX for “thinking systems.”  
-3. **Structured outputs outperform walls of text.**  
-4. **Creation and editing require different mental models.**  
-5. **UX and orchestration must co-evolve.** One cannot be downstream of the other.
-
----
-
-graph TD
-
-    %% Failure Nodes
-    A[UX Failure:<br/>Hidden Context]
-    B[UX Failure:<br/>Walls of Text]
-    C[UX Failure:<br/>Opaque Wait Times]
-    D[UX Failure:<br/>Unknown Capabilities]
-
-    %% Solution Nodes
-    E[Solution:<br/>Context Inspector]
-    F[Solution:<br/>Structured PRD Renderer]
-    G[Solution:<br/>Streaming UI]
-    H[Solution:<br/>Starter Examples]
-    I[Solution:<br/>Config Drawer + Visibility]
-
-    %% Principle Nodes
-    P1[Principle:<br/>Context as Product Surface]
-    P2[Principle:<br/>Readable Artifacts]
-    P3[Principle:<br/>Slow AI Transparency]
-    P4[Principle:<br/>Capability Awareness]
-
-    %% Edges (Failure -> Solution -> Principle)
-    A --> E --> P1
-    B --> F --> P2
-    C --> G --> P3
-    D --> H --> P4
-    D --> I --> P4
+1. **Context may need to be user-visible** for artifact-based agents  
+2. **Streaming may reduce wait-time anxiety** in multi-step reasoning  
+3. **Structured outputs may improve editability** vs. plain text  
+4. **Creation and editing may benefit from separation**  
+5. **UX and orchestration may need to co-evolve**
 
 ---
 
