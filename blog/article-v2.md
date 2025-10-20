@@ -187,6 +187,16 @@ So while users don’t flip between modes, the system has a working theory about
 
 ---
 
+## Working Hypotheses
+
+1. **Context is a user-facing product surface.** Expose it.  
+2. **Streaming is not cosmetic.** It is trust-preserving UX for “thinking systems.”  
+3. **Structured outputs outperform walls of text.**  
+4. **Creation and editing require different mental models.**  
+5. **UX and orchestration must co-evolve.** One cannot be downstream of the other.
+
+---
+
 ## Conclusion
 
 This exploration began with a practical frustration described in the introduction: using general-purpose agents like ChatGPT to create and maintain PRDs required repeating prompts, managing context by hand, and working through long, opaque generation cycles. The core friction wasn’t just in the model, but in the *UX around the workflow* — hidden state, unclear progress, and outputs that were difficult to iterate on.
@@ -194,16 +204,6 @@ This exploration began with a practical frustration described in the introductio
 Building a domain-specific PRD agent became a way to investigate whether orchestration patterns, context design, and UX choices could reduce that friction. The current version now includes structured outputs, context controls, streaming transparency, and targeted editing — enough functionality that, for this specific use case, it feels like a more effective alternative to a general-purpose chat interface.
 
 The project is still in motion, and the outcomes are not final. But the journey so far suggests that **domain-specific UX and architecture — designed together, from the start — may meaningfully improve how people collaborate with AI on complex, evolving artifacts**. The next steps will likely focus on validating these ideas with real users, refining the orchestration, and testing additional mechanisms for consistency and context evolution.
-
----
-
-## Working Hypotheses
-
-1. **Context may need to be user-visible** for artifact-based agents  
-2. **Streaming may reduce wait-time anxiety** in multi-step reasoning  
-3. **Structured outputs may improve editability** vs. plain text  
-4. **Creation and editing may benefit from separation**  
-5. **UX and orchestration may need to co-evolve**
 
 ---
 
