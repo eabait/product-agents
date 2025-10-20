@@ -6,6 +6,7 @@
  */
 
 import * as http from 'http'
+import { PassThrough } from 'stream'
 import { PRDOrchestratorAgent } from '../prd-orchestrator-agent'
 import {
   HTTP_STATUS,
@@ -59,6 +60,8 @@ jest.mock('../prd-orchestrator-agent', () => ({
   PRDOrchestratorAgent: mockPRDOrchestratorAgent
 }))
 
+let activeServer: http.Server | undefined
+
 // Mock the OpenRouterClient
 jest.mock('@product-agents/openrouter-client', () => ({
   OpenRouterClient: jest.fn().mockImplementation(() => ({}))
@@ -88,37 +91,97 @@ const makeRequest = (
   body: string
 }> => {
   return new Promise((resolve, reject) => {
-    const options: http.RequestOptions = {
-      hostname: 'localhost',
-      port: 3001,
-      path,
+    if (!activeServer) {
+      reject(new Error('Test server not initialized'))
+      return
+    }
+
+    const handler = activeServer.listeners('request')[0] as ((req: http.IncomingMessage, res: http.ServerResponse) => void) | undefined
+    if (!handler) {
+      reject(new Error('No request handler registered'))
+      return
+    }
+
+    let bodyBuffer: Buffer
+    if (data === undefined || data === null) {
+      bodyBuffer = Buffer.alloc(0)
+    } else if (Buffer.isBuffer(data)) {
+      bodyBuffer = data
+    } else if (typeof data === 'string') {
+      bodyBuffer = Buffer.from(data)
+    } else {
+      bodyBuffer = Buffer.from(JSON.stringify(data))
+    }
+    const requestStream = new PassThrough()
+    const req = Object.assign(requestStream, {
       method,
+      url: path,
       headers: {
-        'Content-Type': 'application/json',
+        'content-type': 'application/json',
         ...headers
       }
-    }
+    }) as unknown as http.IncomingMessage
 
-    const req = http.request(options, (res) => {
-      let body = ''
-      res.on('data', (chunk) => {
-        body += chunk
-      })
-      res.on('end', () => {
+    const responseHeaders: Record<string, string> = {}
+    let statusCode = 200
+    const chunks: Buffer[] = []
+
+    const res = {
+      get statusCode() {
+        return statusCode
+      },
+      set statusCode(value: number) {
+        statusCode = value
+      },
+      setHeader(name: string, value: string) {
+        responseHeaders[name.toLowerCase()] = value
+      },
+      getHeader(name: string) {
+        return responseHeaders[name.toLowerCase()]
+      },
+      write(chunk: any) {
+        if (chunk) {
+          const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk))
+          chunks.push(buffer)
+        }
+        return true
+      },
+      end(chunk?: any) {
+        if (chunk) {
+          this.write(chunk)
+        }
         resolve({
-          statusCode: res.statusCode || 0,
-          headers: res.headers as Record<string, string>,
-          body
+          statusCode,
+          headers: responseHeaders,
+          body: Buffer.concat(chunks).toString('utf8')
         })
+      },
+      writeHead(code: number, head?: Record<string, string>) {
+        statusCode = code
+        if (head) {
+          for (const [key, value] of Object.entries(head)) {
+            responseHeaders[key.toLowerCase()] = value
+          }
+        }
+      }
+    } as unknown as http.ServerResponse
+
+    requestStream.on('error', reject)
+
+    try {
+      const handlerResult = handler(req, res)
+      if (handlerResult && typeof (handlerResult as Promise<unknown>).catch === 'function') {
+        ;(handlerResult as Promise<unknown>).catch(reject)
+      }
+      process.nextTick(() => {
+        if (bodyBuffer.length > 0) {
+          requestStream.write(bodyBuffer)
+        }
+        requestStream.end()
       })
-    })
-
-    req.on('error', reject)
-
-    if (data) {
-      req.write(JSON.stringify(data))
+    } catch (error) {
+      reject(error)
     }
-    req.end()
   })
 }
 
@@ -128,7 +191,7 @@ describe('HTTP Server REST API', () => {
   beforeAll(async () => {
     // Set up environment for testing
     process.env.PRD_AGENT_HTTP_PORT = '3001'
-    process.env.PRD_AGENT_HTTP_HOST = 'localhost' 
+    process.env.PRD_AGENT_HTTP_HOST = '127.0.0.1'
     process.env.OPENROUTER_API_KEY = 'test-key'
     process.env.PRD_AGENT_MODEL = 'anthropic/claude-3-5-sonnet'
     
@@ -138,19 +201,15 @@ describe('HTTP Server REST API', () => {
     // Create a simple test server that mimics the real server behavior
     const { createTestServer } = await import('./test-server-factory.helper')
     server = createTestServer()
+    activeServer = server
     
-    // Start the test server
-    await new Promise<void>((resolve) => {
-      server.listen(3001, 'localhost', () => resolve())
-    })
   })
 
-  afterAll(async () => {
+  afterAll(() => {
     if (server) {
-      await new Promise<void>((resolve) => {
-        server.close(() => resolve())
-      })
+      server.removeAllListeners()
     }
+    activeServer = undefined
   })
 
   beforeEach(() => {
@@ -493,22 +552,7 @@ describe('HTTP Server REST API', () => {
     })
 
     test('should handle malformed JSON requests', async () => {
-      const response = await new Promise<{statusCode: number, body: string}>((resolve) => {
-        const req = http.request({
-          hostname: 'localhost',
-          port: 3001,
-          path: '/prd',
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' }
-        }, (res) => {
-          let body = ''
-          res.on('data', (chunk) => { body += chunk })
-          res.on('end', () => resolve({ statusCode: res.statusCode || 0, body }))
-        })
-        
-        req.write('{"invalid": json}') // Malformed JSON
-        req.end()
-      })
+      const response = await makeRequest('POST', '/prd', '{"invalid": json}')
       
       expect(response.statusCode).toBe(HTTP_STATUS.BAD_REQUEST)
       

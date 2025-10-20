@@ -107,6 +107,53 @@ const parseJsonBody = (req: http.IncomingMessage): Promise<any> => {
   })
 }
 
+const logEditedPrd = (label: string, payload: any) => {
+  try {
+    const snapshot = JSON.stringify(payload, null, 2)
+    console.log(`\n===== ${label} =====\n${snapshot}\n======================\n`)
+  } catch (error) {
+    console.warn(`Failed to serialize PRD payload for ${label}:`, error)
+  }
+}
+
+const logSectionUpdates = (label: string, payload: any) => {
+  if (!payload || typeof payload !== 'object') {
+    console.log(`\n===== ${label}: No section data =====`)
+    return
+  }
+
+  const sections = payload.sections || {}
+  const metadata = payload.metadata || {}
+  let affectedSections: string[] = Array.isArray(metadata.sections_updated)
+    ? metadata.sections_updated
+    : Array.isArray(payload.affectedSections)
+      ? payload.affectedSections
+      : []
+
+  if ((!affectedSections || affectedSections.length === 0) && sections && typeof sections === 'object') {
+    affectedSections = Object.keys(sections)
+  }
+
+  if (affectedSections.length === 0) {
+    console.log(`\n===== ${label}: No sections reported as updated =====`)
+    return
+  }
+
+  console.log(`\n===== ${label} (Sections: ${affectedSections.join(', ')}) =====`)
+
+  for (const sectionName of affectedSections) {
+    const sectionContent = sections[sectionName]
+    try {
+      const snapshot = JSON.stringify(sectionContent ?? null, null, 2)
+      console.log(`\n--- Section: ${sectionName} ---\n${snapshot}`)
+    } catch (error) {
+      console.warn(`Failed to serialize section "${sectionName}" for ${label}:`, error)
+    }
+  }
+
+  console.log('\n======================\n')
+}
+
 // SSE (Server-Sent Events) helper functions for streaming
 const setupSSEHeaders = (res: http.ServerResponse): void => {
   res.setHeader('Content-Type', 'text/event-stream')
@@ -267,10 +314,14 @@ const server = http.createServer(async (req, res) => {
         existingPRD,
         contextPayload
       })
+
+      logEditedPrd('PRD_EDIT_RESULT', result)
       
       res.statusCode = HTTP_STATUS.OK
       res.setHeader('Content-Type', 'application/json')
       res.end(JSON.stringify(result))
+      logSectionUpdates('PRD_SECTION_RESULT', result)
+      logSectionUpdates('PRD_SECTION_RESULT', result)
     } catch (e: any) {
       console.error('PRD edit error:', e)
       res.statusCode = HTTP_STATUS.INTERNAL_SERVER_ERROR
@@ -358,14 +409,21 @@ const server = http.createServer(async (req, res) => {
         targetSections: [sectionName]
       })
       
-      res.statusCode = HTTP_STATUS.OK
-      res.setHeader('Content-Type', 'application/json')
-      res.end(JSON.stringify({
+      const payload = {
         section: sectionName,
         content: result.sections[sectionName],
         metadata: result.metadata,
         validation: result.validation
-      }))
+      }
+
+      res.statusCode = HTTP_STATUS.OK
+      res.setHeader('Content-Type', 'application/json')
+      res.end(JSON.stringify(payload))
+
+      logSectionUpdates('PRD_SINGLE_SECTION_RESULT', {
+        sections: { [sectionName]: result.sections[sectionName] },
+        metadata: result.metadata
+      })
     } catch (e: any) {
       console.error(`Section ${sectionName} generation error:`, e)
       res.statusCode = HTTP_STATUS.INTERNAL_SERVER_ERROR
@@ -483,8 +541,11 @@ const server = http.createServer(async (req, res) => {
         existingPRD,
         contextPayload
       })
+
+      logEditedPrd('PRD_EDIT_STREAM_RESULT', result)
       
       sendSSEEvent(res, 'complete', result)
+      logSectionUpdates('PRD_EDIT_STREAM_SECTION_UPDATES', result)
       sendSSEClose(res)
     } catch (e: any) {
       console.error('Streaming PRD edit error:', e)
@@ -588,11 +649,16 @@ const server = http.createServer(async (req, res) => {
         targetSections: [sectionName]
       }, progressCallback)
       
-      sendSSEEvent(res, 'complete', {
+      const payload = {
         section: sectionName,
         content: result.sections[sectionName],
         metadata: result.metadata,
         validation: result.validation
+      }
+      sendSSEEvent(res, 'complete', payload)
+      logSectionUpdates('PRD_SINGLE_SECTION_STREAM_RESULT', {
+        sections: { [sectionName]: result.sections[sectionName] },
+        metadata: result.metadata
       })
       
       sendSSEClose(res)

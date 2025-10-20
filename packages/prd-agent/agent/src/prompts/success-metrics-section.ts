@@ -35,7 +35,7 @@ export function createSuccessMetricsSectionPrompt(input: SectionWriterInput, con
 
   lines.push(
     '## Instructions',
-    '- Provide 2-4 outcome metrics that signal whether the product meets its goals.',
+    '- Provide 3-6 outcome metrics that signal whether the product meets its goals.',
     '- Each metric must include a measurable target and a realistic timeline.',
     '- Balance user value and business impact; avoid vague activity metrics.',
     '- Reference existing metrics when updating or removing items.',

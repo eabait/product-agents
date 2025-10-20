@@ -42,6 +42,10 @@ export interface SuccessMetricsSection {
   }>
 }
 
+type SuccessMetric = SuccessMetricsSection['successMetrics'][number]
+type SuccessMetricsPlanInput = z.input<typeof SuccessMetricsPlanSchema>
+type SuccessMetricsPlan = z.output<typeof SuccessMetricsPlanSchema>
+
 export class SuccessMetricsSectionWriter extends BaseSectionWriter {
   constructor(settings: any) {
     super(settings)
@@ -88,10 +92,8 @@ export class SuccessMetricsSectionWriter extends BaseSectionWriter {
 
     const normalizedPlan = normalizeSuccessMetricsPlan(plan)
 
-    const mergedMetrics = applySuccessMetricsPlan(existingMetrics, normalizedPlan)
-
     const finalSection: SuccessMetricsSection = {
-      successMetrics: mergedMetrics
+      successMetrics: applySuccessMetricsPlan(existingMetrics, normalizedPlan)
     }
 
     const validation = this.validateSuccessMetricsSection(finalSection)
@@ -188,10 +190,6 @@ export class SuccessMetricsSectionWriter extends BaseSectionWriter {
     }
   }
 }
-
-type SuccessMetric = SuccessMetricsSection['successMetrics'][number]
-type SuccessMetricsPlanInput = z.input<typeof SuccessMetricsPlanSchema>
-type SuccessMetricsPlan = z.output<typeof SuccessMetricsPlanSchema>
 
 const sanitizeMetric = (metric: SuccessMetric | null | undefined): SuccessMetric | null => {
   if (!metric) return null

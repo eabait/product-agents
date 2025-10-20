@@ -132,36 +132,45 @@ export class MockOpenRouterClient {
 
   private determineWorkerFromPrompt(prompt: string): string {
     // Legacy analyzer patterns (still used)
-    if (prompt.includes('Analyze this product request for PRD generation completeness')) {
+    if (prompt.includes('Analyze this product request for PRD generation completeness') ||
+        prompt.includes('You evaluate whether the following product request has enough detail')) {
       return 'clarification'
     }
     if (prompt.includes('Analyze this product request and extract key themes') || 
-        prompt.includes('Analyze and extract:')) {
+        prompt.includes('Analyze and extract:') ||
+        prompt.includes('You analyze the product request and extract planning signals')) {
       return 'contextAnalysis'
     }
-    if (prompt.includes('You are analyzing a PRD edit request to determine which sections need to be updated')) {
+    if (prompt.includes('You are analyzing a PRD edit request to determine which sections need to be updated') ||
+        prompt.includes('You review an edit request and decide which PRD sections require updates.')) {
       return 'sectionDetection'
     }
     
     // New simplified section writer patterns
     if (prompt.includes('creating a concise Target Users section') ||
-        prompt.includes('Generate 2-4 specific target user personas')) {
+        prompt.includes('Generate 2-4 specific target user personas') ||
+        prompt.includes('You are a product manager updating the Target Users section')) {
       return 'targetUsers'
     }
     if (prompt.includes('creating a Solution Overview section') ||
-        prompt.includes('explains WHAT we\'re building and HOW')) {
+        prompt.includes('explains WHAT we\'re building and HOW') ||
+        prompt.includes('You are a product manager drafting the Solution Overview section')) {
       return 'solution'
     }
     if (prompt.includes('creating a Key Features section') ||
-        prompt.includes('Generate 3-7 key features')) {
+        prompt.includes('Generate 3-7 key features') ||
+        prompt.includes('You are a product manager updating the Key Features section')) {
       return 'keyFeatures'
     }
     if (prompt.includes('creating a Success Metrics section') ||
-        prompt.includes('Generate 2-4 key success metrics')) {
+        prompt.includes('Generate 2-4 key success metrics') ||
+        prompt.includes('Provide 3-6 outcome metrics') ||
+        prompt.includes('You are a product manager updating the Success Metrics section')) {
       return 'successMetrics'
     }
     if (prompt.includes('creating a Constraints section') ||
-        prompt.includes('Generate key constraints and assumptions')) {
+        prompt.includes('Generate key constraints and assumptions') ||
+        prompt.includes('You are a product manager refining the Constraints section')) {
       return 'constraints'
     }
     

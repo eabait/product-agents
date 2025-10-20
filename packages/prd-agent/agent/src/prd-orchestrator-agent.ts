@@ -334,7 +334,7 @@ export class PRDOrchestratorAgent extends BaseAgent {
     const affectedSections: SectionName[] = []
 
     // Simple keyword-based section detection for new structure
-    if (messageWords.some(word => ['user', 'persona', 'audience', 'customer', 'who'].includes(word))) {
+    if (messageWords.some(word => ['users', 'persona', 'audience', 'customer', 'who'].includes(word))) {
       affectedSections.push(SECTION_NAMES.TARGET_USERS)
     }
     if (messageWords.some(word => ['solution', 'approach', 'how', 'what', 'build'].includes(word))) {
@@ -353,7 +353,7 @@ export class PRDOrchestratorAgent extends BaseAgent {
     // Default to all sections if no specific matches
     return affectedSections.length > 0 
       ? affectedSections 
-      : ALL_SECTION_NAMES
+      : []
   }
 
   private getSectionProcessingOrder(sections: SectionName[]): SectionName[] {
@@ -376,6 +376,10 @@ export class PRDOrchestratorAgent extends BaseAgent {
         context: { existingPRD }
       })
       const combined = Array.from(new Set<SectionName>([...detected, ...heuristic]))
+
+      if (combined.length === 0) {
+        combined.push(...ALL_SECTION_NAMES)
+      }
 
       console.log(`SectionDetection: ${detected.join(', ') || 'none'} (confidence: ${detectionResult.data.confidence})`)
       if (heuristic.length > 0) {
@@ -405,12 +409,45 @@ export class PRDOrchestratorAgent extends BaseAgent {
       factors: {}
     }
 
+    const mergedSections = {
+      ...existingPRD.sections,
+      ...updatedSections
+    }
+
+    const updatedSolutionOverview =
+      typeof mergedSections.solution?.solutionOverview === 'string'
+        ? mergedSections.solution.solutionOverview
+        : existingPRD.solutionOverview
+
+    const updatedTargetUsers = Array.isArray(mergedSections.targetUsers?.targetUsers)
+      ? mergedSections.targetUsers.targetUsers
+      : existingPRD.targetUsers
+
+    const updatedGoals = Array.isArray(mergedSections.keyFeatures?.keyFeatures)
+      ? mergedSections.keyFeatures.keyFeatures
+      : existingPRD.goals
+
+    const updatedSuccessMetrics = Array.isArray(mergedSections.successMetrics?.successMetrics)
+      ? mergedSections.successMetrics.successMetrics
+      : existingPRD.successMetrics
+
+    const updatedConstraints = Array.isArray(mergedSections.constraints?.constraints)
+      ? mergedSections.constraints.constraints
+      : existingPRD.constraints
+
+    const updatedAssumptions = Array.isArray(mergedSections.constraints?.assumptions)
+      ? mergedSections.constraints.assumptions
+      : existingPRD.assumptions
+
     return {
       ...existingPRD,
-      sections: {
-        ...existingPRD.sections,
-        ...updatedSections
-      },
+      solutionOverview: updatedSolutionOverview,
+      targetUsers: updatedTargetUsers,
+      goals: updatedGoals,
+      successMetrics: updatedSuccessMetrics,
+      constraints: updatedConstraints,
+      assumptions: updatedAssumptions,
+      sections: mergedSections,
       metadata: buildPRDMetadata({
         sectionsGenerated,
         confidenceAssessments,
