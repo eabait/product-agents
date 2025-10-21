@@ -6,6 +6,8 @@ That experience led to a broader question: **What would it take for an agent to 
 
 This write-up documents the technical and UX explorations behind building a PRD-focused agent — not as a product, but as a laboratory. The domain is narrow on purpose: PRDs require structure, iteration, memory, and precision, making them a useful testbed for studying **orchestration patterns, context engineering, and agent UX**. Although the work remains experimental, the lessons seem relevant to **any multi-step, artifact-producing AI workflow**.
 
+Disclaimer: I'm using a very loose definition of agent. Agents are usually implemented inside a loop, with a reasoning LLM with access to tools that enables to changes their environment and some sort of short and long term memory . As a matter of fact, everything described here can be regarded as a Workflow based on the definition given by Anthropic <sup>[1](https://www.anthropic.com/engineering/building-effective-agents).
+
 ---
 
 ## Table of Contents
@@ -191,9 +193,9 @@ So while users don’t flip between modes, the system has a working theory about
 
 1. **Context is a user-facing product surface.** Expose it.  
 2. **Streaming is not cosmetic.** It is trust-preserving UX for “thinking systems.”  
-3. **Structured outputs outperform walls of text.**  
+3. **Agent-driven interactive UI and structured outputs outperform walls of text.**  
 4. **Creation and editing require different mental models.**  
-5. **UX and orchestration must co-evolve.** One cannot be downstream of the other.
+5. **UX and agent orchestration must co-evolve.** One cannot be downstream of the other.
 
 ---
 
