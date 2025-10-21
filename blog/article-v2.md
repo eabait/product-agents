@@ -1,14 +1,12 @@
 # Building a PRD Agentic Workflow: Iterating on Orchestration, Context, and UX
 
-Many challenges in AI products don’t originate only from weak prompting or orchestration gaps. A recurring pattern appears at the **UX layer**: hidden context, unclear system capabilities, opaque wait times, and large undifferentiated text outputs. I first ran into these issues while using ChatGPT to draft and maintain PRDs for my own work — reusing variations of the same prompt, manually managing context, and repeatedly tweaking outputs to keep them aligned. The workflow “worked,” but it felt labor-intensive and brittle.
+Many challenges in AI products may stem less from choosing frameworks or platforms and more from exploring how the user experience and the underlying architecture support each other. I first noticed this while using ChatGPT to draft and maintain PRDs—reusing prompt variants, manually curating context, and repeatedly tweaking outputs to keep them aligned. The workflow “worked,” but it felt labor‑intensive and brittle.
 
-That experience led to a broader question: **What would it take for an agent to produce and maintain a complex artifact like a PRD without so much manual prompting, context oversight, and guesswork?** And more specifically, how would changes in agent architecture and UX design influence the usability and predictability of such a system?
+That experience raised a question: **What might it take for an agentic workflow to produce and maintain a complex artifact like a PRD without so much manual prompting, context oversight, and guesswork?** And more specifically, how could changes in workflow architecture and UX design influence the usability and predictability of such a system?
 
-This write-up documents the technical and UX explorations behind building a PRD-focused agent — not as a product, but as a laboratory. The domain is narrow on purpose: PRDs require structure, iteration, memory, and precision, making them a useful testbed for studying **orchestration patterns, context engineering, and agent UX**. Although the work remains experimental, the lessons seem relevant to **any multi-step, artifact-producing AI workflow**.
+This write‑up shares early technical and UX explorations behind building a PRD‑focused agentic workflow—not as a product, but as a working lab to test ideas and hypotheses. The domain is narrow on purpose: PRDs require structure, iteration, memory, and precision, making them a useful testbed for studying **orchestration patterns, context engineering, and agent UX**. Although the work remains exploratory, the lessons may be relevant to **multi‑step, artifact‑producing AI workflows**.
 
-Terminology note: This project implements an agentic workflow (a workflow where LLMs and tools are orchestrated through predefined code paths). The UX and UI hypotheses in this write-up are intended to apply broadly to agentic systems and to AI-powered products more generally, not just this workflow.
-
-Disclaimer: I'm using a very loose definition of agent. Agents are usually implemented inside a loop, with a reasoning LLM with access to tools that enables to changes their environment and some sort of short and long term memory . As a matter of fact, everything described here can be regarded as a Workflow based on the definition given by Anthropic <sup>[1](https://www.anthropic.com/engineering/building-effective-agents).
+Terminology and scope: This is an agentic workflow—LLMs and tools orchestrated through predefined code paths—rather than an autonomous agent that directs its own tools. The hypotheses here are exploratory and intended to inform agents and AI‑powered products more broadly; this project is a working lab, not a shipped product.
 
 ---
 
@@ -130,8 +128,8 @@ What changed and why:
 
 **1. Visible Capabilities + Streaming (addressing “Slow AI”)**
 
-![Streaming agent steps UI](Starter-and-Clarification.gif)  
-*Starter affordances clarify what the agent can do. Streaming exposes long-running steps to reduce ambiguity.*
+![Streaming agentic workflow steps UI](Starter-and-Clarification.gif)  
+*Starter affordances clarify what the agentic workflow can do. Streaming exposes long-running steps to reduce ambiguity.*
 
 **2. Context Awareness and Control**
 
@@ -162,7 +160,7 @@ The UI work only “clicked” once the agent runtime supported it. Every visibl
 | UX Need | Architecture Change | How It Works in Code |
 |---|---|---|
 | Localized edits | Section-level writers | `packages/prd-agent/agent/src/prd-orchestrator-agent.ts` maintains dedicated writers (Target Users, Solution, Features, Metrics, Constraints) so the orchestrator can regenerate only the affected sections. The editing classifier routes user intents (“update personas”) to the right writer instead of rebuilding the entire PRD. |
-| Explainability | Orchestrator hooks for intermediate artifacts | The orchestrator emits progress events and returns analyzer payloads before final assembly. These hooks drive the status stream (`worker_start`, `worker_complete`) that the frontend renders as visible steps, making the agent’s cognition legible. |
+| Explainability | Orchestrator hooks for intermediate artifacts | The orchestrator emits progress events and returns analyzer payloads before final assembly. These hooks drive the status stream (`worker_start`, `worker_complete`) that the frontend renders as visible steps, making the workflow’s cognition legible. |
 | Streaming transparency | Event-based UI updates | Progress callbacks stream over Server-Sent Events, letting the frontend update the timeline and status indicators as each subagent completes—no more opaque spinner while the model works. |
 | Inspectable context | Shared analysis bundle + context registry | Analyzer outputs are cached in a shared bundle and merged with the user-maintained context registry (`packages/prd-agent/frontend/lib/context-storage.ts`). That bundle powers the context inspector UI where users can pin, mute, or delete items before the writers consume them. |
 | Repeatability | Audit logs and metadata | Every run captures usage metrics, cost estimates, and section-level metadata. The frontend replays that audit trail so users can trace what changed, which model handled it, and how many tokens it cost. |
