@@ -3,7 +3,6 @@
 A turborepo containing multiple AI agents for product development tasks. The most complete agent today is the PRD (Product Requirements Document) agent, which includes:
 - Backend HTTP API (TypeScript/Node)
 - Frontend (Next.js 14)
-- MCP server (Model Context Protocol)
 
 This README covers end-to-end local setup, environment configuration, required API keys, and run commands.
 
@@ -25,8 +24,7 @@ Included tooling (already managed via workspaces):
 packages/
 ├─ prd-agent/              # PRD agent (most complete)
 │  ├─ agent/               # Backend HTTP server
-│  ├─ frontend/            # Next.js UI and API routes (proxy to backend)
-│  └─ mcp-server/          # MCP server
+│  └─ frontend/            # Next.js UI and API routes (proxy to backend)
 ├─ shared/
 │  ├─ agent-core/          # Base agent classes/utilities
 │  ├─ model-compatibility/ # Model capability system
