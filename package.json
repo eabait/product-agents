@@ -5,13 +5,16 @@
   "private": true,
   "workspaces": [
     "packages/shared/*",
+    "packages/product-agent",
+    "packages/product-agent/*",
     "packages/prd-agent/agent",
     "packages/prd-agent/*",
     "packages/research-agent/*",
     "packages/persona-agent/*",
     "packages/story-mapper-agent/*",
     "packages/story-generator-agent/*",
-    "packages/story-refiner-agent/*"
+    "packages/story-refiner-agent/*",
+    "frontend/product-agent"
   ],
   "scripts": {
     "build": "turbo run build",

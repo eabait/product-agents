@@ -22,6 +22,7 @@
       "@product-agents/ui-components": ["./packages/shared/ui-components/src"],
       "@product-agents/agent-core": ["./packages/shared/agent-core/src"],
       "@product-agents/openrouter-client": ["./packages/shared/openrouter-client/src"],
+      "@product-agents/product-agent": ["./packages/product-agent/src"],
       "@product-agents/prd-agent": ["./packages/prd-agent/agent/src"],
       "@product-agents/research-agent": ["./packages/research-agent/agent/src"],
       "@product-agents/persona-agent": ["./packages/persona-agent/agent/src"],

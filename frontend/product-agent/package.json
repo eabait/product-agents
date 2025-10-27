@@ -1,0 +1,11 @@
+{
+  "name": "@product-agents/product-agent-frontend",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Placeholder workspace for the future product agent UI relocation",
+  "scripts": {
+    "build": "echo \"frontend/product-agent:build not yet implemented\"",
+    "dev": "echo \"frontend/product-agent:dev not yet implemented\"",
+    "test": "echo \"frontend/product-agent:test not yet implemented\""
+  }
+}
