@@ -17,6 +17,7 @@ Included tooling (already managed via workspaces):
 - Turbo (turborepo)
 - TypeScript
 - ESLint
+- npm workspaces (pnpm/yarn not required)
 
 
 ## Repository Structure
@@ -71,6 +72,8 @@ From repository root:
 ```
 npm install
 ```
+
+> ℹ️ This repo is configured for npm workspaces only. pnpm/yarn workspace commands are unsupported in this environment.
 
 
 ## Running Locally (recommended dev flow)
@@ -172,4 +175,3 @@ npm run build
 ## Notes
 - This repo uses capability filtering to show models compatible with the agent’s requirements (e.g., structured output, streaming).
 - Do not expose secrets to the browser. Prefer server-side env vars or per-request headers.
-

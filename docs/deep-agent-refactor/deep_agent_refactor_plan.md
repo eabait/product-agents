@@ -60,7 +60,7 @@
 
 ### Phase 0 – Audit & Scaffolding
 - Inventory current orchestrator flows, section writers, analyzers, shared utils, and frontend dependencies.
-- Update Turbo/pnpm workspaces and dependency graphs for the new `product-agent` package and frontend relocation.
+- Update Turbo/npm workspaces and dependency graphs for the new `product-agent` package and frontend relocation.
 - Define initial TypeScript interfaces in `packages/product-agent` aligning with `deep_agent_spec`.
 - Add a central `product-agent.config.ts` (or equivalent) capturing non-sensitive defaults, supporting environment-variable overrides, and exposing user-facing knobs for API overrides.
 - Exit Criteria: Documentation for interfaces, workspace configuration updated, no behavior change.
@@ -111,6 +111,6 @@
 
 ## Risks & Mitigations
 - **Coupling between packages:** Mitigate with explicit interfaces and shared types; enforce via lint rules.
-- **Build complexity:** Avoid new build targets; reuse Turbo pipelines and pnpm workspace configuration.
+- **Build complexity:** Avoid new build targets; reuse Turbo pipelines and existing npm workspace configuration.
 - **Feature regression:** Stage refactor behind feature flags and run dual-mode testing during Phase 1–3.
 - **Research subagent unknowns:** Capture design spikes before implementation; may require additional infrastructure (RAG, search).

@@ -2,7 +2,7 @@
 
 Phase 0 placeholder workspace for the deep product agent UI.
 
-- Added to npm/pnpm workspaces to reserve the namespace.
+- Added to npm workspaces to reserve the namespace.
 - Actual Next.js implementation will migrate here during Phase 3.
 - Scripts echo until the real app is relocated.
 
