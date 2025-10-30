@@ -67,7 +67,7 @@ const DEFAULT_STORAGE_ROOT = path.resolve(process.cwd(), 'data', 'runs')
 
 const DEFAULT_CONFIG: ProductAgentConfig = {
   runtime: {
-    defaultModel: 'anthropic/claude-3-7-sonnet',
+    defaultModel: 'qwen/qwen3-235b-a22b:free',
     defaultTemperature: 0.2,
     maxOutputTokens: 8000,
     allowStreaming: true,
@@ -114,11 +114,16 @@ const cloneConfig = (config: ProductAgentConfig): ProductAgentConfig => ({
   telemetry: { ...config.telemetry }
 })
 
-type PartialProductAgentConfig = Partial<ProductAgentConfig> & {
-  runtime?: Partial<ProductAgentConfig['runtime']> & { retry?: Partial<RetryPolicy> }
-  workspace?: Partial<ProductAgentConfig['workspace']>
-  skills?: Partial<ProductAgentConfig['skills']> & { enabledPacks?: SkillPackReference[] }
-  telemetry?: Partial<ProductAgentConfig['telemetry']>
+type RuntimeOverrides = Partial<ProductAgentConfig['runtime']> & { retry?: Partial<RetryPolicy> }
+type WorkspaceOverrides = Partial<ProductAgentConfig['workspace']>
+type SkillsOverrides = Partial<ProductAgentConfig['skills']> & { enabledPacks?: SkillPackReference[] }
+type TelemetryOverrides = Partial<ProductAgentConfig['telemetry']>
+
+type PartialProductAgentConfig = {
+  runtime?: RuntimeOverrides
+  workspace?: WorkspaceOverrides
+  skills?: SkillsOverrides
+  telemetry?: TelemetryOverrides
 }
 
 const mergeConfig = (
@@ -189,10 +194,10 @@ const parseSkillPackList = (value: string | undefined): SkillPackReference[] | u
 }
 
 const parseEnvOverrides = (env: NodeJS.ProcessEnv): PartialProductAgentConfig | undefined => {
-  const runtime: PartialProductAgentConfig['runtime'] = {}
-  const workspace: PartialProductAgentConfig['workspace'] = {}
-  const skills: PartialProductAgentConfig['skills'] = {}
-  const telemetry: PartialProductAgentConfig['telemetry'] = {}
+  const runtime: RuntimeOverrides = {}
+  const workspace: WorkspaceOverrides = {}
+  const skills: SkillsOverrides = {}
+  const telemetry: TelemetryOverrides = {}
 
   if (env.PRODUCT_AGENT_MODEL) {
     runtime.defaultModel = env.PRODUCT_AGENT_MODEL
@@ -262,20 +267,20 @@ const parseEnvOverrides = (env: NodeJS.ProcessEnv): PartialProductAgentConfig | 
   }
 
   const overrides: PartialProductAgentConfig = {}
-  if (Object.keys(runtime).length > 0) {
+  if (Object.keys(runtime as Record<string, unknown>).length > 0) {
     overrides.runtime = runtime
   }
-  if (Object.keys(workspace).length > 0) {
+  if (Object.keys(workspace as Record<string, unknown>).length > 0) {
     overrides.workspace = workspace
   }
-  if (Object.keys(skills).length > 0) {
+  if (Object.keys(skills as Record<string, unknown>).length > 0) {
     overrides.skills = skills
   }
-  if (Object.keys(telemetry).length > 0) {
+  if (Object.keys(telemetry as Record<string, unknown>).length > 0) {
     overrides.telemetry = telemetry
   }
 
-  return Object.keys(overrides).length > 0 ? overrides : undefined
+  return Object.keys(overrides as Record<string, unknown>).length > 0 ? overrides : undefined
 }
 
 export const loadProductAgentConfig = (options?: {

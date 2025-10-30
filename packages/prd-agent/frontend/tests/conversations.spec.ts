@@ -1,13 +1,14 @@
 import { test, expect } from '@playwright/test';
 
-test('creating a new conversation adds it to the list', async ({ page }) => {
+test('clicking a conversation starter populates the prompt', async ({ page }) => {
   await page.goto('/');
 
-  const conversationButtons = page.locator('button[title="New PRD"]');
-  await expect(conversationButtons.first()).toBeVisible();
-  const initialCount = await conversationButtons.count();
+  const starterText = 'Create a PRD for a mobile payment app';
+  const starterButton = page.getByRole('button', { name: starterText });
+  await expect(starterButton).toBeVisible();
 
-  await page.getByRole('button', { name: 'New' }).click();
+  await starterButton.click();
 
-  await expect(page.locator('button[title="New PRD"]')).toHaveCount(initialCount + 1);
+  const promptInput = page.getByPlaceholder('Type your requirements or prompt...');
+  await expect(promptInput).toHaveValue(starterText);
 });

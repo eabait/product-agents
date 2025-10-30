@@ -9,9 +9,12 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "lint": "eslint 'src/**/*.{ts,tsx}'",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "test": "node --test --loader ./tests/ts-loader.mjs tests/**/*.test.ts"
   },
   "dependencies": {
+    "@product-agents/agent-core": "*",
+    "@product-agents/prd-agent": "*",
     "zod": "^3.25.76"
   },
   "devDependencies": {

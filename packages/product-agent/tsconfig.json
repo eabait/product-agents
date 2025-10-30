@@ -9,7 +9,11 @@
     "declarationMap": true,
     "emitDeclarationOnly": true,
     "moduleResolution": "bundler",
-    "module": "esnext"
+    "module": "esnext",
+    "paths": {
+      "@product-agents/prd-agent": ["./src/types/external"],
+      "@product-agents/agent-core": ["./src/types/external"]
+    }
   },
   "include": ["src"]
 }

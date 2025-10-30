@@ -178,7 +178,7 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
     id: string,
     update:
       | Partial<{ providerOpen: boolean; modelOpen: boolean }>
-      | ((state: { providerOpen: boolean; modelOpen: boolean }) => { providerOpen: boolean; modelOpen: boolean })
+      | ((_state: { providerOpen: boolean; modelOpen: boolean }) => { providerOpen: boolean; modelOpen: boolean })
   ) => {
     setSubAgentDropdownState(prev => {
       const snapshot = getSubAgentDropdownState(id)
@@ -855,9 +855,9 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
                                   value={currentProvider || undefined}
                                   open={dropdownState.providerOpen}
                                   onOpenChange={(open) => {
-                                    setSubAgentDropdown(subAgent.id, (state) => ({
+                                    setSubAgentDropdown(subAgent.id, (currentState) => ({
                                       providerOpen: open,
-                                      modelOpen: open ? false : current.modelOpen
+                                      modelOpen: open ? false : currentState.modelOpen
                                     }))
                                   }}
                                   onValueChange={(value: string) => {
@@ -928,9 +928,9 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
                                       value={currentSettings.model}
                                       open={dropdownState.modelOpen}
                                       onOpenChange={(open) => {
-                                        setSubAgentDropdown(subAgent.id, (state) => ({
+                                        setSubAgentDropdown(subAgent.id, (currentState) => ({
                                           modelOpen: open,
-                                          providerOpen: open ? false : current.providerOpen
+                                          providerOpen: open ? false : currentState.providerOpen
                                         }))
                                       }}
                                       onValueChange={(value: string) => {

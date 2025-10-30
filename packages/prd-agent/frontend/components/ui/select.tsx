@@ -48,9 +48,24 @@ const Select = React.forwardRef<
     disabled?: boolean
     children: React.ReactNode
     className?: string
+    open?: boolean
+    // eslint-disable-next-line no-unused-vars
+    onOpenChange?: (open: boolean) => void
   }
->(({ value = "", onValueChange = () => {}, disabled = false, children, className }, ref) => {
-  const [open, setOpen] = React.useState(false)
+>(({ value = "", onValueChange = () => {}, disabled = false, children, className, open: openProp, onOpenChange }, ref) => {
+  const [internalOpen, setInternalOpen] = React.useState(false)
+  const isControlled = typeof openProp === 'boolean'
+  const open = isControlled ? (openProp as boolean) : internalOpen
+
+  const handleSetOpen = React.useCallback(
+    (next: boolean) => {
+      if (!isControlled) {
+        setInternalOpen(next)
+      }
+      onOpenChange?.(next)
+    },
+    [isControlled, onOpenChange]
+  )
   
   // Synchronously extract item labels from children
   const itemLabels = React.useMemo(() => {
@@ -80,7 +95,7 @@ const Select = React.forwardRef<
   }, [children])
 
   return (
-    <SelectContext.Provider value={{ value, onValueChange, open, setOpen, disabled, itemLabels }}>
+    <SelectContext.Provider value={{ value, onValueChange, open, setOpen: handleSetOpen, disabled, itemLabels }}>
       <div ref={ref} className={cn("relative", className)}>
         {children}
       </div>
