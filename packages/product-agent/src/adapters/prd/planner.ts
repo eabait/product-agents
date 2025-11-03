@@ -1,15 +1,27 @@
 import type { Planner, PlanDraft, PlanRefinementInput } from '../../contracts/planner'
 import type { PlanGraph } from '../../contracts/core'
 import type { RunContext } from '../../contracts/core'
+import type { SectionRoutingRequest, SectionName } from '@product-agents/prd-shared'
+import { ALL_SECTION_NAMES } from '@product-agents/prd-shared'
 
-export interface PrdPlanTask {
-  kind: 'legacy-prd-run'
-  description: string
-}
+export type PrdPlanTask =
+  | {
+      kind: 'clarification-check'
+    }
+  | {
+      kind: 'analyze-context'
+    }
+  | {
+      kind: 'write-section'
+      section: SectionName
+    }
+  | {
+      kind: 'assemble-prd'
+    }
 
-type PrdRunContext = RunContext
+type PrdRunContext = RunContext<SectionRoutingRequest>
 
-const PLAN_VERSION = '1.0.0'
+const PLAN_VERSION = '2.1.0'
 
 interface PrdPlannerOptions {
   clock?: () => Date
@@ -24,24 +36,69 @@ export class PrdPlanner implements Planner<PrdPlanTask> {
 
   async createPlan(context: PrdRunContext): Promise<PlanDraft<PrdPlanTask>> {
     const createdAt = this.clock()
+    const runInput = context.request.input
+
+    const requestedSections =
+      runInput?.targetSections && runInput.targetSections.length > 0
+        ? runInput.targetSections.filter((section): section is SectionName =>
+            (ALL_SECTION_NAMES as readonly string[]).includes(section)
+          )
+        : (ALL_SECTION_NAMES as SectionName[])
+
+    const sectionNodes: Record<string, ReturnType<PrdPlanner['createSectionNode']>> = {}
+    const sectionIds: string[] = []
+
+    requestedSections.forEach(section => {
+      const nodeId = `write-${section}`
+      sectionIds.push(nodeId)
+      sectionNodes[nodeId] = this.createSectionNode(section)
+    })
+
     const plan: PlanGraph<PrdPlanTask> = {
       id: `plan-${context.runId}`,
       artifactKind: context.request.artifactKind,
-      entryId: 'legacy-prd-run',
+      entryId: 'clarification-check',
       createdAt,
       version: PLAN_VERSION,
       nodes: {
-        'legacy-prd-run': {
-          id: 'legacy-prd-run',
-          label: 'Generate PRD using legacy orchestrator',
-          task: {
-            kind: 'legacy-prd-run',
-            description: 'Invokes the existing PRD orchestrator to build sections'
-          },
+        'clarification-check': {
+          id: 'clarification-check',
+          label: 'Check prompt for clarification needs',
+          task: { kind: 'clarification-check' },
           status: 'pending',
           dependsOn: [],
           metadata: {
-            skillId: 'prd.legacy-orchestrator'
+            skillId: 'prd.check-clarification'
+          }
+        },
+        'analyze-context': {
+          id: 'analyze-context',
+          label: 'Analyze product context',
+          task: { kind: 'analyze-context' },
+          status: 'pending',
+          dependsOn: ['clarification-check'],
+          metadata: {
+            skillId: 'prd.analyze-context'
+          }
+        },
+        ...sectionIds.reduce<Record<string, typeof sectionNodes[string]>>((acc, nodeId) => {
+          acc[nodeId] = {
+            ...sectionNodes[nodeId],
+            dependsOn: ['analyze-context']
+          }
+          return acc
+        }, {}),
+        'assemble-prd': {
+          id: 'assemble-prd',
+          label: 'Assemble Product Requirements Document',
+          task: { kind: 'assemble-prd' },
+          status: 'pending',
+          dependsOn:
+            sectionIds.length > 0
+              ? sectionIds
+              : ['analyze-context'],
+          metadata: {
+            skillId: 'prd.assemble-prd'
           }
         }
       },
@@ -53,6 +110,22 @@ export class PrdPlanner implements Planner<PrdPlanTask> {
     return {
       plan,
       context
+    }
+  }
+
+  private createSectionNode(section: SectionName) {
+    return {
+      id: `write-${section}`,
+      label: `Write ${section} section`,
+      task: {
+        kind: 'write-section',
+        section
+      } as PrdPlanTask,
+      status: 'pending' as const,
+      dependsOn: [],
+      metadata: {
+        skillId: `prd.write-${section}`
+      }
     }
   }
 

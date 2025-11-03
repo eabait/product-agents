@@ -26,6 +26,8 @@
     "@product-agents/openrouter-client": "*",
     "@product-agents/agent-core": "*",
     "@product-agents/model-compatibility": "*",
+    "@product-agents/prd-shared": "*",
+    "@product-agents/skills-prd": "*",
     "zod": "^3.22.0"
   },
   "devDependencies": {

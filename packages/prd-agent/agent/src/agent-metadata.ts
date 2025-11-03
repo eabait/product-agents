@@ -1,6 +1,6 @@
 import { AgentRuntimeSettings } from '@product-agents/agent-core'
 import { ModelCapability } from '@product-agents/model-compatibility'
-import { DEFAULT_AGENT_SETTINGS, CURRENT_PRD_VERSION } from './constants'
+import { DEFAULT_AGENT_SETTINGS, CURRENT_PRD_VERSION } from '@product-agents/prd-shared'
 
 export type SubAgentKind = 'orchestrator' | 'analyzer' | 'section-writer'
 

@@ -9,6 +9,7 @@
     "packages/product-agent/*",
     "packages/prd-agent/agent",
     "packages/prd-agent/*",
+    "packages/skills/*",
     "packages/research-agent/*",
     "packages/persona-agent/*",
     "packages/story-mapper-agent/*",

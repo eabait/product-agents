@@ -67,7 +67,7 @@ const DEFAULT_STORAGE_ROOT = path.resolve(process.cwd(), 'data', 'runs')
 
 const DEFAULT_CONFIG: ProductAgentConfig = {
   runtime: {
-    defaultModel: 'qwen/qwen3-235b-a22b:free',
+    defaultModel: 'qwen/qwen3-235b-a22b-2507', //'anthropic/claude-3.5-haiku',
     defaultTemperature: 0.2,
     maxOutputTokens: 8000,
     allowStreaming: true,

@@ -1,24 +1,22 @@
 import { BaseAgent, AgentSettings, AgentRuntimeSettings, UsageEntry, UsageCategory, summarizeUsage } from '@product-agents/agent-core'
 import { ModelCapability } from '@product-agents/model-compatibility'
-import { 
-  PRD, 
-  ClarificationResult, 
-  SectionRoutingRequest, 
+import {
+  PRD,
+  ClarificationResult,
+  SectionRoutingRequest,
   SectionRoutingResponse,
-  ConfidenceAssessment 
-} from './schemas'
-import { combineConfidenceAssessments } from './utils/confidence-assessment'
-import { 
+  ConfidenceAssessment,
+  combineConfidenceAssessments,
   SECTION_NAMES,
   ALL_SECTION_NAMES,
   type SectionName
-} from './constants'
+} from '@product-agents/prd-shared'
 import { buildPRDMetadata } from './utilities'
-import { 
+import {
   ClarificationAnalyzer,
   ContextAnalyzer,
   SectionDetectionAnalyzer
-} from './analyzers'
+} from '@product-agents/skills-prd'
 import {
   // New simplified section writers
   TargetUsersSectionWriter,
@@ -27,7 +25,7 @@ import {
   SuccessMetricsSectionWriter,
   ConstraintsSectionWriter,
   type SectionWriterInput
-} from './section-writers'
+} from '@product-agents/skills-prd'
 import { PRD_AGENT_METADATA, getDefaultSubAgentSettings, AgentMetadata } from './agent-metadata'
 
 // Progress event types for streaming

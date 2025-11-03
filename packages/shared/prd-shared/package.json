@@ -1,0 +1,12 @@
+{
+  "name": "@product-agents/prd-shared",
+  "version": "0.1.0",
+  "description": "Shared schemas, constants, and confidence utilities for PRD skills",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "dependencies": {
+    "zod": "^3.25.76"
+  }
+}

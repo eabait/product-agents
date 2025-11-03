@@ -3,8 +3,13 @@
  * Common patterns extracted from the codebase to reduce duplication
  */
 
-import { CURRENT_PRD_VERSION, HTTP_STATUS, ERROR_MESSAGES, FALLBACK_MAX_TOKENS } from './constants'
-import { ConfidenceAssessment } from './schemas'
+import {
+  CURRENT_PRD_VERSION,
+  HTTP_STATUS,
+  ERROR_MESSAGES,
+  FALLBACK_MAX_TOKENS,
+  ConfidenceAssessment
+} from '@product-agents/prd-shared'
 
 /**
  * Creates a standardized HTTP response

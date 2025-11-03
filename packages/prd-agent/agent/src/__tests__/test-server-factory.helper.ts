@@ -7,14 +7,14 @@
 
 import * as http from 'http'
 import { PRDOrchestratorAgent } from '../prd-orchestrator-agent'
-import { 
-  HTTP_STATUS, 
-  ERROR_MESSAGES, 
+import {
+  HTTP_STATUS,
+  ERROR_MESSAGES,
   ALL_SECTION_NAMES,
   DEFAULT_TEMPERATURE,
   DEFAULT_MAX_TOKENS,
   CURRENT_PRD_VERSION
-} from '../constants'
+} from '@product-agents/prd-shared'
 import { validateAgentSettings, safeParseJSON } from '../utilities'
 import { getDefaultSubAgentSettings } from '../agent-metadata'
 

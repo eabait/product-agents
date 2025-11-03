@@ -8,10 +8,74 @@ import { GraphController } from '../src/controller/graph-controller'
 import { FilesystemWorkspaceDAO } from '../src/workspace/filesystem-workspace-dao'
 import { createPrdPlanner, createPrdSkillRunner, createPrdVerifier } from '../src/adapters/prd/index'
 import { getDefaultProductAgentConfig } from '../src/config/product-agent.config'
+import type { SectionName } from '@product-agents/prd-shared'
 
 const fixedClock = () => new Date('2024-04-04T00:00:00.000Z')
 
-test('graph controller run produces PRD artifact', async () => {
+class IntegrationSectionWriter {
+  constructor(private readonly section: SectionName) {}
+
+  async writeSection() {
+    return {
+      name: this.section,
+      content: { generated: `integration-${this.section}` },
+      shouldRegenerate: true,
+      confidence: {
+        level: 'medium',
+        reasons: [`integration confidence for ${this.section}`]
+      },
+      metadata: {
+        validation_issues: []
+      }
+    }
+  }
+}
+
+class IntegrationClarificationAnalyzer {
+  async analyze() {
+    return {
+      name: 'clarification',
+      data: {
+        needsClarification: false,
+        confidence: {
+          level: 'high',
+          reasons: ['integration clarification stub']
+        },
+        missingCritical: [],
+        questions: []
+      },
+      confidence: {
+        level: 'high',
+        reasons: ['integration clarification stub']
+      },
+      metadata: {}
+    }
+  }
+}
+
+class IntegrationClarificationNeededAnalyzer {
+  async analyze() {
+    return {
+      name: 'clarification',
+      data: {
+        needsClarification: true,
+        confidence: {
+          level: 'low',
+          reasons: ['integration clarification needed']
+        },
+        missingCritical: ['Missing target audience details'],
+        questions: ['Who is the primary target user for this product?']
+      },
+      confidence: {
+        level: 'low',
+        reasons: ['integration clarification needed']
+      },
+      metadata: {}
+    }
+  }
+}
+
+test('graph controller run produces PRD artifact using extracted skills', async () => {
   const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'product-agent-int-'))
   const config = getDefaultProductAgentConfig()
   config.workspace.storageRoot = workspaceRoot
@@ -19,44 +83,32 @@ test('graph controller run produces PRD artifact', async () => {
 
   const planner = createPrdPlanner({ clock: fixedClock })
 
-  const stubResponse = {
-    sections: {
-      targetUsers: { targetUsers: ['Freelancers needing simple invoicing'] },
-      solution: { summary: 'Deliver a streamlined payments experience.' },
-      keyFeatures: { keyFeatures: ['One-tap checkout'] },
-      successMetrics: {
-        successMetrics: [
-          { metric: 'Activation rate', target: '60% within 30 days', timeline: '30 days' }
-        ]
-      },
-      constraints: {
-        constraints: ['Meet PCI compliance requirements'],
-        assumptions: ['Bank partners provide APIs']
-      }
-    },
-    metadata: {
-      sections_updated: ['solution'],
-      overall_confidence: { level: 'high' },
-      confidence_assessments: {},
-      should_regenerate_prd: false,
-      processing_time_ms: 123
-    },
-    validation: {
-      is_valid: true,
-      issues: [],
-      warnings: []
-    }
-  }
-
   const skillRunner = createPrdSkillRunner({
     clock: fixedClock,
-    createAgent: async settings => {
-      assert.equal(settings.model, config.runtime.defaultModel)
-      return {
-        async generateSectionsWithProgress() {
-          return stubResponse
+    factories: {
+      createClarificationAnalyzer: () => new IntegrationClarificationAnalyzer() as any,
+      createContextAnalyzer: () => ({
+        async analyze() {
+          return {
+            name: 'contextAnalysis',
+            data: {
+              themes: ['simplicity'],
+              requirements: {
+                functional: ['Issue invoices'],
+                technical: ['Multi-tenant architecture'],
+                user_experience: ['Delightful UI']
+              },
+              constraints: []
+            },
+            confidence: {
+              level: 'high',
+              reasons: ['integration analyzer stub']
+            },
+            metadata: {}
+          }
         }
-      }
+      }) as any,
+      createSectionWriter: section => new IntegrationSectionWriter(section) as any
     }
   })
 
@@ -78,12 +130,7 @@ test('graph controller run produces PRD artifact', async () => {
     artifactKind: 'prd' as const,
     input: {
       message: 'Create a PRD for a mobile payment application.',
-      context: {},
-      settings: {
-        model: config.runtime.defaultModel,
-        temperature: config.runtime.defaultTemperature,
-        maxTokens: config.runtime.maxOutputTokens
-      }
+      context: {}
     },
     createdBy: 'integration-test'
   }
@@ -93,14 +140,81 @@ test('graph controller run produces PRD artifact', async () => {
 
     assert.equal(summary.status, 'completed')
     assert.ok(summary.artifact, 'expected artifact in summary')
-    assert.equal(summary.artifact?.data.sections.solution.summary, stubResponse.sections.solution.summary)
-    assert.equal(summary.skillResults.length, 1)
+    assert.equal(summary.artifact?.id, 'artifact-run-prd-int')
+
+    const sections = summary.artifact?.data.sections ?? {}
+    assert.equal(sections.targetUsers.generated, 'integration-targetUsers')
+    assert.equal(sections.solution.generated, 'integration-solution')
+    assert.equal(summary.skillResults.length, 8)
 
     const artifacts = await workspace.listArtifacts(summary.runId)
     assert.equal(artifacts.length, 1)
     assert.equal(artifacts[0].id, summary.artifact?.id)
   } finally {
     await workspace.teardown('run-prd-int').catch(() => {})
+    await fs.rm(workspaceRoot, { recursive: true, force: true })
+  }
+})
+
+test('graph controller stops early when clarification is required', async () => {
+  const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'product-agent-int-clar-'))
+  const config = getDefaultProductAgentConfig()
+  config.workspace.storageRoot = workspaceRoot
+  config.workspace.persistArtifacts = true
+
+  const planner = createPrdPlanner({ clock: fixedClock })
+
+  const skillRunner = createPrdSkillRunner({
+    clock: fixedClock,
+    factories: {
+      createClarificationAnalyzer: () => new IntegrationClarificationNeededAnalyzer() as any,
+      createContextAnalyzer: () => ({
+        async analyze() {
+          throw new Error('context analyzer should not run when clarification is required')
+        }
+      }) as any,
+      createSectionWriter: section => new IntegrationSectionWriter(section) as any
+    }
+  })
+
+  const verifier = createPrdVerifier({ clock: fixedClock })
+  const workspace = new FilesystemWorkspaceDAO({ root: workspaceRoot, clock: fixedClock })
+
+  const controller = new GraphController(
+    {
+      planner,
+      skillRunner,
+      verifier: { primary: verifier },
+      workspace
+    },
+    config,
+    { clock: fixedClock, idFactory: () => 'run-prd-int-clar' }
+  )
+
+  const runRequest = {
+    artifactKind: 'prd' as const,
+    input: {
+      message: 'Draft a PRD.',
+      context: {}
+    },
+    createdBy: 'integration-test-clar'
+  }
+
+  try {
+    const summary = await controller.start({ request: runRequest })
+
+    assert.equal(summary.status, 'awaiting-input')
+    assert.equal(summary.skillResults.length, 1)
+    assert.ok(!summary.artifact)
+
+    const clarificationMetadata = summary.skillResults[0].metadata as any
+    assert.ok(clarificationMetadata?.clarification)
+    assert.equal(clarificationMetadata.clarification.needsClarification, true)
+    assert.deepEqual(clarificationMetadata.clarification.questions, [
+      'Who is the primary target user for this product?'
+    ])
+  } finally {
+    await workspace.teardown('run-prd-int-clar').catch(() => {})
     await fs.rm(workspaceRoot, { recursive: true, force: true })
   }
 })

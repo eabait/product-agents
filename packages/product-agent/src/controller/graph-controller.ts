@@ -15,6 +15,7 @@ import { resolveRunSettings } from '../config/product-agent.config'
 import type { Artifact, StepId } from '../contracts/core'
 import type { WorkspaceDAO, WorkspaceEvent, WorkspaceHandle } from '../contracts/workspace'
 import type { Planner } from '../contracts/planner'
+import type { ClarificationResult } from '@product-agents/prd-shared'
 
 type Clock = () => Date
 
@@ -34,6 +35,7 @@ interface ExecutionContext {
   artifact?: Artifact
   verification?: VerificationResult
   status: RunStatus
+  clarification?: ClarificationResult
 }
 
 const STATUS_RUNNING: RunStatus = 'running'
@@ -249,16 +251,21 @@ export class GraphController implements AgentController {
 
     try {
       await this.executePlan(executionContext, options)
-      if (!executionContext.artifact) {
-        throw new Error('Run completed without producing an artifact')
-      }
 
-      const verification = await this.runVerification(executionContext, options)
-      executionContext.verification = verification
-      executionContext.status = mapVerificationStatusToRunStatus(verification)
+      if (executionContext.status === STATUS_AWAITING_INPUT) {
+        // Skip verification; run awaits user clarification input
+      } else {
+        if (!executionContext.artifact) {
+          throw new Error('Run completed without producing an artifact')
+        }
 
-      if (executionContext.status === STATUS_FAILED) {
-        throw new Error('Verification failed')
+        const verification = await this.runVerification(executionContext, options)
+        executionContext.verification = verification
+        executionContext.status = mapVerificationStatusToRunStatus(verification)
+
+        if (executionContext.status === STATUS_FAILED) {
+          throw new Error('Verification failed')
+        }
       }
     } catch (error) {
       executionContext.status = STATUS_FAILED
@@ -412,6 +419,22 @@ export class GraphController implements AgentController {
             }
           })
         )
+
+        const metadata = result.metadata as Record<string, unknown> | undefined
+        const runStatusOverride =
+          typeof metadata?.runStatus === 'string' ? (metadata.runStatus as RunStatus) : undefined
+        if (runStatusOverride === STATUS_AWAITING_INPUT) {
+          context.status = STATUS_AWAITING_INPUT
+          const clarification = metadata?.clarification as ClarificationResult | undefined
+          if (clarification) {
+            context.clarification = clarification
+            if (!context.runContext.metadata) {
+              context.runContext.metadata = {}
+            }
+            context.runContext.metadata.clarification = clarification
+          }
+          break
+        }
       } catch (error) {
         emitEvent(
           options,

@@ -11,7 +11,7 @@ import {
   ALL_SECTION_NAMES,
   HTTP_STATUS,
   ERROR_MESSAGES
-} from './constants'
+} from '@product-agents/prd-shared'
 import {
   validateAgentSettings,
   buildPRDMetadata,

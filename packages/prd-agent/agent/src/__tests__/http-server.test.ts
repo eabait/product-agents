@@ -12,7 +12,7 @@ import {
   HTTP_STATUS,
   ERROR_MESSAGES,
   ALL_SECTION_NAMES
-} from '../constants'
+} from '@product-agents/prd-shared'
 
 // Mock the PRDOrchestratorAgent to avoid real AI calls
 const mockGenerateSections = jest.fn()

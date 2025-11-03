@@ -1,7 +1,7 @@
-import { PRD, PRDSchema } from './schemas'
+import { PRD } from '@product-agents/prd-shared'
 
 // Re-export post-processing utilities
-export * from './utils/post-process-structured-response'
+export { postProcessStructuredResponse, ensureArrayFields } from '@product-agents/skills-prd/utils'
 
 // Helper function to apply section updates to a PRD
 export function applyPatch(basePRD: PRD, sectionUpdates: any): PRD {
@@ -44,4 +44,3 @@ export function applyPatch(basePRD: PRD, sectionUpdates: any): PRD {
   
   return result
 }
-

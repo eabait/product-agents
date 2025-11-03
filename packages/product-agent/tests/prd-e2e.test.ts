@@ -87,7 +87,15 @@ e2eTest(
       }
 
       assert.notEqual(summary.status, 'failed', 'run should not fail')
-      assert.ok(summary.artifact, 'expected a PRD artifact in the summary')
+
+      if (summary.status === 'awaiting-input') {
+        assert.ok(clarificationEvents.length > 0, 'clarification metadata should be present when awaiting input')
+        const clarification = clarificationEvents[0] as { needsClarification?: boolean } | undefined
+        assert.ok(clarification?.needsClarification === true, 'run awaiting input should request clarification')
+      } else {
+        assert.equal(summary.status, 'completed', 'non-clarification runs should complete')
+        assert.ok(summary.artifact, 'expected a PRD artifact in the summary')
+      }
     } finally {
       await fs.rm(workspaceRoot, { recursive: true, force: true })
     }
