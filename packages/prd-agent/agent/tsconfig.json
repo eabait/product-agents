@@ -7,7 +7,13 @@
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
-    "noEmit": false
+    "noEmit": false,
+    "paths": {
+      "@product-agents/agent-core": ["../../product-agent/src/types/external.d.ts"],
+      "@product-agents/prd-shared": ["../../product-agent/src/types/external.d.ts"],
+      "@product-agents/skills-prd": ["../../product-agent/src/types/external.d.ts"],
+      "@product-agents/model-compatibility": ["../../product-agent/src/types/external.d.ts"]
+    }
   },
   "include": [
     "src/**/*"

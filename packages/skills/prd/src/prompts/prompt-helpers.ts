@@ -18,10 +18,31 @@ export interface AnalysisSummaryOptions {
   includeConstraints?: boolean
 }
 
+const extractLatestUserInstruction = (message: string): string | null => {
+  if (!message) {
+    return null
+  }
+
+  const userInstructionRegex = /^user:\s*([\s\S]*?)(?=^(?:user|assistant|system):|\Z)/gim
+  const matches = [...message.matchAll(userInstructionRegex)]
+
+  if (matches.length === 0) {
+    return null
+  }
+
+  const lastMatch = matches[matches.length - 1]
+  const instruction = lastMatch[1]?.trim()
+  return instruction && instruction.length > 0 ? instruction : null
+}
+
 export function buildUserContextBlock(message: string): string {
   const trimmed = message.trim()
-  const safeMessage = trimmed.length > 0 ? trimmed : 'No specific instructions provided.'
-  return ['## User Input', safeMessage].join('\n')
+  const latestInstruction = extractLatestUserInstruction(trimmed)
+  const safeMessage =
+    latestInstruction ??
+    (trimmed.length > 0 ? trimmed : 'No specific instructions provided.')
+
+  return ['## Latest User Instruction', safeMessage].join('\n')
 }
 
 export function buildAnalysisSummaryBlock(

@@ -267,20 +267,20 @@ npm run build
 npm install <package-name>
 
 # Install dependency in specific package
-npm install <package-name> -w packages/prd-agent/frontend
+npm install <package-name> -w frontend/product-agent
 npm install <package-name> -w packages/shared/ui-components
 
 # Install dev dependency in specific package  
 npm install <package-name> -D -w packages/prd-agent/agent
 
 # Install dependency in all frontend packages
-npm install <package-name> -w packages/prd-agent/frontend -w packages/persona-agent/frontend
+npm install <package-name> -w frontend/product-agent -w packages/persona-agent/frontend
 ```
 
 **Common Examples**:
 ```bash
 # Add a new React component library to all frontends
-npm install lucide-react -w packages/prd-agent/frontend -w packages/persona-agent/frontend
+npm install lucide-react -w frontend/product-agent -w packages/persona-agent/frontend
 
 # Add a backend utility to a specific agent
 npm install express-rate-limit -w packages/prd-agent/agent

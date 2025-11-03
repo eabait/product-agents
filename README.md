@@ -42,7 +42,7 @@ Where to obtain: Create an account and key at openrouter.ai (do not commit your 
 
 Recommended local setup files:
 - Backend: `packages/prd-agent/agent/.env`
-- Frontend: `packages/prd-agent/frontend/.env.local`
+- Frontend: `frontend/product-agent/.env.local`
 
 Required/optional variables by component:
 
@@ -55,7 +55,7 @@ Backend HTTP API (`packages/prd-agent/agent/.env`)
 - `PRD_AGENT_MAX_TOKENS`: Optional, default from server constants
 - `PRD_AGENT_CHANGE_WORKER_TEMPERATURE`: Optional, tuning edit worker
 
-Frontend (`packages/prd-agent/frontend/.env.local`)
+Frontend (`frontend/product-agent/.env.local`)
 - `PRD_AGENT_URL`: REQUIRED, e.g. `http://localhost:3001`
 - `OPENROUTER_API_KEY`: Optional (server-side fetch for models)
 - `YOUR_SITE_URL`: Optional, used as `HTTP-Referer` for OpenRouter models API
@@ -90,7 +90,7 @@ npm run start-http
 
 2) Start the Frontend (Next.js)
 ```
-cd packages/prd-agent/frontend
+cd frontend/product-agent
 # Create .env.local with at least:
 # PRD_AGENT_URL=http://localhost:3001
 # (Optionally OPENROUTER_API_KEY, YOUR_SITE_URL, YOUR_SITE_NAME)
@@ -153,7 +153,7 @@ Root (turborepo):
 
 PRD Agent workspaces:
 - `packages/prd-agent/agent`: `npm run start-http`, `npm run build`, `npm run dev` (build watch), `npm run test`
-- `packages/prd-agent/frontend`: `npm run dev`, `npm run build`, `npm run start`, `npm run lint`
+- `frontend/product-agent`: `npm run dev`, `npm run build`, `npm run start`, `npm run lint`
 - `packages/prd-agent/mcp-server`: `npm run build`, `npm run dev`
 
 
@@ -166,7 +166,7 @@ npm run build
 
 
 ## Troubleshooting
-- 404s from frontend API: Confirm `PRD_AGENT_URL` is set in `packages/prd-agent/frontend/.env.local`.
+- 404s from frontend API: Confirm `PRD_AGENT_URL` is set in `frontend/product-agent/.env.local`.
 - Backend errors about missing API key: Set `OPENROUTER_API_KEY` in `packages/prd-agent/agent/.env` or pass `settings.apiKey` in requests.
 - Port conflicts: Change `PRD_AGENT_HTTP_PORT` or Next.js port (`PORT`) as needed.
 - Model list empty: Ensure `OPENROUTER_API_KEY` is set for frontend server-side or provide `x-api-key` header to `/api/models`.

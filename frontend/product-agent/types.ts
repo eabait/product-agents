@@ -88,4 +88,5 @@ export interface AgentSettingsState {
   apiKey?: string;
   streaming?: boolean;
   subAgentSettings: SubAgentSettingsMap;
+  artifactTypes: string[];
 }

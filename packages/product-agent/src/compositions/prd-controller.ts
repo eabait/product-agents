@@ -1,12 +1,12 @@
-import { GraphController } from '../controller/graph-controller.ts'
+import { GraphController } from '../controller/graph-controller'
 import {
   getDefaultProductAgentConfig,
   loadProductAgentConfig,
   type ProductAgentConfig
-} from '../config/product-agent.config.ts'
-import { createPrdPlanner, createPrdSkillRunner, createPrdVerifier } from '../adapters/prd/index.ts'
-import { FilesystemWorkspaceDAO } from '../workspace/filesystem-workspace-dao.ts'
-import type { AgentController } from '../contracts/controller.ts'
+} from '../config/product-agent.config'
+import { createPrdPlanner, createPrdSkillRunner, createPrdVerifier } from '../adapters/prd'
+import { FilesystemWorkspaceDAO } from '../workspace/filesystem-workspace-dao'
+import type { AgentController } from '../contracts/controller'
 
 interface CreatePrdControllerOptions {
   config?: ProductAgentConfig

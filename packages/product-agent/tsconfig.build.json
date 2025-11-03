@@ -3,8 +3,8 @@
   "compilerOptions": {
     "noEmit": false,
     "emitDeclarationOnly": false,
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext"
+    "module": "esnext",
+    "moduleResolution": "bundler"
   },
   "include": ["src"]
 }

@@ -17,7 +17,7 @@ export type {
 
 export * from './contracts'
 
-export { FilesystemWorkspaceDAO } from './workspace/filesystem-workspace-dao.ts'
-export * from './controller/graph-controller.ts'
-export * from './adapters/prd/index.ts'
-export * from './compositions/prd-controller.ts'
+export { FilesystemWorkspaceDAO } from './workspace/filesystem-workspace-dao'
+export * from './controller/graph-controller'
+export * from './adapters/prd'
+export * from './compositions/prd-controller'

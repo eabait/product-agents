@@ -30,6 +30,7 @@ import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { type ProgressEvent } from "@/components/chat/ProgressIndicator";
 import { contextStorage } from "@/lib/context-storage";
 import { buildEnhancedContextPayload, getContextSummary } from "@/lib/context-utils";
+import { startRun, streamRun } from "@/lib/run-client";
 import { 
   UI_DIMENSIONS, 
   VALIDATION_LIMITS, 
@@ -150,7 +151,8 @@ function PRDAgentPageContent() {
     maxTokens: 8000, // Will be updated with agent defaults
     apiKey: undefined,
     streaming: true, // Enable streaming by default
-    subAgentSettings: {}
+    subAgentSettings: {},
+    artifactTypes: ['prd']
   });
   const [agentMetadata, setAgentMetadata] = useState<AgentMetadata | null>(null);
   
@@ -704,6 +706,9 @@ function PRDAgentPageContent() {
           try {
             const parsed = JSON.parse(rawSettings) as AgentSettingsState;
             parsed.subAgentSettings = parsed.subAgentSettings || {};
+            if (!parsed.artifactTypes || parsed.artifactTypes.length === 0) {
+              parsed.artifactTypes = ['prd'];
+            }
             savedSettings = parsed;
             console.log("Loaded settings from localStorage:", parsed);
           } catch (parseErr) {
@@ -782,6 +787,7 @@ function PRDAgentPageContent() {
         apiKey: baseSettings.apiKey,
         streaming: baseSettings.streaming,
         subAgentSettings: baseSettings.subAgentSettings || {},
+        artifactTypes: baseSettings.artifactTypes && baseSettings.artifactTypes.length > 0 ? baseSettings.artifactTypes : ['prd']
       };
 
       if (defaultSettings) {
@@ -790,6 +796,9 @@ function PRDAgentPageContent() {
         merged.maxTokens = defaultSettings.maxTokens ?? merged.maxTokens;
         merged.apiKey = defaultSettings.apiKey ?? merged.apiKey;
         merged.subAgentSettings = defaultSettings.subAgentSettings || merged.subAgentSettings;
+        if (defaultSettings.artifactTypes && defaultSettings.artifactTypes.length > 0) {
+          merged.artifactTypes = defaultSettings.artifactTypes;
+        }
       }
 
       if (savedSettings) {
@@ -798,6 +807,9 @@ function PRDAgentPageContent() {
         merged.maxTokens = savedSettings.maxTokens ?? merged.maxTokens;
         merged.apiKey = savedSettings.apiKey ?? merged.apiKey;
         merged.streaming = savedSettings.streaming ?? merged.streaming;
+        if (savedSettings.artifactTypes && savedSettings.artifactTypes.length > 0) {
+          merged.artifactTypes = savedSettings.artifactTypes;
+        }
       }
 
       if (metadata || savedSettings?.subAgentSettings || defaultSettings?.subAgentSettings) {
@@ -1012,20 +1024,18 @@ function PRDAgentPageContent() {
     let timeoutId: NodeJS.Timeout | null = null;
 
     try {
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          messages: newMessages, 
-          settings: settings,
-          contextPayload: contextPayload,
-          stream: true // Enable streaming
-        }),
+      const run = await startRun({
+        messages: newMessages,
+        settings,
+        contextPayload,
+        artifactType: settings.artifactTypes?.[0] ?? 'prd'
       });
 
-      if (!response.ok) {
-        throw new Error(`Chat request failed: ${response.status} ${response.statusText}`);
+      if (!run.runId) {
+        throw new Error("Run was created without an id");
       }
+
+      const response = await streamRun(run.runId);
 
       // Create EventSource-like interface from the response stream
       reader = response.body?.getReader();
@@ -1220,19 +1230,14 @@ function PRDAgentPageContent() {
 
   // Non-streaming submission handler (original logic)
   const handleNonStreamingSubmit = async (newMessages: Message[], contextPayload: any, userMessage: Message) => {
-    const response = await fetch("/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ 
-        messages: newMessages, 
-        settings: settings,
-        contextPayload: contextPayload
-      }),
+    const runResult = await startRun({
+      messages: newMessages,
+      settings,
+      contextPayload,
+      artifactType: settings.artifactTypes?.[0] ?? 'prd'
     });
 
-    if (!response.ok) throw new Error("Chat request failed");
-
-    const data = await response.json();
+    const data: any = runResult.result ?? {};
     if (data.error) throw new Error(data.error);
 
     // Handle both structured data and string content

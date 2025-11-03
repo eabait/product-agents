@@ -2,6 +2,28 @@
 
 > Track implementation progress across phases. Update status as work advances.
 
+## Phase 3 – Frontend Relocation & Integration
+- [x] Move Next.js app to `frontend/product-agent` and fix import paths.
+- [x] Wire UI data layer to thin API (`startRun`, `getRun`, `streamRun`).
+- [x] Expose configuration toggles for artifact types (PRD default).
+- [x] Verify Turbo `build`, `dev`, and `test` run clean after relocation.
+- [x] Execute end-to-end smoke test through UI.
+- [ ] Relocate the thin API from `apps/mcp-server` to `apps/api` (or equivalent) so it is domain-agnostic.
+- [ ] Update workspace config, scripts, and deployment manifests to point at the new `apps/api` location.
+- [ ] Remove remaining MCP-specific references from docs and tooling to reflect the shared API surface.
+
+### Execution Gameplan
+1. Relocate the app shell into `frontend/product-agent` and adjust path aliases/imports.
+2. Refactor hooks and API utilities to rely on the thin data layer (`startRun`, `getRun`, `streamRun`).
+3. Surface artifact toggles in settings/components with PRD as the default selection.
+4. Run Turbo `build`, `dev`, and `test` to confirm workspace wiring survives the move.
+5. Perform a UI smoke pass to validate streaming, toggles, and legacy flows.
+
+### Prep Checklist
+- [x] Confirm root `tsconfig.json` and workspace aliases cover the new `frontend/product-agent` path.
+- [x] Double-check `package.json` scripts reference the relocated frontend.
+- [x] Note any implicit dependencies from the current frontend directory before moving files.
+
 ## Phase 2 – Skill & Utility Extraction (Completed)
 - [x] Move stateless skills into `packages/skills/*` modules with shared interface.
 - [x] Introduce single-file manifest (`prdSkillPack.ts`) exporting metadata and registration helpers.
@@ -9,14 +31,9 @@
 - [x] Add contract tests validating each skill against planner/verify schemas.
 - [x] Update tooling/build scripts for new skill package structure.
 
-## Phase 3 – Frontend Relocation & Integration
-- [ ] Move Next.js app to `frontend/product-agent` and fix import paths.
-- [ ] Wire UI data layer to thin API (`startRun`, `getRun`, `streamRun`).
-- [ ] Expose configuration toggles for artifact types (PRD default).
-- [ ] Verify Turbo `build`, `dev`, and `test` run clean after relocation.
-- [ ] Execute end-to-end smoke test through UI.
-
 ## Phase 4 – Subagent Enablement
+- [ ] Expose subagent routes through the shared thin API and validate end-to-end access via `apps/api`.
+- [ ] Document API contract updates so frontend and SDK consumers can call subagent endpoints.
 - [ ] Define subagent interfaces (inputs/outputs, lifecycle) reused across persona/research/story mapping.
 - [ ] Implement persona builder subagent using existing PRD artifacts.
 - [ ] Draft research subagent design doc (tooling, data sources).

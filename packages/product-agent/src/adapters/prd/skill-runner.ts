@@ -93,7 +93,7 @@ export class PrdSkillRunner implements SkillRunner<PrdPlanTask, unknown> {
   }
 
   async invoke(request: PrdSkillRequest): Promise<SkillResult<unknown>> {
-    const task = request.planNode.task
+    const task = request.planNode.task as PrdPlanTask
 
     const runInput = request.context.run.request.input as SectionRoutingRequest | undefined
     if (!runInput) {

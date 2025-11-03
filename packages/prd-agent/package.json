@@ -11,16 +11,15 @@
     "prd-agent-mcp": "./bin/mcp-server.js"
   },
   "scripts": {
-    "dev": "npm run dev --workspace=frontend",
+    "dev": "npm run dev --workspace=@product-agents/prd-agent-frontend",
     "build": "turbo run build",
     "test": "vitest",
-    "start": "npm run start --workspace=frontend",
+    "start": "npm run start --workspace=@product-agents/prd-agent-frontend",
     "clean": "turbo run clean",
     "lint": "turbo run lint"
   },
   "workspaces": [
     "agent",
-    "frontend",
     "mcp-server"
   ],
   "devDependencies": {

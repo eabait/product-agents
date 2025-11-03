@@ -38,17 +38,18 @@ export class PrdPlanner implements Planner<PrdPlanTask> {
     const createdAt = this.clock()
     const runInput = context.request.input
 
+    const isSectionName = (value: string): value is SectionName =>
+      (ALL_SECTION_NAMES as readonly string[]).includes(value)
+    const validSections = ALL_SECTION_NAMES as readonly SectionName[]
     const requestedSections =
       runInput?.targetSections && runInput.targetSections.length > 0
-        ? runInput.targetSections.filter((section): section is SectionName =>
-            (ALL_SECTION_NAMES as readonly string[]).includes(section)
-          )
-        : (ALL_SECTION_NAMES as SectionName[])
+        ? runInput.targetSections.filter(isSectionName)
+        : [...validSections]
 
     const sectionNodes: Record<string, ReturnType<PrdPlanner['createSectionNode']>> = {}
     const sectionIds: string[] = []
 
-    requestedSections.forEach(section => {
+    requestedSections.forEach((section: SectionName) => {
       const nodeId = `write-${section}`
       sectionIds.push(nodeId)
       sectionNodes[nodeId] = this.createSectionNode(section)
@@ -122,7 +123,7 @@ export class PrdPlanner implements Planner<PrdPlanTask> {
         section
       } as PrdPlanTask,
       status: 'pending' as const,
-      dependsOn: [],
+      dependsOn: [] as string[],
       metadata: {
         skillId: `prd.write-${section}`
       }

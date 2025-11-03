@@ -11,8 +11,10 @@
     "moduleResolution": "bundler",
     "module": "esnext",
     "paths": {
-      "@product-agents/prd-agent": ["./src/types/external"],
-      "@product-agents/agent-core": ["./src/types/external"]
+      "@product-agents/prd-agent": ["./src/types/external.d.ts"],
+      "@product-agents/agent-core": ["./src/types/external.d.ts"],
+      "@product-agents/prd-shared": ["./src/types/external.d.ts"],
+      "@product-agents/skills-prd": ["./src/types/external.d.ts"]
     }
   },
   "include": ["src"]

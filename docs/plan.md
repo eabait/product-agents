@@ -680,7 +680,7 @@ export class PRDGeneratorAgent {
 
 ### Frontend Implementation
 ```typescript
-// packages/prd-agent/frontend/app/page.tsx
+// frontend/product-agent/app/page.tsx
 'use client'
 
 import { useState } from 'react'
@@ -895,7 +895,7 @@ ${prd.assumptions.map(a => `- ${a}`).join('\n')}`
 
 ```bash
 # Development mode for PRD Agent
-cd packages/prd-agent/frontend
+cd frontend/product-agent
 npm run dev
 # Opens at http://localhost:3000
 

@@ -1,0 +1,30 @@
+// tsup.config.ts
+import path from "node:path";
+import { defineConfig } from "tsup";
+var __injected_dirname__ = "/Users/estebanabait/Documents/Projects/product-agents/packages/prd-agent/agent";
+var resolveFromRoot = (...segments) => path.resolve(__injected_dirname__, "..", "..", ...segments);
+var tsup_config_default = defineConfig({
+  entry: ["src/index.ts", "src/http-server.ts"],
+  format: ["esm", "cjs"],
+  dts: true,
+  sourcemap: false,
+  clean: true,
+  bundle: true,
+  splitting: false,
+  target: "es2022",
+  noExternal: [/^@product-agents\//],
+  esbuildOptions(options) {
+    options.alias = {
+      "@product-agents/prd-shared": resolveFromRoot("shared/prd-shared/src/index.ts"),
+      "@product-agents/skills-prd": resolveFromRoot("skills/prd/src/index.ts"),
+      "@product-agents/skills-prd/utils": resolveFromRoot("skills/prd/src/utils/index.ts"),
+      "@product-agents/agent-core": resolveFromRoot("shared/agent-core/src/index.ts"),
+      "@product-agents/model-compatibility": resolveFromRoot("shared/model-compatibility/src/index.ts"),
+      "@product-agents/openrouter-client": resolveFromRoot("shared/openrouter-client/src/index.ts")
+    };
+  }
+});
+export {
+  tsup_config_default as default
+};
+//# sourceMappingURL=data:application/json;base64,ewogICJ2ZXJzaW9uIjogMywKICAic291cmNlcyI6IFsidHN1cC5jb25maWcudHMiXSwKICAic291cmNlc0NvbnRlbnQiOiBbImNvbnN0IF9faW5qZWN0ZWRfZmlsZW5hbWVfXyA9IFwiL1VzZXJzL2VzdGViYW5hYmFpdC9Eb2N1bWVudHMvUHJvamVjdHMvcHJvZHVjdC1hZ2VudHMvcGFja2FnZXMvcHJkLWFnZW50L2FnZW50L3RzdXAuY29uZmlnLnRzXCI7Y29uc3QgX19pbmplY3RlZF9kaXJuYW1lX18gPSBcIi9Vc2Vycy9lc3RlYmFuYWJhaXQvRG9jdW1lbnRzL1Byb2plY3RzL3Byb2R1Y3QtYWdlbnRzL3BhY2thZ2VzL3ByZC1hZ2VudC9hZ2VudFwiO2NvbnN0IF9faW5qZWN0ZWRfaW1wb3J0X21ldGFfdXJsX18gPSBcImZpbGU6Ly8vVXNlcnMvZXN0ZWJhbmFiYWl0L0RvY3VtZW50cy9Qcm9qZWN0cy9wcm9kdWN0LWFnZW50cy9wYWNrYWdlcy9wcmQtYWdlbnQvYWdlbnQvdHN1cC5jb25maWcudHNcIjtpbXBvcnQgcGF0aCBmcm9tICdub2RlOnBhdGgnXG5pbXBvcnQgeyBkZWZpbmVDb25maWcgfSBmcm9tICd0c3VwJ1xuXG5jb25zdCByZXNvbHZlRnJvbVJvb3QgPSAoLi4uc2VnbWVudHM6IHN0cmluZ1tdKSA9PlxuICBwYXRoLnJlc29sdmUoX19kaXJuYW1lLCAnLi4nLCAnLi4nLCAuLi5zZWdtZW50cylcblxuZXhwb3J0IGRlZmF1bHQgZGVmaW5lQ29uZmlnKHtcbiAgZW50cnk6IFsnc3JjL2luZGV4LnRzJywgJ3NyYy9odHRwLXNlcnZlci50cyddLFxuICBmb3JtYXQ6IFsnZXNtJywgJ2NqcyddLFxuICBkdHM6IHRydWUsXG4gIHNvdXJjZW1hcDogZmFsc2UsXG4gIGNsZWFuOiB0cnVlLFxuICBidW5kbGU6IHRydWUsXG4gIHNwbGl0dGluZzogZmFsc2UsXG4gIHRhcmdldDogJ2VzMjAyMicsXG4gIG5vRXh0ZXJuYWw6IFsvXkBwcm9kdWN0LWFnZW50c1xcLy9dLFxuICBlc2J1aWxkT3B0aW9ucyhvcHRpb25zKSB7XG4gICAgb3B0aW9ucy5hbGlhcyA9IHtcbiAgICAgICdAcHJvZHVjdC1hZ2VudHMvcHJkLXNoYXJlZCc6IHJlc29sdmVGcm9tUm9vdCgnc2hhcmVkL3ByZC1zaGFyZWQvc3JjL2luZGV4LnRzJyksXG4gICAgICAnQHByb2R1Y3QtYWdlbnRzL3NraWxscy1wcmQnOiByZXNvbHZlRnJvbVJvb3QoJ3NraWxscy9wcmQvc3JjL2luZGV4LnRzJyksXG4gICAgICAnQHByb2R1Y3QtYWdlbnRzL3NraWxscy1wcmQvdXRpbHMnOiByZXNvbHZlRnJvbVJvb3QoJ3NraWxscy9wcmQvc3JjL3V0aWxzL2luZGV4LnRzJyksXG4gICAgICAnQHByb2R1Y3QtYWdlbnRzL2FnZW50LWNvcmUnOiByZXNvbHZlRnJvbVJvb3QoJ3NoYXJlZC9hZ2VudC1jb3JlL3NyYy9pbmRleC50cycpLFxuICAgICAgJ0Bwcm9kdWN0LWFnZW50cy9tb2RlbC1jb21wYXRpYmlsaXR5JzogcmVzb2x2ZUZyb21Sb290KCdzaGFyZWQvbW9kZWwtY29tcGF0aWJpbGl0eS9zcmMvaW5kZXgudHMnKSxcbiAgICAgICdAcHJvZHVjdC1hZ2VudHMvb3BlbnJvdXRlci1jbGllbnQnOiByZXNvbHZlRnJvbVJvb3QoJ3NoYXJlZC9vcGVucm91dGVyLWNsaWVudC9zcmMvaW5kZXgudHMnKVxuICAgIH1cbiAgfVxufSlcbiJdLAogICJtYXBwaW5ncyI6ICI7QUFBd1gsT0FBTyxVQUFVO0FBQ3pZLFNBQVMsb0JBQW9CO0FBRGlHLElBQU0sdUJBQXVCO0FBRzNKLElBQU0sa0JBQWtCLElBQUksYUFDMUIsS0FBSyxRQUFRLHNCQUFXLE1BQU0sTUFBTSxHQUFHLFFBQVE7QUFFakQsSUFBTyxzQkFBUSxhQUFhO0FBQUEsRUFDMUIsT0FBTyxDQUFDLGdCQUFnQixvQkFBb0I7QUFBQSxFQUM1QyxRQUFRLENBQUMsT0FBTyxLQUFLO0FBQUEsRUFDckIsS0FBSztBQUFBLEVBQ0wsV0FBVztBQUFBLEVBQ1gsT0FBTztBQUFBLEVBQ1AsUUFBUTtBQUFBLEVBQ1IsV0FBVztBQUFBLEVBQ1gsUUFBUTtBQUFBLEVBQ1IsWUFBWSxDQUFDLG9CQUFvQjtBQUFBLEVBQ2pDLGVBQWUsU0FBUztBQUN0QixZQUFRLFFBQVE7QUFBQSxNQUNkLDhCQUE4QixnQkFBZ0IsZ0NBQWdDO0FBQUEsTUFDOUUsOEJBQThCLGdCQUFnQix5QkFBeUI7QUFBQSxNQUN2RSxvQ0FBb0MsZ0JBQWdCLCtCQUErQjtBQUFBLE1BQ25GLDhCQUE4QixnQkFBZ0IsZ0NBQWdDO0FBQUEsTUFDOUUsdUNBQXVDLGdCQUFnQix5Q0FBeUM7QUFBQSxNQUNoRyxxQ0FBcUMsZ0JBQWdCLHVDQUF1QztBQUFBLElBQzlGO0FBQUEsRUFDRjtBQUNGLENBQUM7IiwKICAibmFtZXMiOiBbXQp9Cg==
