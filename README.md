@@ -35,6 +35,25 @@ packages/
 └─ (other agent scaffolds)
 ```
 
+### Deep Agent Architecture (high level flow)
+```
+┌────────────────┐      HTTPS/SSE       ┌─────────────────────────┐       Skill packs / shared libs
+│  Frontend UI   │ ───────────────────▶ │        apps/api         │ ─────────────────────────────────▶ @product-agents/skills-prd
+│ (Next.js 14)   │ ◀─────────────────── │  (thin controller host) │ ◀─────────────────────────────────▶ @product-agents/shared/*
+└────────────────┘    streaming events  └─────────────────────────┘
+                                │
+                                │ invokes
+                                ▼
+                      ┌───────────────────────────┐
+                      │ packages/product-agent    │
+                      │ (planner → execute graph) │
+                      └───────────────────────────┘
+```
+- `frontend/product-agent` only speaks to the thin API (start/run/stream).  
+- `apps/api` loads `product-agent.config.ts`, registers skill packs, and proxies progress events.  
+- `packages/product-agent` composes planners, skill runners, verifiers, workspace DAO, and subagents.  
+- `packages/skills/prd` + `packages/shared/*` provide the analyzers, section writers, and schemas consumed by the controller.
+
 
 ## Environment Variables and API Keys
 The project integrates with OpenRouter for AI models. You need an OpenRouter API Key.
@@ -65,6 +84,21 @@ Security notes:
 - Do not commit real API keys. `.env*` files are gitignored.
 - Keys can also be supplied per-request in payloads if preferred.
 
+## Configuration & Overrides
+- **Source of truth:** `packages/product-agent/src/config/product-agent.config.ts`
+- **Defaults:** `loadProductAgentConfig()` loads runtime/workspace/skills/telemetry defaults (model, retries, storage root, enabled skill packs, log level).
+- **Env overrides (server-wide):**
+
+| Scope | Environment variable | Description |
+| --- | --- | --- |
+| Runtime | `PRODUCT_AGENT_MODEL`, `PRODUCT_AGENT_TEMPERATURE`, `PRODUCT_AGENT_MAX_OUTPUT_TOKENS`, `PRODUCT_AGENT_ALLOW_STREAMING`, `PRODUCT_AGENT_FALLBACK_MODEL`, `PRODUCT_AGENT_RETRY_ATTEMPTS`, `PRODUCT_AGENT_RETRY_BACKOFF_MS` | Define default model + sampling + retry behaviour. |
+| Workspace | `PRODUCT_AGENT_WORKSPACE_ROOT`, `PRODUCT_AGENT_WORKSPACE_PERSIST`, `PRODUCT_AGENT_WORKSPACE_RETENTION_DAYS`, `PRODUCT_AGENT_WORKSPACE_TEMP_SUBDIR` | Control filesystem storage path/retention. |
+| Skills | `PRODUCT_AGENT_SKILL_PACKS`, `PRODUCT_AGENT_ALLOW_DYNAMIC_SKILLS` | Choose skill packs and whether per-run overrides are allowed. |
+| Telemetry | `PRODUCT_AGENT_TELEMETRY_STREAM`, `PRODUCT_AGENT_TELEMETRY_METRICS`, `PRODUCT_AGENT_TELEMETRY_LOG_LEVEL`, `PRODUCT_AGENT_TELEMETRY_THROTTLE_MS` | Toggle streaming + metrics + logging detail. |
+
+- **API overrides (per run):** `model`, `temperature`, `maxOutputTokens`, `skillPackId`, `additionalSkillPacks`, `workspaceRoot`, `logLevel` — validated against `ProductAgentApiOverrideSchema`.
+- **Backend host overrides:** `PRODUCT_AGENT_API_HOST`, `PRODUCT_AGENT_API_PORT` live in `apps/api/.env` alongside `OPENROUTER_API_KEY`.
+- See `docs/deep-agent-refactor/phase5-changelog.md` for a concise summary of the API/env deltas introduced during Phase 5.
 
 ## Install
 From repository root:

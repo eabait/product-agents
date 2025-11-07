@@ -46,10 +46,10 @@
   - [x] Inventory every legacy file (`prd-orchestrator-agent.ts`, HTTP utilities, adapters) and map replacements inside `packages/product-agent` + `apps/api`.
   - [x] Delete the legacy code + exports once consumers are updated so only the new controller/skill packs remain.
   - [x] Run targeted TypeScript builds/tests to ensure zero stray imports remain.
-- [ ] Update documentation and READMEs to reflect new package layout and config.
-  - [ ] Refresh root README + AGENT.md with the deep agent architecture diagram/text.
-  - [ ] Update `docs/deep-agent-refactor/*` and package-level READMEs with migration notes + new config knobs.
-  - [ ] Capture a short changelog blurb for PRD consumers covering API/env deltas.
+- [x] Update documentation and READMEs to reflect new package layout and config.
+  - [x] Refresh root README + AGENT.md with the deep agent architecture diagram/text.
+  - [x] Update `docs/deep-agent-refactor/*` and package-level READMEs with migration notes + new config knobs.
+  - [x] Capture a short changelog blurb for PRD consumers covering API/env deltas.
 - [ ] Ensure CI/CD pipelines reference new packages and run relevant tests.
   - [ ] Audit Turbo graph, GitHub Actions (or equivalent), and deployment manifests for old paths (`apps/mcp-server`, legacy frontend).
   - [ ] Add/verify jobs for `run_e2e.sh`, subagent suites, and PRD skill-pack contract tests.
@@ -73,9 +73,9 @@
 ## Phase 0 – Audit & Scaffolding (Completed)
 - [x] Inventory current orchestrator flows, section writers, analyzers, and shared utilities.
   - **Orchestrator:** `packages/product-agent/src/compositions/prd-controller.ts` composes the planner, skill runner, verifier, subagents, and workspace DAO. The thin HTTP surface in `apps/api/src/index.ts` loads `product-agent.config.ts`, streams progress events, and exposes `/prd` + `/runs` endpoints.
-  - **Analyzers:** `ContextAnalyzer`, `ClarificationAnalyzer`, and `SectionDetectionAnalyzer` (plus `base-analyzer.ts`) coordinate routing decisions and clarification prompts; each pulls runtime overrides from `agent-metadata`.
-  - **Section writers:** Target users, solution, key features, success metrics, and constraints writers inherit `BaseSectionWriter`, using shared prompt builders in `section-writers/*.ts`.
-  - **Shared utilities:** `utilities.ts` (HTTP helpers + settings validation), `utils/confidence-assessment.ts`, `utils/post-process-structured-response.ts`, and cross-package modules in `packages/shared/*` (`agent-core`, `model-compatibility`, `types`, `openrouter-client`, `ui-components`).
+  - **Analyzers:** `packages/skills/prd/src/analyzers/*` (Context, Clarification, Section Detection) reuse the shared analyzer base + OpenRouter client helpers and accept per-worker runtime overrides from config.
+  - **Section writers:** `packages/skills/prd/src/section-writers/*` cover target users, solution, key features, success metrics, and constraints with shared prompt builders.
+  - **Shared utilities:** `packages/skills/prd/src/utils/*` plus cross-package modules in `packages/shared/*` (`agent-core`, `model-compatibility`, `types`, `openrouter-client`, `ui-components`).
 - [x] Document frontend dependencies and data flows.
   - **Dependencies:** Next.js 14, React 18, Radix UI primitives, Tailwind stack, `framer-motion`, `lucide-react`, `react-markdown`, and local `@product-agents/model-compatibility` types from the monorepo.
   - **API boundaries:** `/api/chat` validates payloads with `zod`, chooses backend endpoints (`/prd`, `/prd/edit`, `/prd/sections`, `/prd/section/:id`) and supports SSE streaming to `PRD_AGENT_URL`. `/api/sections` proxies targeted section operations and surfaces catalogue data, `/api/agent-defaults` bootstraps settings from `/health`, and `/api/models` hydrates model pickers via OpenRouter with capability filtering.

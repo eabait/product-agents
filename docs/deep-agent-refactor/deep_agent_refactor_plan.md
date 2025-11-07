@@ -31,6 +31,11 @@
 - **Overrides:** 
   - Environment variables (`PRODUCT_AGENT_MODEL`, `PRODUCT_AGENT_WORKSPACE_ROOT`, etc.) override defaults at load time.
   - API-level overrides accept a subset of user-facing fields (e.g., model, skill pack selection) and merge per-run with safeguards (validation + max limits).
+- **Environment variable guide:**
+  - Runtime: `PRODUCT_AGENT_MODEL`, `PRODUCT_AGENT_TEMPERATURE`, `PRODUCT_AGENT_MAX_OUTPUT_TOKENS`, `PRODUCT_AGENT_ALLOW_STREAMING`, `PRODUCT_AGENT_FALLBACK_MODEL`, `PRODUCT_AGENT_RETRY_ATTEMPTS`, `PRODUCT_AGENT_RETRY_BACKOFF_MS`
+  - Workspace: `PRODUCT_AGENT_WORKSPACE_ROOT`, `PRODUCT_AGENT_WORKSPACE_PERSIST`, `PRODUCT_AGENT_WORKSPACE_RETENTION_DAYS`, `PRODUCT_AGENT_WORKSPACE_TEMP_SUBDIR`
+  - Skills: `PRODUCT_AGENT_SKILL_PACKS`, `PRODUCT_AGENT_ALLOW_DYNAMIC_SKILLS`
+  - Telemetry: `PRODUCT_AGENT_TELEMETRY_STREAM`, `PRODUCT_AGENT_TELEMETRY_METRICS`, `PRODUCT_AGENT_TELEMETRY_LOG_LEVEL`, `PRODUCT_AGENT_TELEMETRY_THROTTLE_MS`
 - **Consumption:** The orchestrator imports the config at start, injects it into the workspace DAO and planner/skill runner factories, and exposes a typed helper for reading effective config per run.
 - **Hot Reload:** Keep initial implementation static (config read on process boot); document future extension if live reload becomes necessary.
 

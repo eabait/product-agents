@@ -300,6 +300,22 @@ npm install prettier -D
 - `npm run lint` - Run ESLint across all packages
 - `npm run clean` - Clean build artifacts
 
+### Deep Agent Architecture Cheat Sheet
+- **apps/api** – Thin HTTP/SSE layer. Loads `product-agent.config.ts`, exposes `/runs` + `/prd` endpoints, and enforces env overrides (`PRODUCT_AGENT_API_HOST/PORT`, OpenRouter keys).
+- **packages/product-agent** – Graph controller (`Plan → Execute → Verify → Deliver`), filesystem workspace DAO, planner/skill-runner/verifier adapters, subagent registry.
+- **packages/skills/prd** – Stateless analyzers + section writers used by the orchestrator via skill packs.
+- **frontend/product-agent** – Next.js UI that calls `/api/chat`, `/api/runs`, `/api/models`, etc. No direct orchestrator imports.
+
+### Config & Override Workflow
+1. **Default config** lives in `packages/product-agent/src/config/product-agent.config.ts`. Call `loadProductAgentConfig()` (apps/api already does this) to hydrate runtime/workspace/skills/telemetry defaults.
+2. **Environment overrides** (set in `apps/api/.env` or host env) include:
+   - Runtime: `PRODUCT_AGENT_MODEL`, `PRODUCT_AGENT_TEMPERATURE`, `PRODUCT_AGENT_MAX_OUTPUT_TOKENS`, `PRODUCT_AGENT_ALLOW_STREAMING`, `PRODUCT_AGENT_FALLBACK_MODEL`, `PRODUCT_AGENT_RETRY_ATTEMPTS`, `PRODUCT_AGENT_RETRY_BACKOFF_MS`
+   - Workspace: `PRODUCT_AGENT_WORKSPACE_ROOT`, `PRODUCT_AGENT_WORKSPACE_PERSIST`, `PRODUCT_AGENT_WORKSPACE_RETENTION_DAYS`, `PRODUCT_AGENT_WORKSPACE_TEMP_SUBDIR`
+   - Skills: `PRODUCT_AGENT_SKILL_PACKS`, `PRODUCT_AGENT_ALLOW_DYNAMIC_SKILLS`
+   - Telemetry: `PRODUCT_AGENT_TELEMETRY_STREAM`, `PRODUCT_AGENT_TELEMETRY_METRICS`, `PRODUCT_AGENT_TELEMETRY_LOG_LEVEL`, `PRODUCT_AGENT_TELEMETRY_THROTTLE_MS`
+3. **Per-run overrides** (API payloads) map to `ProductAgentApiOverrideSchema`: `model`, `temperature`, `maxOutputTokens`, `skillPackId`, `additionalSkillPacks`, `workspaceRoot`, `logLevel`.
+4. **Backend host overrides** use `PRODUCT_AGENT_API_HOST` / `PRODUCT_AGENT_API_PORT` in `apps/api/.env`.
+
 ## Key Technologies
 - **Frontend**: Next.js 14 (App Router), React 18, TypeScript, Tailwind CSS, shadcn/ui
 - **Backend**: Express.js, TypeScript, Zod validation
