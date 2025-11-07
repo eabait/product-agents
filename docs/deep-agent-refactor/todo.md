@@ -8,9 +8,9 @@
 - [x] Expose configuration toggles for artifact types (PRD default).
 - [x] Verify Turbo `build`, `dev`, and `test` run clean after relocation.
 - [x] Execute end-to-end smoke test through UI.
-- [ ] Relocate the thin API from `apps/mcp-server` to `apps/api` (or equivalent) so it is domain-agnostic.
-- [ ] Update workspace config, scripts, and deployment manifests to point at the new `apps/api` location.
-- [ ] Remove remaining MCP-specific references from docs and tooling to reflect the shared API surface.
+- [x] Relocate the thin API from `apps/mcp-server` to `apps/api` (or equivalent) so it is domain-agnostic.
+- [x] Update workspace config, scripts, and deployment manifests to point at the new `apps/api` location.
+- [x] Remove remaining MCP-specific references from docs and tooling to reflect the shared API surface.
 
 ### Execution Gameplan
 1. Relocate the app shell into `frontend/product-agent` and adjust path aliases/imports.
@@ -32,14 +32,14 @@
 - [x] Update tooling/build scripts for new skill package structure.
 
 ## Phase 4 – Subagent Enablement
-- [ ] Expose subagent routes through the shared thin API and validate end-to-end access via `apps/api`.
-- [ ] Document API contract updates so frontend and SDK consumers can call subagent endpoints.
-- [ ] Define subagent interfaces (inputs/outputs, lifecycle) reused across persona/research/story mapping.
-- [ ] Implement persona builder subagent using existing PRD artifacts.
-- [ ] Draft research subagent design doc (tooling, data sources).
-- [ ] Prototype user story mapping subagent contract mirroring PRD outputs.
-- [ ] Integrate subagents via skill pack configuration behind feature flags.
-- [ ] Add tests covering orchestrator + subagent integration flow.
+- [x] Expose subagent routes through the shared thin API and validate end-to-end access via `apps/api`.
+- [x] Document API contract updates so frontend and SDK consumers can call subagent endpoints.
+- [x] Define subagent interfaces (inputs/outputs, lifecycle) reused across persona/research/story mapping.
+- [x] Implement persona builder subagent using existing PRD artifacts.
+- [x] Draft research subagent design doc (tooling, data sources).
+- [x] Prototype user story mapping subagent contract mirroring PRD outputs.
+- [x] Integrate subagents via skill pack configuration.
+- [x] Add tests covering orchestrator + subagent integration flow.
 
 ## Phase 5 – Hardening & Cleanup
 - [ ] Remove deprecated orchestrator utilities from `packages/prd-agent`.
@@ -48,6 +48,13 @@
 - [ ] Publish migration notes for internal consumers (SDK/API changes).
 - [ ] Audit repo for legacy references (imports, paths) and clean up.
 - [ ] Final regression pass across backend and frontend.
+
+## Phase 6 – Planner Intelligence & Multi-Artifact Orchestration
+- [ ] Replace the hardcoded PRD planner with an intelligent planner that dynamically composes plans from available skills and subagents.
+- [ ] Enable plan generation for PRD, persona, and user story mapping artifacts (and transitions between them) based on the user’s prompt intent.
+- [ ] Integrate artifact-aware skill/subagent registries so the planner can reason across shared tooling.
+- [ ] Add verification to ensure multi-artifact plans produce coherent cross-handovers (e.g., PRD → persona → story map).
+- [ ] Expand test coverage for planner reasoning, tool selection, and artifact handoff flows.
 
 ## Phase 0 – Audit & Scaffolding (Completed)
 - [x] Inventory current orchestrator flows, section writers, analyzers, and shared utilities.

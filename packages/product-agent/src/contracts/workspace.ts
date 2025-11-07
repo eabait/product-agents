@@ -41,7 +41,7 @@ export interface WorkspaceDAO {
 export interface WorkspaceEvent {
   id: string
   runId: RunId
-  type: 'plan' | 'skill' | 'verification' | 'artifact' | 'system'
+  type: 'plan' | 'skill' | 'verification' | 'artifact' | 'system' | 'subagent'
   createdAt: string
   payload: Record<string, unknown>
 }

@@ -114,7 +114,7 @@ const SETTINGS_GROUP_IDS = new Set<SettingsGroupId>(SETTINGS_GROUPS.map(group =>
 const isSettingsGroupId = (value: string): value is SettingsGroupId =>
   SETTINGS_GROUP_IDS.has(value as SettingsGroupId)
 
-const ARTIFACT_OPTIONS = [
+const BASE_ARTIFACT_OPTIONS = [
   {
     id: 'prd',
     label: 'Product Requirements Document (PRD)',
@@ -124,7 +124,7 @@ const ARTIFACT_OPTIONS = [
   {
     id: 'persona',
     label: 'Persona Builder',
-    description: 'Draft personas from PRD context. Coming soon.',
+    description: 'Draft personas from PRD context when the persona subagent is enabled.',
     available: false
   },
   {
@@ -170,6 +170,13 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
     return settings.model ? settings.model.split('/')[0] : ''
   })
 
+  const personaMetadata = metadata?.subAgents?.find(subAgent => subAgent.id === 'persona.builder')
+  const artifactOptions = BASE_ARTIFACT_OPTIONS.map(option =>
+    option.id === 'persona'
+      ? { ...option, available: Boolean(personaMetadata) }
+      : option
+  )
+
   // Use reactive contexts
   const { setModels: setModelContextModels, updateModelFromId } = useModelContext()
   const { contextSettings, updateContextSettings } = useContextSettings()
@@ -193,6 +200,15 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
 
   const modelsForProvider = models.filter(model => model.provider === selectedProvider)
   const currentModel = settings.model ? models.find(model => model.id === settings.model) : undefined
+
+  useEffect(() => {
+    if (!personaMetadata && settings.artifactTypes?.includes('persona')) {
+      onSettingsChange({
+        ...settings,
+        artifactTypes: settings.artifactTypes.filter(id => id !== 'persona')
+      })
+    }
+  }, [personaMetadata, settings, onSettingsChange])
   const getSubAgentDropdownState = (id: string) => {
     const state = subAgentDropdownState[id]
     if (state) {
@@ -598,7 +614,7 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
                 </p>
               </div>
               <div className="space-y-2">
-                {ARTIFACT_OPTIONS.map(option => {
+                {artifactOptions.map(option => {
                   const checked = settings.artifactTypes?.includes(option.id) ?? false
                   const disabled = !option.available
                   const lockChecked = option.id === 'prd' && (settings.artifactTypes?.length ?? 0) <= 1
@@ -625,7 +641,7 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
                           <span className="text-sm font-medium">{option.label}</span>
                           {!option.available && (
                             <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                              Coming soon
+                              {option.id === 'persona' ? 'Enable persona subagent in backend' : 'Coming soon'}
                             </span>
                           )}
                         </div>

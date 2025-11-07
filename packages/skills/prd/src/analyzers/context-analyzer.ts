@@ -61,6 +61,36 @@ export interface ContextAnalysisResult {
   constraints: string[]
 }
 
+type RawEpic = {
+  title?: string | null
+  description?: string | null
+} | null
+
+const normalizeEpics = (
+  input?: RawEpic[] | null
+): ContextAnalysisResult['requirements']['epics'] => {
+  if (!Array.isArray(input) || input.length === 0) {
+    return undefined
+  }
+
+  const items = input
+    .map(epic => {
+      const title = (epic?.title ?? '').trim()
+      const description = (epic?.description ?? '').trim()
+      if (!title && !description) {
+        return null
+      }
+
+      return {
+        title: title || (description ? description.slice(0, 120) : 'Untitled epic'),
+        description: description || title || 'No description provided.'
+      }
+    })
+    .filter((epic): epic is { title: string; description: string } => Boolean(epic))
+
+  return items.length > 0 ? items : undefined
+}
+
 export class ContextAnalyzer extends BaseAnalyzer {
   async analyze(input: AnalyzerInput): Promise<AnalyzerResult<ContextAnalysisResult>> {
     const rawAnalysis = await this.generateStructured({
@@ -94,7 +124,7 @@ export class ContextAnalyzer extends BaseAnalyzer {
             functional: processedAnalysis.requirements.functional || [],
             technical: processedAnalysis.requirements.technical || [],
             user_experience: processedAnalysis.requirements.user_experience || [],
-            epics: processedAnalysis.requirements.epics || [],
+            epics: normalizeEpics(processedAnalysis.requirements.epics),
             mvpFeatures: processedAnalysis.requirements.mvpFeatures || []
           }
         }
@@ -103,7 +133,7 @@ export class ContextAnalyzer extends BaseAnalyzer {
           functional: processedAnalysis.functional || [],
           technical: processedAnalysis.technical || [],
           user_experience: processedAnalysis.user_experience || [],
-          epics: processedAnalysis.epics || [],
+          epics: normalizeEpics(processedAnalysis.epics),
           mvpFeatures: processedAnalysis.mvpFeatures || []
         }
       })(),

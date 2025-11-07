@@ -7,6 +7,7 @@ import {
 import { createPrdPlanner, createPrdSkillRunner, createPrdVerifier } from '../adapters/prd'
 import { FilesystemWorkspaceDAO } from '../workspace/filesystem-workspace-dao'
 import type { AgentController } from '../contracts/controller'
+import { createPersonaBuilderSubagent } from '../subagents'
 
 interface CreatePrdControllerOptions {
   config?: ProductAgentConfig
@@ -35,6 +36,7 @@ export const createPrdController = (options?: CreatePrdControllerOptions): Agent
     clock: options?.clock
   })
   const verifier = createPrdVerifier({ clock: options?.clock })
+  const subagents = [createPersonaBuilderSubagent({ clock: options?.clock })]
 
   const workspace = new FilesystemWorkspaceDAO({
     root: options?.workspaceRoot ?? config.workspace.storageRoot,
@@ -50,7 +52,8 @@ export const createPrdController = (options?: CreatePrdControllerOptions): Agent
       verifier: {
         primary: verifier
       },
-      workspace
+      workspace,
+      subagents
     },
     config,
     {

@@ -4,6 +4,8 @@
   "description": "Monorepo for six product management agents",
   "private": true,
   "workspaces": [
+    "apps/api",
+    "packages/prd-agent",
     "packages/shared/*",
     "packages/product-agent",
     "packages/product-agent/*",

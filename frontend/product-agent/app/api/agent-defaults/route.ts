@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { prdSkillPack } from '@product-agents/skills-prd';
 
 const PRD_AGENT_URL = process.env.PRD_AGENT_URL || 'http://localhost:3001';
 
@@ -28,6 +29,21 @@ export async function GET() {
         }, {})
       : {};
     
+    const manifestSubAgents = prdSkillPack.subagents ?? [];
+
+    const mergedMetadata =
+      data.metadata && typeof data.metadata === 'object'
+        ? {
+            ...data.metadata,
+            subAgents:
+              Array.isArray((data.metadata as any).subAgents) && (data.metadata as any).subAgents.length > 0
+                ? (data.metadata as any).subAgents
+                : manifestSubAgents
+          }
+        : {
+            subAgents: manifestSubAgents
+          };
+
     return NextResponse.json({
       settings: {
         model: defaults.model,
@@ -36,7 +52,7 @@ export async function GET() {
         subAgentSettings,
       },
       agentInfo: data.agentInfo || null,
-      metadata: data.metadata || null
+      metadata: mergedMetadata
     });
 
   } catch (error) {

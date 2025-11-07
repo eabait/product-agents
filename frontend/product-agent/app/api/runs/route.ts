@@ -36,8 +36,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { artifactType, ...rest } = parsed.data
-    const streamingEnabled = rest.settings?.streaming !== false
+    const streamingEnabled = parsed.data.settings?.streaming !== false
 
     if (!streamingEnabled) {
       console.warn(
@@ -51,13 +50,51 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const record = createRunRecord({ ...rest, artifactType }, artifactType)
+    const backendResponse = await fetch(`${PRD_AGENT_URL}/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(parsed.data)
+    })
 
-    console.log(`[runs:${requestId}] run ${record.id} created`)
+    if (!backendResponse.ok) {
+      const errorBody = await backendResponse.json().catch(() => ({}))
+      console.error(`[runs:${requestId}] backend /runs request failed`, backendResponse.status, errorBody)
+      return NextResponse.json(
+        {
+          error: errorBody?.error ?? 'Failed to start run',
+          details: errorBody?.details ?? null
+        },
+        { status: backendResponse.status }
+      )
+    }
+
+    const backendPayload = (await backendResponse.json().catch(() => ({}))) as {
+      runId?: string
+      status?: string
+      artifactType?: string
+      streamUrl?: string
+    }
+
+    if (!backendPayload?.runId) {
+      console.error(`[runs:${requestId}] backend response missing runId`, backendPayload)
+      return NextResponse.json(
+        {
+          error: 'Backend did not return a run identifier'
+        },
+        { status: 502 }
+      )
+    }
+
+    const artifactType = backendPayload.artifactType ?? parsed.data.artifactType ?? 'prd'
+    const runStatus = (backendPayload.status as 'pending' | 'running' | 'awaiting-input' | 'completed' | 'failed' | undefined) ?? 'pending'
+
+    const record = createRunRecord(backendPayload.runId, parsed.data, artifactType, runStatus)
+
+    console.log(`[runs:${requestId}] run ${record.id} created (backend status: ${runStatus})`)
 
     return NextResponse.json({
       runId: record.id,
-      status: record.status,
+      status: runStatus,
       createdAt: record.createdAt,
       artifactType: record.artifactType,
       streamUrl: `/api/runs/${record.id}/stream`,

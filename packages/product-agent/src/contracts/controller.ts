@@ -3,6 +3,7 @@ import type { Planner } from './planner'
 import type { SkillRunner, SkillResult } from './skill-runner'
 import type { VerificationResult, Verifier } from './verifier'
 import type { WorkspaceDAO, WorkspaceHandle } from './workspace'
+import type { SubagentLifecycle, SubagentRunSummary } from './subagent'
 
 export interface ControllerComposition {
   planner: Planner
@@ -12,6 +13,7 @@ export interface ControllerComposition {
     secondary?: Verifier[]
   }
   workspace: WorkspaceDAO
+  subagents?: SubagentLifecycle[]
 }
 
 export interface ControllerStartRequest<TInput = unknown> {
@@ -38,6 +40,7 @@ export interface ControllerRunSummary<TArtifact = unknown> extends ControllerSte
   status: 'completed' | 'failed' | 'awaiting-input'
   workspace: WorkspaceHandle
   metadata?: Record<string, unknown>
+  subagents?: SubagentRunSummary[]
 }
 
 export interface AgentController {

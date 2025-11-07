@@ -237,10 +237,11 @@ export class OpenRouterClient {
                     // Apply comprehensive response preprocessing
                     const sanitizedJson = this.sanitizeResponse(text);
                     const rawObject = JSON.parse(sanitizedJson);
+                    const normalizedObject = this.parseNestedJsonStrings(rawObject);
                     // Apply post-processing for array fields if specified
                     const processedObject = params.arrayFields && params.arrayFields.length > 0
-                        ? this.ensureArrayFields(rawObject, params.arrayFields)
-                        : rawObject;
+                        ? this.ensureArrayFields(normalizedObject, params.arrayFields)
+                        : normalizedObject;
                     // Validate the processed object
                     const validatedObject = params.schema.parse(processedObject);
                     console.log('Enhanced fallback preprocessing succeeded');
@@ -434,6 +435,34 @@ export class OpenRouterClient {
             return result;
         }
         return processObject(processedObj);
+    }
+    parseNestedJsonStrings(value) {
+        if (typeof value === 'string') {
+            const trimmed = value.trim();
+            const looksLikeJson = (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+                (trimmed.startsWith('[') && trimmed.endsWith(']'));
+            if (looksLikeJson) {
+                try {
+                    const parsed = JSON.parse(trimmed);
+                    return this.parseNestedJsonStrings(parsed);
+                }
+                catch {
+                    return value;
+                }
+            }
+            return value;
+        }
+        if (!value || typeof value !== 'object') {
+            return value;
+        }
+        if (Array.isArray(value)) {
+            return value.map((entry) => this.parseNestedJsonStrings(entry));
+        }
+        const result = {};
+        for (const [key, entry] of Object.entries(value)) {
+            result[key] = this.parseNestedJsonStrings(entry);
+        }
+        return result;
     }
     async generateText(params) {
         this.resetUsage();

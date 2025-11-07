@@ -61,38 +61,34 @@ product-agents/                    # Monorepo root
 │   ├── prd-agent/
 │   │   ├── agent/                  # Core agent logic
 │   │   ├── frontend/               # Next.js test frontend
-│   │   ├── mcp-server/             # MCP server wrapper
 │   │   └── package.json
 │   │
 │   ├── research-agent/
 │   │   ├── agent/
 │   │   ├── frontend/
-│   │   ├── mcp-server/
 │   │   └── package.json
 │   │
 │   ├── persona-agent/
 │   │   ├── agent/
 │   │   ├── frontend/
-│   │   ├── mcp-server/
 │   │   └── package.json
 │   │
 │   ├── story-mapper-agent/
 │   │   ├── agent/
 │   │   ├── frontend/
-│   │   ├── mcp-server/
 │   │   └── package.json
 │   │
 │   ├── story-generator-agent/
 │   │   ├── agent/
 │   │   ├── frontend/
-│   │   ├── mcp-server/
 │   │   └── package.json
 │   │
 │   └── story-refiner-agent/
 │       ├── agent/
 │       ├── frontend/
-│       ├── mcp-server/
 │       └── package.json
+├── apps/
+│   └── api/                       # Shared thin HTTP/SSE API backed by @product-agents/product-agent
 ├── turbo.json                      # Turborepo config
 └── package.json
 ```
@@ -905,8 +901,9 @@ npm run build
 npm start
 # Serves complete agent with frontend
 
-# Run as MCP server
-npx @product-agents/prd-agent mcp
+# Run thin API server
+npm run build --workspace=apps/api
+node apps/api/dist/index.js
 
 # Use in code
 import { PRDGeneratorAgent } from '@product-agents/prd-agent'
@@ -921,11 +918,9 @@ const agent = new PRDGeneratorAgent({ apiKey: 'sk-or-...' })
   "version": "1.0.0",
   "exports": {
     ".": "./dist/agent/index.js",
-    "./mcp": "./dist/mcp-server/index.js"
   },
   "bin": {
-    "prd-agent": "./bin/cli.js",
-    "prd-agent-mcp": "./bin/mcp-server.js"
+    "prd-agent": "./bin/cli.js"
   },
   "scripts": {
     "dev": "npm run dev --workspace=frontend",
@@ -935,8 +930,7 @@ const agent = new PRDGeneratorAgent({ apiKey: 'sk-or-...' })
   },
   "workspaces": [
     "agent",
-    "frontend",
-    "mcp-server"
+    "frontend"
   ]
 }
 ```

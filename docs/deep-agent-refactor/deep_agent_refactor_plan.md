@@ -16,10 +16,10 @@
 | `packages/skills/*` | **Skill Modules** | Stateless skills (section writers, analyzers, validators, formatters) | Namespaced per capability; shipped as tree-shakeable imports. |
 | `packages/subagents/*` | **Stateful Subagents** | Persona builder, research synthesizer, story mapper, etc. | Promoted when internal planning/iteration justified. |
 | `packages/shared/*` | **Shared Utilities** | Common types, schema defs, confidence utilities, client SDK | Prune/relocate code from `prd-agent` as needed. |
-| `apps/mcp-server` (existing) | **Thin API Surface** | HTTP/SSE endpoints, auth, rate limiting | Wraps orchestrator core; keeps IO/APIs isolated. |
+| `apps/api` (replaces legacy `apps/mcp-server`) | **Thin API Surface** | HTTP/SSE endpoints, auth, rate limiting | Wraps orchestrator core via `@product-agents/product-agent`; shared across artifact types. |
 
 ## System Boundaries & API Decisions
-- **Thin API:** Retain the existing MCP/API server as the external interface. Refactor it to depend on `packages/product-agent` so other surfaces (CLI, UI, integrations) reuse the same orchestration contract.
+- **Thin API:** Serve requests through the shared `apps/api` package, backed by `@product-agents/product-agent`, so other surfaces (CLI, UI, integrations) reuse the same orchestration contract.
 - **Contract-first:** Export a stable TypeScript SDK (`@product-agents/product-agent`) exposing: `startRun`, `getRun`, `streamRun`, plan/verify schemas, and skill registration helpers.
 - **Artifact Persistence:** Implement a filesystem-backed workspace DAO inside `packages/product-agent`, defaulting to a configurable root path from the central config file with optional environment-variable overrides; keep the storage interface abstract to support future database swaps.
 - **Configuration:** Use single-file manifest-based skill packs (e.g., `prdSkillPack`) published as monorepo references that register skills/subagents with the orchestrator; avoid build-time configuration magic.
@@ -89,7 +89,7 @@
 - Design interfaces for stateful subagents (planning loops, retries); house in `packages/subagents`.
 - Implement persona builder subagent first, using PRD outputs as inputs.
 - Draft architecture for research subagent (needs external data retrieval); capture open design tasks.
-- Wire optional subagents into orchestrator via skill-pack configuration (feature flags).
+- Wire optional subagents into orchestrator via skill-pack configuration.
 - Exit Criteria: Persona subagent functional behind flag; roadmap and contracts in place for research & story mapping.
 
 ### Phase 5 – Hardening & Cleanup
@@ -112,5 +112,5 @@
 ## Risks & Mitigations
 - **Coupling between packages:** Mitigate with explicit interfaces and shared types; enforce via lint rules.
 - **Build complexity:** Avoid new build targets; reuse Turbo pipelines and existing npm workspace configuration.
-- **Feature regression:** Stage refactor behind feature flags and run dual-mode testing during Phase 1–3.
+- **Feature regression:** Stage refactor with incremental toggles and run dual-mode testing during Phase 1–3.
 - **Research subagent unknowns:** Capture design spikes before implementation; may require additional infrastructure (RAG, search).

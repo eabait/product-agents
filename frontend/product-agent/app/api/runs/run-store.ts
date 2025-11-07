@@ -1,5 +1,3 @@
-import { randomUUID } from 'node:crypto'
-
 import type { StartRunPayload } from './schemas'
 import type { UsageSummary } from '@product-agents/agent-core'
 
@@ -18,6 +16,14 @@ export interface RunRecord {
   result?: unknown
   error?: string | null
   clarification?: Record<string, unknown> | null
+  subagentArtifacts?: Record<
+    string,
+    {
+      artifact: unknown
+      metadata?: Record<string, unknown> | null
+      generatedAt: string
+    }
+  >
 }
 
 const MAX_RUN_RECORDS = 50
@@ -46,20 +52,24 @@ const touch = (record: RunRecord): void => {
   record.updatedAt = new Date().toISOString()
 }
 
-export const createRunRecord = (request: StartRunPayload, artifactType: string): RunRecord => {
-  const id = randomUUID()
+export const createRunRecord = (
+  runId: string,
+  request: StartRunPayload,
+  artifactType: string,
+  status: RunStatus = 'pending'
+): RunRecord => {
   const timestamp = new Date().toISOString()
   const record: RunRecord = {
-    id,
+    id: runId,
     artifactType,
-    status: 'pending',
+    status,
     request,
     createdAt: timestamp,
     updatedAt: timestamp,
     progress: []
   }
 
-  runStore.set(id, record)
+  runStore.set(runId, record)
   pruneStore()
   return record
 }
@@ -103,6 +113,31 @@ export const updateRunRecord = (
   return record
 }
 
+export const attachSubagentArtifact = (
+  runId: string,
+  subagentId: string,
+  artifact: unknown,
+  metadata?: Record<string, unknown> | null
+): RunRecord | undefined => {
+  const record = runStore.get(runId)
+  if (!record) {
+    return undefined
+  }
+
+  if (!record.subagentArtifacts) {
+    record.subagentArtifacts = {}
+  }
+
+  record.subagentArtifacts[subagentId] = {
+    artifact,
+    metadata: metadata ?? null,
+    generatedAt: new Date().toISOString()
+  }
+
+  touch(record)
+  return record
+}
+
 export const serializeRunRecord = (record: RunRecord) => ({
   runId: record.id,
   artifactType: record.artifactType,
@@ -114,5 +149,6 @@ export const serializeRunRecord = (record: RunRecord) => ({
   result: record.result ?? null,
   error: record.error ?? null,
   clarification: record.clarification ?? null,
-  progress: record.progress
+  progress: record.progress,
+  subagentArtifacts: record.subagentArtifacts ?? null
 })

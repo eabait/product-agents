@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { prdSkillPack, listPrdSkills } from '@product-agents/skills-prd'
+import { prdSkillPack, listPrdSkills, listPrdSubagents } from '@product-agents/skills-prd'
 import { SECTION_NAMES } from '@product-agents/prd-shared'
 
 test('prdSkillPack exposes expected skills', () => {
@@ -25,4 +25,24 @@ test('listPrdSkills produces copy of manifest entries', () => {
   } as any)
 
   assert.equal(prdSkillPack.skills.length, 8)
+})
+
+test('prdSkillPack declares persona subagent', () => {
+  assert.ok(Array.isArray(prdSkillPack.subagents))
+  const subagents = prdSkillPack.subagents ?? []
+  const persona = subagents.find(entry => entry.id === 'persona.builder')
+  assert.ok(persona, 'persona.builder subagent should be registered')
+  assert.equal(persona?.artifactKind, 'persona')
+})
+
+test('listPrdSubagents returns a defensive copy', () => {
+  const entries = listPrdSubagents()
+  const originalLength = prdSkillPack.subagents?.length ?? 0
+  entries.push({
+    id: 'temp',
+    label: 'Temp',
+    version: '0.0.1',
+    artifactKind: 'temp'
+  })
+  assert.equal(prdSkillPack.subagents?.length ?? 0, originalLength)
 })

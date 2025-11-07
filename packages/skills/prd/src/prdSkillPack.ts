@@ -11,12 +11,21 @@ export interface PrdSkillManifestEntry {
   section?: SectionName
 }
 
+export interface PrdSubagentManifestEntry {
+  id: string
+  label: string
+  version: string
+  artifactKind: string
+  description?: string
+}
+
 export interface PrdSkillPackManifest {
   id: string
   version: string
   label: string
   description?: string
   skills: PrdSkillManifestEntry[]
+  subagents?: PrdSubagentManifestEntry[]
 }
 
 const SECTION_LABELS: Record<SectionName, string> = {
@@ -29,7 +38,7 @@ const SECTION_LABELS: Record<SectionName, string> = {
 
 export const prdSkillPack: PrdSkillPackManifest = {
   id: 'prd.core',
-  version: '0.2.0',
+  version: '0.3.0',
   label: 'PRD Core Skills',
   description: 'Context analysis, section writers, and assembly primitives for PRD generation.',
   skills: [
@@ -62,7 +71,17 @@ export const prdSkillPack: PrdSkillPackManifest = {
       category: 'assembly',
       description: 'Aggregates section outputs, calculates confidence, and emits final artifact metadata.'
     }
+  ],
+  subagents: [
+    {
+      id: 'persona.builder',
+      label: 'Persona Builder',
+      version: '0.1.0',
+      artifactKind: 'persona',
+      description: 'Derives structured personas from generated PRDs.'
+    }
   ]
 }
 
 export const listPrdSkills = (): PrdSkillManifestEntry[] => [...prdSkillPack.skills]
+export const listPrdSubagents = (): PrdSubagentManifestEntry[] => [...(prdSkillPack.subagents ?? [])]

@@ -30,7 +30,7 @@ import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { type ProgressEvent } from "@/components/chat/ProgressIndicator";
 import { contextStorage } from "@/lib/context-storage";
 import { buildEnhancedContextPayload, getContextSummary } from "@/lib/context-utils";
-import { startRun, streamRun } from "@/lib/run-client";
+import { getRun, startRun, streamRun } from "@/lib/run-client";
 import { 
   UI_DIMENSIONS, 
   VALIDATION_LIMITS, 
@@ -158,9 +158,11 @@ function PRDAgentPageContent() {
   
   // Streaming state
   const [progressEvents, setProgressEvents] = useState<ProgressEvent[]>([]);
-  
-  // Derive streaming state from settings
-  const isStreamingEnabled = settings.streaming !== false;
+
+  const activeArtifactType = settings.artifactTypes?.[0] ?? 'prd'
+  const isPersonaMode = activeArtifactType === 'persona'
+  // Derive streaming state from settings (persona runs are batch-only)
+  const isStreamingEnabled = settings.streaming !== false && !isPersonaMode;
   
   // Context panel state
   const [contextOpen, setContextOpen] = useState(false);
@@ -985,11 +987,15 @@ function PRDAgentPageContent() {
       // Build enhanced context payload including categorized context, selected messages, and current PRD
       const existingPRD = getPRDFromMessages(newMessages);
       const contextPayload = buildEnhancedContextPayload(newMessages, existingPRD);
-      
+
+      if (activeArtifactType === 'persona' && !existingPRD) {
+        throw new Error('Please generate a PRD before running the persona builder.');
+      }
+
       if (isStreamingEnabled) {
-        await handleStreamingSubmit(newMessages, contextPayload, userMessage);
+        await handleStreamingSubmit(newMessages, contextPayload, userMessage, existingPRD);
       } else {
-        await handleNonStreamingSubmit(newMessages, contextPayload, userMessage);
+        await handleNonStreamingSubmit(newMessages, contextPayload, userMessage, existingPRD);
       }
     } catch (error) {
       console.error("Chat error:", error);
@@ -1019,21 +1025,29 @@ function PRDAgentPageContent() {
   };
 
   // Streaming submission handler with proper cleanup and error handling
-  const handleStreamingSubmit = async (newMessages: Message[], contextPayload: any, userMessage: Message) => {
+  const handleStreamingSubmit = async (newMessages: Message[], contextPayload: any, userMessage: Message, existingPRD: any) => {
     let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
     let timeoutId: NodeJS.Timeout | null = null;
+    let hasFinalArtifact = false;
+    let runId: string | null = null;
+    let streamedUsageSummary: any = null;
+    let streamedMetadata: any = null;
+    let streamedModel: string | null = settings.model ?? null;
 
     try {
       const run = await startRun({
         messages: newMessages,
         settings,
         contextPayload,
-        artifactType: settings.artifactTypes?.[0] ?? 'prd'
+        artifactType: activeArtifactType,
+        sourceArtifact: existingPRD ?? undefined
       });
 
       if (!run.runId) {
         throw new Error("Run was created without an id");
       }
+
+      runId = run.runId;
 
       const response = await streamRun(run.runId);
 
@@ -1044,29 +1058,36 @@ function PRDAgentPageContent() {
       }
 
       const decoder = new TextDecoder();
-      let streamedUsageSummary: any = null;
-      let streamedMetadata: any = null;
-      let streamedModel: string | null = settings.model ?? null;
       let buffer = '';
       const assistantMessageId = uuidv4();
 
-      // Set up timeout for streaming connection
-      timeoutId = setTimeout(() => {
-        if (reader) {
-          reader.cancel('Stream timeout');
+      const refreshTimeout = () => {
+        if (timeoutId) {
+          clearTimeout(timeoutId);
         }
-        setProgressEvents(prev => [...prev, {
-          type: 'final',
-          timestamp: new Date().toISOString(),
-          error: `Stream timeout after ${STREAM_TIMEOUT_MS / 1000 / 60} minutes`
-        }]);
-      }, STREAM_TIMEOUT_MS);
+        timeoutId = setTimeout(() => {
+          if (reader) {
+            reader.cancel('Stream timeout');
+          }
+          setProgressEvents(prev => [
+            ...prev,
+            {
+              type: 'final',
+              timestamp: new Date().toISOString(),
+              error: `Stream timeout after ${STREAM_TIMEOUT_MS / 1000 / 60} minutes`
+            }
+          ]);
+        }, STREAM_TIMEOUT_MS);
+      };
+
+      refreshTimeout();
       // eslint-disable-next-line no-constant-condition
       while (true) {
         const { done, value } = await reader.read();
-        
+
         if (done) break;
 
+        refreshTimeout();
         buffer += decoder.decode(value, { stream: true });
         
         // Process complete lines from buffer
@@ -1094,6 +1115,14 @@ function PRDAgentPageContent() {
                 }
               }
 
+              if (eventData.artifact?.metadata && typeof eventData.artifact.metadata === 'object') {
+                streamedMetadata = streamedMetadata ?? (eventData.artifact.metadata as Record<string, unknown>);
+                const artifactUsage = (eventData.artifact.metadata as Record<string, unknown>).usage;
+                if (artifactUsage) {
+                  streamedUsageSummary = artifactUsage as any;
+                }
+              }
+
               if (eventData.usage) {
                 streamedUsageSummary = eventData.usage;
               }
@@ -1108,18 +1137,40 @@ function PRDAgentPageContent() {
                 setProgressEvents(prev => [...prev, eventData]);
               } else if (eventData.error) {
                 throw new Error(eventData.error);
-              } else if (eventData.problemStatement || eventData.sections || eventData.solutionOverview) {
-                // Direct PRD object response
-                const messageContent = JSON.stringify(eventData, null, 2);
+              } else if (eventData.artifact) {
+                const artifactPayload = eventData.artifact as Record<string, unknown> | undefined;
+                const artifactData =
+                  artifactPayload && typeof artifactPayload === 'object'
+                    ? ((artifactPayload as Record<string, unknown>).data as unknown) ?? artifactPayload
+                    : eventData.artifact;
+
+                let messageContent: string;
+                if (typeof artifactData === 'string') {
+                  messageContent = artifactData;
+                } else {
+                  try {
+                    messageContent = JSON.stringify(artifactData, null, 2);
+                  } catch {
+                    messageContent = String(artifactData);
+                  }
+                }
+
+                const artifactMetadata =
+                  artifactPayload && typeof artifactPayload === 'object'
+                    ? ((artifactPayload as Record<string, unknown>).metadata as Record<string, unknown> | undefined)
+                    : undefined;
+
                 const assistantMetadata = buildAssistantMetadata(
-                  streamedUsageSummary,
+                  streamedUsageSummary ?? eventData.usage,
                   streamedModel,
-                  streamedMetadata || eventData.metadata
+                  streamedMetadata || eventData.metadata || artifactMetadata
                 );
-                
+
+                hasFinalArtifact = true;
+
                 const assistantMessage: Message = {
                   id: assistantMessageId,
-                  role: "assistant",
+                  role: 'assistant',
                   content: messageContent,
                   timestamp: new Date(),
                   ...(assistantMetadata ? { metadata: assistantMetadata } : {})
@@ -1127,31 +1178,33 @@ function PRDAgentPageContent() {
 
                 const finalMessages = [...newMessages, assistantMessage];
                 updateActiveConversation(conv => {
-                  const shouldUpdateTitle = conv.title === "New PRD" && conv.messages.length === 0;
+                  const shouldUpdateTitle = conv.title === 'New PRD' && conv.messages.length === 0;
                   return {
-                    ...conv, 
+                    ...conv,
                     messages: finalMessages,
                     title: shouldUpdateTitle ? generateTitleFromMessage(userMessage.content) : conv.title
                   };
                 });
                 streamedUsageSummary = null;
                 streamedMetadata = null;
-              } else if (eventData.prd || eventData.content) {
-                // Final result
-                const messageContent = eventData.prd 
-                  ? JSON.stringify(eventData.prd, null, 2)
-                  : (typeof eventData.content === 'object' 
-                      ? JSON.stringify(eventData.content, null, 2)
-                      : eventData.content);
+              } else if (eventData.content) {
+                const contentPayload = eventData.content;
+                const messageContent =
+                  typeof contentPayload === 'string'
+                    ? contentPayload
+                    : JSON.stringify(contentPayload, null, 2);
+
                 const assistantMetadata = buildAssistantMetadata(
                   streamedUsageSummary ?? eventData.usage,
                   streamedModel,
                   streamedMetadata || eventData.metadata
                 );
-                
+
+                hasFinalArtifact = true;
+
                 const assistantMessage: Message = {
                   id: assistantMessageId,
-                  role: "assistant",
+                  role: 'assistant',
                   content: messageContent,
                   timestamp: new Date(),
                   ...(assistantMetadata ? { metadata: assistantMetadata } : {})
@@ -1159,9 +1212,9 @@ function PRDAgentPageContent() {
 
                 const finalMessages = [...newMessages, assistantMessage];
                 updateActiveConversation(conv => {
-                  const shouldUpdateTitle = conv.title === "New PRD" && conv.messages.length === 0;
+                  const shouldUpdateTitle = conv.title === 'New PRD' && conv.messages.length === 0;
                   return {
-                    ...conv, 
+                    ...conv,
                     messages: finalMessages,
                     title: shouldUpdateTitle ? generateTitleFromMessage(userMessage.content) : conv.title
                   };
@@ -1225,20 +1278,106 @@ function PRDAgentPageContent() {
           console.warn('Error releasing reader lock:', error);
         }
       }
+
+      if (!hasFinalArtifact && runId) {
+        try {
+          const runSummary = await getRun(runId);
+          const artifactPayload = (runSummary?.result as Record<string, unknown> | undefined) ??
+            (runSummary?.summary?.artifact as Record<string, unknown> | undefined) ?? null;
+
+          if (artifactPayload) {
+            const artifactData =
+              typeof artifactPayload === 'object'
+                ? ((artifactPayload as Record<string, unknown>).data as unknown) ?? artifactPayload
+                : artifactPayload;
+
+            let messageContent: string;
+            if (typeof artifactData === 'string') {
+              messageContent = artifactData;
+            } else {
+              try {
+                messageContent = JSON.stringify(artifactData, null, 2);
+              } catch {
+                messageContent = String(artifactData);
+              }
+            }
+
+            const assistantMetadata = buildAssistantMetadata(
+              runSummary?.usage ?? null,
+              streamedModel,
+              runSummary?.metadata ?? null
+            );
+
+            const assistantMessage: Message = {
+              id: uuidv4(),
+              role: 'assistant',
+              content: messageContent,
+              timestamp: new Date(),
+              ...(assistantMetadata ? { metadata: assistantMetadata } : {})
+            };
+
+            const finalMessages = [...newMessages, assistantMessage];
+            updateActiveConversation(conv => {
+              const shouldUpdateTitle = conv.title === 'New PRD' && conv.messages.length === 0;
+              return {
+                ...conv,
+                messages: finalMessages,
+                title: shouldUpdateTitle ? generateTitleFromMessage(userMessage.content) : conv.title
+              };
+            });
+          }
+        } catch (fallbackError) {
+          console.warn('Failed to fetch run summary after stream completion', fallbackError);
+        }
+      }
     }
   };
 
   // Non-streaming submission handler (original logic)
-  const handleNonStreamingSubmit = async (newMessages: Message[], contextPayload: any, userMessage: Message) => {
+  const handleNonStreamingSubmit = async (newMessages: Message[], contextPayload: any, userMessage: Message, existingPRD: any) => {
     const runResult = await startRun({
       messages: newMessages,
       settings,
       contextPayload,
-      artifactType: settings.artifactTypes?.[0] ?? 'prd'
+      artifactType: activeArtifactType,
+      sourceArtifact: existingPRD ?? undefined
     });
 
-    const data: any = runResult.result ?? {};
-    if (data.error) throw new Error(data.error);
+    if (activeArtifactType === 'persona') {
+      const personaPayload = (runResult.result as Record<string, unknown> | undefined) ?? {}
+      const personaArtifact = (runResult.artifact as Record<string, unknown> | undefined) ??
+        ((personaPayload?.artifact as Record<string, unknown> | undefined) ?? null)
+
+      if (!personaArtifact) {
+        throw new Error('Persona subagent did not return an artifact payload')
+      }
+
+      const messageContent = JSON.stringify(personaArtifact, null, 2)
+      const assistantMetadata = buildAssistantMetadata(null, settings.model ?? null, runResult.metadata ?? undefined)
+
+      const assistantMessage: Message = {
+        id: uuidv4(),
+        role: "assistant",
+        content: messageContent,
+        timestamp: new Date(),
+        ...(assistantMetadata ? { metadata: assistantMetadata } : {})
+      }
+
+      const finalMessages = [...newMessages, assistantMessage]
+      updateActiveConversation(conv => {
+        const shouldUpdateTitle = conv.title === "New PRD" && conv.messages.length === 0
+        return {
+          ...conv,
+          messages: finalMessages,
+          title: shouldUpdateTitle ? generateTitleFromMessage(userMessage.content) : conv.title
+        }
+      })
+
+      return
+    }
+
+    const data: any = runResult.result ?? {}
+    if (data.error) throw new Error(data.error)
 
     // Handle both structured data and string content
     let messageContent: string;

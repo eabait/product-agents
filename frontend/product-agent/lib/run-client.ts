@@ -6,6 +6,8 @@ interface StartRunParams {
   contextPayload?: unknown
   targetSections?: string[]
   artifactType?: string
+  runId?: string
+  sourceArtifact?: unknown
 }
 
 interface StartRunResult {
@@ -16,10 +18,47 @@ interface StartRunResult {
   usage?: Record<string, unknown> | null
   streamUrl?: string
   artifactType?: string
+  artifact?: unknown
 }
 
 export const startRun = async (params: StartRunParams): Promise<StartRunResult> => {
   const artifactType = params.artifactType ?? params.settings.artifactTypes?.[0] ?? 'prd'
+  if (artifactType === 'persona') {
+    if (!params.sourceArtifact) {
+      throw new Error('Persona generation requires an existing PRD artifact.')
+    }
+
+    const response = await fetch('/api/subagents/persona', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        runId: params.runId,
+        artifact: {
+          data: params.sourceArtifact
+        },
+        overrides: {
+          model: params.settings.model,
+          temperature: params.settings.temperature,
+          maxOutputTokens: params.settings.maxTokens
+        }
+      })
+    })
+
+    if (!response.ok) {
+      const errorPayload = await response.json().catch(() => ({}))
+      throw new Error(errorPayload?.error ?? `Persona run failed (${response.status})`)
+    }
+
+    const payload = await response.json()
+    return {
+      status: 'completed',
+      result: payload,
+      artifact: payload?.artifact ?? null,
+      metadata: payload?.metadata ?? null,
+      usage: null,
+      artifactType
+    }
+  }
   const streamingEnabled = params.settings.streaming !== false
 
   if (!streamingEnabled) {

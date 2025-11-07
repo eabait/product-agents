@@ -1,3 +1,6 @@
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
 import { NextRequest, NextResponse } from "next/server";
 import { ModelCapability, mapOpenRouterToAgentCapabilities } from "@product-agents/model-compatibility";
 
@@ -99,7 +102,11 @@ function doesModelMeetRequirements(model: OpenRouterModel, requiredCapabilities:
 
 export async function GET(request: NextRequest) {
   try {
-    const apiKey = process.env.OPENROUTER_API_KEY || request.headers.get('x-api-key');
+    const envApiKey = (process.env.OPENROUTER_API_KEY ?? '').trim()
+    const headerApiKey = request.headers.get('x-api-key')?.trim() ?? ''
+    const queryApiKey = request.nextUrl.searchParams.get('apiKey')?.trim() ?? ''
+
+    const apiKey = [envApiKey, headerApiKey, queryApiKey].find(key => key.length > 0)
     
     if (!apiKey) {
       return NextResponse.json(

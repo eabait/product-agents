@@ -79,6 +79,10 @@ export type ProgressEventType =
   | 'verification.issue'
   | 'artifact.delivered'
   | 'run.status'
+  | 'subagent.started'
+  | 'subagent.progress'
+  | 'subagent.completed'
+  | 'subagent.failed'
 
 export interface ProgressEvent<TPayload = unknown> {
   type: ProgressEventType

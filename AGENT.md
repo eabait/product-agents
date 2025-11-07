@@ -35,9 +35,9 @@ agent-name/
 │   ├── app/api/       # API routes (proxy to backend)
 │   ├── components/    # Agent-specific components
 │   └── lib/          # Utilities and schemas
-├── agent/             # Backend HTTP server
-│   └── src/          # Agent logic and HTTP endpoints
-└── mcp-server/        # Model Context Protocol integration
+├── agent/             # Domain-specific orchestration adapters
+│   └── src/          # Planner/skill wiring, legacy utilities
+└── (shared) apps/api/ # Thin HTTP/SSE API backed by @product-agents/product-agent
 ```
 
 ## Design Decisions
@@ -48,7 +48,7 @@ agent-name/
 
 **Communication Flow**:
 ```
-Frontend UI → Next.js API Routes → Backend HTTP Server → Agent Logic → LLM APIs
+Frontend UI → Next.js API Routes → apps/api (thin server) → Product Agent controller → LLM APIs
 ```
 
 **Key Design Patterns**:
@@ -65,10 +65,11 @@ POST /api/chat           // Main agent interaction
 GET  /api/agent-defaults // Agent configuration and capabilities
 GET  /api/models        // Compatible models filtered by agent requirements
 
-// Backend HTTP Server (Express)
+// Thin API server (apps/api)
 GET  /health           // Agent info, defaults, and health check
-POST /prd              // Create new PRD
-POST /prd/edit         // Edit existing PRD
+POST /runs             // Start a new agent run (streaming)
+GET  /runs/:runId      // Fetch run summary
+GET  /runs/:runId/stream // Stream progress/events/results
 ```
 
 #### Request/Response Format

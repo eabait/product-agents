@@ -16,6 +16,7 @@ import type { Artifact, StepId } from '../contracts/core'
 import type { WorkspaceDAO, WorkspaceEvent, WorkspaceHandle } from '../contracts/workspace'
 import type { Planner } from '../contracts/planner'
 import type { ClarificationResult } from '@product-agents/prd-shared'
+import type { SubagentLifecycle, SubagentRunSummary } from '../contracts/subagent'
 
 type Clock = () => Date
 
@@ -36,6 +37,7 @@ interface ExecutionContext {
   verification?: VerificationResult
   status: RunStatus
   clarification?: ClarificationResult
+  subagentResults: SubagentRunSummary[]
 }
 
 const STATUS_RUNNING: RunStatus = 'running'
@@ -149,6 +151,7 @@ export class GraphController implements AgentController {
   readonly skillRunner: SkillRunner
   readonly verifier: Verifier
   readonly workspace: WorkspaceDAO
+  readonly subagents: SubagentLifecycle[]
 
   private readonly config: ProductAgentConfig
   private readonly clock: Clock
@@ -166,6 +169,7 @@ export class GraphController implements AgentController {
     this.skillRunner = composition.skillRunner
     this.verifier = composition.verifier.primary
     this.workspace = composition.workspace
+    this.subagents = composition.subagents ?? []
     this.verifierGroup = composition.verifier
     this.config = config
     this.clock = options?.clock ?? (() => new Date())
@@ -246,7 +250,8 @@ export class GraphController implements AgentController {
       runContext,
       plan,
       skillResults: [],
-      status: STATUS_RUNNING
+      status: STATUS_RUNNING,
+      subagentResults: []
     }
 
     try {
@@ -267,6 +272,8 @@ export class GraphController implements AgentController {
           throw new Error('Verification failed')
         }
       }
+
+      await this.runSubagents(executionContext, options)
     } catch (error) {
       executionContext.status = STATUS_FAILED
       await this.workspace.appendEvent(
@@ -550,6 +557,162 @@ export class GraphController implements AgentController {
     return aggregatedResult
   }
 
+  private async runSubagents(
+    context: ExecutionContext,
+    options?: ControllerStartOptions
+  ): Promise<void> {
+    if (!context.artifact || this.subagents.length === 0) {
+      return
+    }
+
+    if (context.status !== STATUS_COMPLETED) {
+      return
+    }
+
+    const runId = context.runContext.runId
+    const sourceKind = context.runContext.request.artifactKind
+    const shouldRunSubagent = (subagent: SubagentLifecycle) => {
+      if (
+        subagent.metadata.sourceKinds.length > 0 &&
+        !subagent.metadata.sourceKinds.includes(sourceKind)
+      ) {
+        return false
+      }
+      return true
+    }
+
+    for (const subagent of this.subagents) {
+      if (!shouldRunSubagent(subagent)) {
+        continue
+      }
+
+      emitEvent(
+        options,
+        toProgressEvent({
+          type: 'subagent.started',
+          runId,
+          payload: {
+            subagentId: subagent.metadata.id,
+            artifactKind: subagent.metadata.artifactKind,
+            label: subagent.metadata.label
+          },
+          message: `${subagent.metadata.label ?? subagent.metadata.id} started`
+        })
+      )
+
+      await this.workspace.appendEvent(
+        runId,
+        createWorkspaceEvent(runId, 'subagent', {
+          action: 'start',
+          subagentId: subagent.metadata.id,
+          artifactKind: subagent.metadata.artifactKind
+        })
+      )
+
+      try {
+        const result = await subagent.execute({
+          params: {},
+          run: context.runContext,
+          sourceArtifact: context.artifact,
+          emit: event =>
+            emitEvent(
+              options,
+              toProgressEvent({
+                type: 'subagent.progress',
+                runId,
+                payload: {
+                  subagentId: subagent.metadata.id,
+                  event
+                }
+              })
+            )
+        })
+
+        await this.workspace.writeArtifact(runId, result.artifact)
+
+        context.subagentResults.push({
+          subagentId: subagent.metadata.id,
+          artifact: result.artifact,
+          metadata: result.metadata
+        })
+
+        if (!context.runContext.metadata) {
+          context.runContext.metadata = {}
+        }
+
+        const existingSubagents =
+          (context.runContext.metadata.subagents as Record<string, unknown> | undefined) ?? {}
+
+        existingSubagents[subagent.metadata.id] = {
+          artifactId: result.artifact.id,
+          artifactKind: result.artifact.kind,
+          metadata: result.metadata ?? {},
+          label: result.artifact.label,
+          version: result.artifact.version
+        }
+
+        context.runContext.metadata.subagents = existingSubagents
+
+        await this.workspace.appendEvent(
+          runId,
+          createWorkspaceEvent(runId, 'subagent', {
+            action: 'complete',
+            subagentId: subagent.metadata.id,
+            artifactId: result.artifact.id,
+            artifactKind: result.artifact.kind
+          })
+        )
+
+        emitEvent(
+          options,
+          toProgressEvent({
+            type: 'subagent.completed',
+            runId,
+            payload: {
+              subagentId: subagent.metadata.id,
+              artifactId: result.artifact.id,
+              artifactKind: result.artifact.kind
+            },
+            message: `${subagent.metadata.label ?? subagent.metadata.id} completed`
+          })
+        )
+      } catch (error) {
+        await this.workspace.appendEvent(
+          runId,
+          createWorkspaceEvent(runId, 'subagent', {
+            action: 'failed',
+            subagentId: subagent.metadata.id,
+            error: error instanceof Error ? error.message : String(error)
+          })
+        )
+
+        emitEvent(
+          options,
+          toProgressEvent({
+            type: 'subagent.failed',
+            runId,
+            payload: {
+              subagentId: subagent.metadata.id,
+              error: error instanceof Error ? error.message : String(error)
+            },
+            message: error instanceof Error ? error.message : 'Subagent failed'
+          })
+        )
+
+        if (!context.runContext.metadata) {
+          context.runContext.metadata = {}
+        }
+        const failures =
+          (context.runContext.metadata.subagentFailures as Record<string, unknown> | undefined) ?? {}
+        failures[subagent.metadata.id] = {
+          error: error instanceof Error ? error.message : String(error),
+          timestamp: this.clock().toISOString()
+        }
+        context.runContext.metadata.subagentFailures = failures
+      }
+    }
+  }
+
   private toSummary<TArtifact>(
     context: ExecutionContext,
     completedAt: Date
@@ -562,7 +725,8 @@ export class GraphController implements AgentController {
       completedAt,
       status: toControllerStatus(context.status),
       workspace: context.runContext.workspace,
-      metadata: context.runContext.metadata
+      metadata: context.runContext.metadata,
+      subagents: context.subagentResults.length > 0 ? context.subagentResults : undefined
     }
   }
 }

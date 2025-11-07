@@ -1,4 +1,4 @@
-import { readFile, access } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -35,12 +35,17 @@ const resolveFromParent = async (specifier, parentURL) => {
 
   const candidates = TS_EXTENSIONS.some(ext => specifier.endsWith(ext))
     ? [basePath]
-    : TS_EXTENSIONS.map(ext => `${basePath}${ext}`)
+    : [
+        ...TS_EXTENSIONS.map(ext => `${basePath}${ext}`),
+        ...TS_EXTENSIONS.map(ext => path.join(basePath, `index${ext}`))
+      ]
 
   for (const candidate of candidates) {
     try {
-      await access(candidate)
-      return pathToFileURL(candidate).href
+      const fileStat = await stat(candidate)
+      if (fileStat.isFile()) {
+        return pathToFileURL(candidate).href
+      }
     } catch {
       // continue trying candidates
     }
@@ -73,8 +78,10 @@ const resolveAlias = async (specifier) => {
 
   for (const candidate of attemptCandidates) {
     try {
-      await access(candidate)
-      return pathToFileURL(candidate).href
+      const fileStat = await stat(candidate)
+      if (fileStat.isFile()) {
+        return pathToFileURL(candidate).href
+      }
     } catch {
       // keep trying
     }
@@ -112,7 +119,15 @@ export async function resolve(specifier, context, defaultResolve) {
 
 export async function load(url, context, defaultLoad) {
   if (TS_EXTENSIONS.some(ext => url.endsWith(ext))) {
-    const source = await readFile(new URL(url), 'utf8')
+    let source
+    try {
+      source = await readFile(new URL(url), 'utf8')
+    } catch (error) {
+      if (error && error.code === 'EISDIR') {
+        console.error('[ts-loader] Attempted to load directory as file:', url)
+      }
+      throw error
+    }
     const transpiled = ts.transpileModule(source, {
       compilerOptions: {
         module: ts.ModuleKind.ESNext,

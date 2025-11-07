@@ -147,21 +147,28 @@ Ensure `PRD_AGENT_URL` points to your running backend, and set `OPENROUTER_API_K
 Root (turborepo):
 - `npm run dev` — turbo run dev (frontend only by default)
 - `npm run build` — turbo run build for all packages
-- `npm run test` — turbo run test
-- `npm run lint` — turbo run lint
+- `npm run test` — turbo run test (runs every workspace’s test suite)
+- `npm run lint` — turbo run lint (runs every workspace’s lint task)
+- `npm run lint:fix` — turbo run lint:fix (applies auto-fixes where available)
 - `npm run clean` — clean build outputs
+
+Validating changes locally:
+- Run `npm run lint` from the repo root to execute all lint jobs; use `npm run lint:fix` to apply safe fixes.
+- Run `npm run test` from the repo root to execute the full workspace test matrix.
+- To validate a single package, scope the turbo run: e.g. `npx turbo run lint --filter=frontend/product-agent` or `npx turbo run test --filter=packages/product-agent`.
 
 PRD Agent workspaces:
 - `packages/prd-agent/agent`: `npm run start-http`, `npm run build`, `npm run dev` (build watch), `npm run test`
 - `frontend/product-agent`: `npm run dev`, `npm run build`, `npm run start`, `npm run lint`
-- `packages/prd-agent/mcp-server`: `npm run build`, `npm run dev`
+- `apps/api`: `npm run dev`, `npm run build`, `npm run start`
 
 
-## MCP Server (optional)
+## Thin API Server
 ```
-cd packages/prd-agent/mcp-server
+cd apps/api
 npm run build
-# Binary available as `prd-agent-mcp` (see package bin). Integrate per your MCP host tooling.
+npm run start
+# or npm run dev for watch mode
 ```
 
 

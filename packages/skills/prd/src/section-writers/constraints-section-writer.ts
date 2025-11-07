@@ -15,8 +15,28 @@ import {
   MIN_ASSUMPTION_LENGTH
 } from '@product-agents/prd-shared'
 
+const normalizePlanAction = (action: string): 'add' | 'update' | 'remove' => {
+  const normalized = action.toLowerCase().trim()
+  if (normalized === 'modify' || normalized === 'edit') return 'update'
+  if (normalized === 'delete') return 'remove'
+  if (normalized === 'append' || normalized === 'insert') return 'add'
+  return normalized === 'update' || normalized === 'remove' ? normalized : 'add'
+}
+
 const ConstraintsPlanOperationSchema = z.object({
-  action: z.enum(['add', 'update', 'remove']).default('add'),
+  action: z
+    .union([
+      z.literal('add'),
+      z.literal('update'),
+      z.literal('remove'),
+      z.literal('modify'),
+      z.literal('edit'),
+      z.literal('delete'),
+      z.literal('append'),
+      z.literal('insert')
+    ])
+    .default('add')
+    .transform(value => normalizePlanAction(value)),
   reference: z.string().optional(),
   value: z.string().optional(),
   rationale: z.string().optional()

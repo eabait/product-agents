@@ -1,0 +1,30 @@
+{
+  "name": "@product-agents/api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Thin HTTP API for the product-agent orchestrator",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsup --config tsup.config.ts",
+    "dev": "tsup --config tsup.config.ts --watch",
+    "start": "node dist/index.js",
+    "clean": "rm -rf dist",
+    "lint": "eslint \"src/**/*.ts\"",
+    "lint:fix": "eslint \"src/**/*.{ts,tsx}\" --fix"
+  },
+  "dependencies": {
+    "@product-agents/product-agent": "*",
+    "@product-agents/prd-shared": "*",
+    "@product-agents/agent-core": "*",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "tsup": "^7.2.0",
+    "typescript": "^5.0.0",
+    "eslint": "^8.45.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "eslint-plugin-import": "^2.28.0"
+  }
+}

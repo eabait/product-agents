@@ -13,6 +13,8 @@
   },
   "dependencies": {
     "@product-agents/agent-core": "*",
+    "@product-agents/product-agent": "*",
+    "@product-agents/skills-prd": "*",
     "@product-agents/model-compatibility": "*",
     "@radix-ui/react-checkbox": "^1.3.3",
     "@radix-ui/react-collapsible": "^1.1.12",

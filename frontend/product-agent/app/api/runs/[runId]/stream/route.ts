@@ -1,6 +1,5 @@
 import { NextRequest } from 'next/server'
 
-import { buildBackendRequest } from '../../helpers'
 import { getRunRecord, updateRunRecord } from '../../run-store'
 
 interface RouteParams {
@@ -33,14 +32,25 @@ const handleEventForStore = (runId: string, eventType: string, data: any) => {
         clarification: data ?? null
       })
       break
-    case 'complete':
+    case 'complete': {
+      const artifact = data?.artifact ?? null
+      const metadata =
+        (data?.metadata as Record<string, unknown> | undefined) ??
+        (artifact?.metadata as Record<string, unknown> | undefined) ??
+        null
+      const usageCandidate =
+        (metadata && (metadata as any).usage) ??
+        (data?.metadata?.usage as any) ??
+        (data?.usage as any) ??
+        null
       updateRunRecord(runId, {
         status: 'completed',
-        result: data ?? null,
-        metadata: (data?.metadata as Record<string, unknown> | undefined) ?? null,
-        usage: (data?.metadata?.usage as any) ?? (data?.usage as any) ?? null
+        result: artifact ?? data ?? null,
+        metadata,
+        usage: usageCandidate
       })
       break
+    }
     case 'error':
       updateRunRecord(runId, {
         status: 'failed',
@@ -62,7 +72,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     return new Response(JSON.stringify({ error: 'Run not found' }), { status: 404 })
   }
 
-  const backendRequest = buildBackendRequest({ payload: record.request, streaming: true })
   const upstreamController = new AbortController()
 
   const abortHandler = () => {
@@ -82,10 +91,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
   let backendResponse: Response
   try {
-    backendResponse = await fetch(`${PRD_AGENT_URL}${backendRequest.endpoint}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(backendRequest.body),
+    backendResponse = await fetch(`${PRD_AGENT_URL}/runs/${record.id}/stream`, {
+      method: 'GET',
+      headers: { Accept: 'text/event-stream' },
       signal: upstreamController.signal
     })
   } catch (error) {
@@ -130,13 +138,22 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
   const stream = new ReadableStream({
     async start(controller) {
       let buffer = ''
-      const timeout = setTimeout(() => {
-        reader.cancel('Stream timeout')
-        updateRunRecord(record.id, {
-          status: 'failed',
-          error: `Stream timeout after ${STREAM_TIMEOUT_MS / 1000}s`
-        })
-      }, STREAM_TIMEOUT_MS)
+      let timeout: NodeJS.Timeout | null = null
+
+      const refreshTimeout = () => {
+        if (timeout) {
+          clearTimeout(timeout)
+        }
+        timeout = setTimeout(() => {
+          reader.cancel('Stream timeout')
+          updateRunRecord(record.id, {
+            status: 'failed',
+            error: `Stream timeout after ${STREAM_TIMEOUT_MS / 1000}s`
+          })
+        }, STREAM_TIMEOUT_MS)
+      }
+
+      refreshTimeout()
 
       try {
         // eslint-disable-next-line no-constant-condition
@@ -147,6 +164,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           }
 
           if (value) {
+            refreshTimeout()
             controller.enqueue(value)
             buffer += decoder.decode(value, { stream: true })
 
@@ -194,7 +212,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         }
         controller.error(error)
       } finally {
-        clearTimeout(timeout)
+        if (timeout) {
+          clearTimeout(timeout)
+        }
         request.signal.removeEventListener('abort', abortHandler)
         controller.close()
       }
