@@ -42,12 +42,26 @@
 - [x] Add tests covering orchestrator + subagent integration flow.
 
 ## Phase 5 – Hardening & Cleanup
-- [ ] Remove deprecated orchestrator utilities from `packages/prd-agent`.
+- [x] Remove deprecated orchestrator utilities from the retired PRD bundle.
+  - [x] Inventory every legacy file (`prd-orchestrator-agent.ts`, HTTP utilities, adapters) and map replacements inside `packages/product-agent` + `apps/api`.
+  - [x] Delete the legacy code + exports once consumers are updated so only the new controller/skill packs remain.
+  - [x] Run targeted TypeScript builds/tests to ensure zero stray imports remain.
 - [ ] Update documentation and READMEs to reflect new package layout and config.
+  - [ ] Refresh root README + AGENT.md with the deep agent architecture diagram/text.
+  - [ ] Update `docs/deep-agent-refactor/*` and package-level READMEs with migration notes + new config knobs.
+  - [ ] Capture a short changelog blurb for PRD consumers covering API/env deltas.
 - [ ] Ensure CI/CD pipelines reference new packages and run relevant tests.
-- [ ] Publish migration notes for internal consumers (SDK/API changes).
+  - [ ] Audit Turbo graph, GitHub Actions (or equivalent), and deployment manifests for old paths (`apps/mcp-server`, legacy frontend).
+  - [ ] Add/verify jobs for `run_e2e.sh`, subagent suites, and PRD skill-pack contract tests.
+  - [ ] Confirm caches/artifacts track the relocated frontend + `apps/api`.
 - [ ] Audit repo for legacy references (imports, paths) and clean up.
+  - [ ] Use `rg` (plus codemods when safe) to flag deprecated identifiers/env vars across code + docs.
+  - [ ] Add a temporary lint/prohibit rule to prevent reintroduction.
+  - [ ] Track findings in a punch list until `rg` shows zero matches.
 - [ ] Final regression pass across backend and frontend.
+  - [ ] Run unit + contract tests per package, backend smoke via `apps/api`, and UI e2e flow.
+  - [ ] Exercise persona/subagent flows introduced in Phase 4.
+  - [ ] Archive logs/results for release notes and sign-off.
 
 ## Phase 6 – Planner Intelligence & Multi-Artifact Orchestration
 - [ ] Replace the hardcoded PRD planner with an intelligent planner that dynamically composes plans from available skills and subagents.
@@ -58,7 +72,7 @@
 
 ## Phase 0 – Audit & Scaffolding (Completed)
 - [x] Inventory current orchestrator flows, section writers, analyzers, and shared utilities.
-  - **Orchestrator:** `packages/prd-agent/agent/src/prd-orchestrator-agent.ts` drives generation/edit flows (`handleFullGeneration`, `handleEditOperation`, `generateSectionsWithProgress`) with streaming progress events and metadata assembly via `buildPRDMetadata`. HTTP surface in `packages/prd-agent/agent/src/http-server.ts` wraps it with env-driven defaults and validation helpers.
+  - **Orchestrator:** `packages/product-agent/src/compositions/prd-controller.ts` composes the planner, skill runner, verifier, subagents, and workspace DAO. The thin HTTP surface in `apps/api/src/index.ts` loads `product-agent.config.ts`, streams progress events, and exposes `/prd` + `/runs` endpoints.
   - **Analyzers:** `ContextAnalyzer`, `ClarificationAnalyzer`, and `SectionDetectionAnalyzer` (plus `base-analyzer.ts`) coordinate routing decisions and clarification prompts; each pulls runtime overrides from `agent-metadata`.
   - **Section writers:** Target users, solution, key features, success metrics, and constraints writers inherit `BaseSectionWriter`, using shared prompt builders in `section-writers/*.ts`.
   - **Shared utilities:** `utilities.ts` (HTTP helpers + settings validation), `utils/confidence-assessment.ts`, `utils/post-process-structured-response.ts`, and cross-package modules in `packages/shared/*` (`agent-core`, `model-compatibility`, `types`, `openrouter-client`, `ui-components`).

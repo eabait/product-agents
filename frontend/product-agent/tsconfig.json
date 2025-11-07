@@ -35,8 +35,6 @@
       "@product-agents/prd-shared/*": ["../../packages/shared/prd-shared/src/*"],
       "@product-agents/skills-prd": ["../../packages/skills/prd/src/index.ts"],
       "@product-agents/skills-prd/*": ["../../packages/skills/prd/src/*"],
-      "@product-agents/prd-agent": ["../../packages/prd-agent/agent/src"],
-      "@product-agents/prd-agent/*": ["../../packages/prd-agent/agent/src/*"],
       "@product-agents/research-agent": ["../../packages/research-agent/agent/src"],
       "@product-agents/research-agent/*": ["../../packages/research-agent/agent/src/*"],
       "@product-agents/persona-agent": ["../../packages/persona-agent/agent/src"],

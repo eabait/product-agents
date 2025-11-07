@@ -5,12 +5,9 @@
   "private": true,
   "workspaces": [
     "apps/api",
-    "packages/prd-agent",
     "packages/shared/*",
     "packages/product-agent",
     "packages/product-agent/*",
-    "packages/prd-agent/agent",
-    "packages/prd-agent/*",
     "packages/skills/*",
     "packages/research-agent/*",
     "packages/persona-agent/*",

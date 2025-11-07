@@ -12,7 +12,7 @@
 | --- | --- | --- | --- |
 | `packages/product-agent` | **Deep Orchestrator Core** | Graph controller, planner, skill runner, verifier adapter, workspace DAO, run types | Primary runtime API; PRD is the first specialization. |
 | `frontend/product-agent` | **Product Agent Frontend** | Next.js UI for interacting with the deep product agent | Rehomes existing PRD frontend; future-proof for multi-artifact workflows. |
-| `packages/prd-agent` | **Domain Bundle** | PRD-specific plan templates, skill wiring, prompts, config | Becomes a composition layer that consumes `product-agent`. |
+| Legacy PRD bundle (removed) | **Legacy Domain Bundle** | PRD-specific plan templates, skill wiring, prompts, config | Removed during Phase 5; domain wiring now lives in `packages/product-agent` + `packages/skills/prd`. |
 | `packages/skills/*` | **Skill Modules** | Stateless skills (section writers, analyzers, validators, formatters) | Namespaced per capability; shipped as tree-shakeable imports. |
 | `packages/subagents/*` | **Stateful Subagents** | Persona builder, research synthesizer, story mapper, etc. | Promoted when internal planning/iteration justified. |
 | `packages/shared/*` | **Shared Utilities** | Common types, schema defs, confidence utilities, client SDK | Prune/relocate code from `prd-agent` as needed. |
@@ -93,7 +93,7 @@
 - Exit Criteria: Persona subagent functional behind flag; roadmap and contracts in place for research & story mapping.
 
 ### Phase 5 – Hardening & Cleanup
-- Remove deprecated orchestrator utilities from `packages/prd-agent`.
+- Remove any remaining deprecated orchestrator utilities tied to the legacy PRD-specific package.
 - Update tests, fixtures, and docs to reference new package structure.
 - Add migration notes for consumers (SDK/API changes, environment variables).
 - Exit Criteria: Repo lint/tests green; documentation updated; no unused legacy code remains.
@@ -105,7 +105,7 @@
 - Measure run telemetry parity before/after refactor using existing logging.
 
 ## Migration & Backwards Compatibility
-- Provide interim adapters so existing consumers of `packages/prd-agent` continue to function until final cleanup.
+- Provide interim adapters so existing consumers of the legacy PRD bundle continue to function until final cleanup.
 - Align environment variables/config files between backend and UI; update deployment manifests incrementally.
 - Document any new CLI commands or SDK entry points early to avoid breaking automation.
 

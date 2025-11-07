@@ -25,7 +25,6 @@
       "@product-agents/product-agent": ["./packages/product-agent/src"],
       "@product-agents/prd-shared": ["./packages/shared/prd-shared/src/index.ts"],
       "@product-agents/skills-prd": ["./packages/skills/prd/src/index.ts"],
-      "@product-agents/prd-agent": ["./packages/prd-agent/agent/src"],
       "@product-agents/research-agent": ["./packages/research-agent/agent/src"],
       "@product-agents/persona-agent": ["./packages/persona-agent/agent/src"],
       "@product-agents/story-mapper-agent": ["./packages/story-mapper-agent/agent/src"],

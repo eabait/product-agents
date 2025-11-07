@@ -1,6 +1,6 @@
 # PRD Orchestrator Agent – Architectural History
 
-This log captures the major architecture shifts to `packages/prd-agent/agent/src/prd-orchestrator-agent.ts`, with an emphasis on how worker orchestration and platform capabilities evolved in line with the principles outlined in `blog/article.md` (context planning, creation vs. edition, and UX transparency).
+This log captures the major architecture shifts of the legacy PRD orchestrator (now superseded by the `packages/product-agent` controller), with an emphasis on how worker orchestration and platform capabilities evolved in line with the principles outlined in `blog/article.md` (context planning, creation vs. edition, and UX transparency).
 
 # VERSION v0
 

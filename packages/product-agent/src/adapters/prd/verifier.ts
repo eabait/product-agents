@@ -1,6 +1,6 @@
 import type { Verifier, VerificationRequest, VerificationResult, VerificationIssue } from '../../contracts/verifier'
 import type { Artifact } from '../../contracts/core'
-import type { SectionRoutingResponse } from '@product-agents/prd-agent'
+import type { SectionRoutingResponse } from '@product-agents/prd-shared'
 
 interface PrdVerifierOptions {
   clock?: () => Date

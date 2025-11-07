@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENV_FILE="${ROOT_DIR}/packages/prd-agent/agent/.env"
+ENV_FILE="${ROOT_DIR}/apps/api/.env"
 
 if [[ ! -f "$ENV_FILE" ]]; then
   echo "Environment file not found at ${ENV_FILE}" >&2

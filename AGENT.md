@@ -272,7 +272,7 @@ npm install <package-name> -w frontend/product-agent
 npm install <package-name> -w packages/shared/ui-components
 
 # Install dev dependency in specific package  
-npm install <package-name> -D -w packages/prd-agent/agent
+npm install <package-name> -D -w apps/api
 
 # Install dependency in all frontend packages
 npm install <package-name> -w frontend/product-agent -w packages/persona-agent/frontend
@@ -284,7 +284,7 @@ npm install <package-name> -w frontend/product-agent -w packages/persona-agent/f
 npm install lucide-react -w frontend/product-agent -w packages/persona-agent/frontend
 
 # Add a backend utility to a specific agent
-npm install express-rate-limit -w packages/prd-agent/agent
+npm install express-rate-limit -w apps/api
 
 # Add a shared utility that all packages can use
 npm install lodash -w packages/shared/agent-core

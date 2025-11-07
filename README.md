@@ -22,16 +22,17 @@ Included tooling (already managed via workspaces):
 
 ## Repository Structure
 ```
+apps/
+├─ api/                    # Thin HTTP/SSE server backed by @product-agents/product-agent
+
+frontend/
+├─ product-agent/          # Next.js UI and proxy API routes
+
 packages/
-├─ prd-agent/              # PRD agent (most complete)
-│  ├─ agent/               # Backend HTTP server
-│  └─ frontend/            # Next.js UI and API routes (proxy to backend)
-├─ shared/
-│  ├─ agent-core/          # Base agent classes/utilities
-│  ├─ model-compatibility/ # Model capability system
-│  ├─ openrouter-client/   # OpenRouter + Vercel AI SDK client
-│  └─ ui-components/       # Reusable React components
-└─ (other agents scaffolds)
+├─ product-agent/          # Deep agent orchestrator core
+├─ skills/prd/             # PRD skill pack (analyzers, section writers)
+├─ shared/*                # Agent core, model compatibility, PRD schemas, UI kit, etc.
+└─ (other agent scaffolds)
 ```
 
 
@@ -41,19 +42,17 @@ The project integrates with OpenRouter for AI models. You need an OpenRouter API
 Where to obtain: Create an account and key at openrouter.ai (do not commit your key).
 
 Recommended local setup files:
-- Backend: `packages/prd-agent/agent/.env`
+- Backend: `apps/api/.env`
 - Frontend: `frontend/product-agent/.env.local`
 
 Required/optional variables by component:
 
-Backend HTTP API (`packages/prd-agent/agent/.env`)
+Backend HTTP API (`apps/api/.env`)
 - `OPENROUTER_API_KEY`: REQUIRED unless passed per-request in settings
-- `PRD_AGENT_HTTP_HOST`: Optional, default `0.0.0.0`
-- `PRD_AGENT_HTTP_PORT`: Optional, default `3001`
-- `PRD_AGENT_MODEL`: Optional, default `anthropic/claude-3-7-sonnet`
-- `PRD_AGENT_TEMPERATURE`: Optional, default from server constants
-- `PRD_AGENT_MAX_TOKENS`: Optional, default from server constants
+- `PRODUCT_AGENT_API_HOST`: Optional, default `0.0.0.0`
+- `PRODUCT_AGENT_API_PORT`: Optional, default `3001`
 - `PRD_AGENT_CHANGE_WORKER_TEMPERATURE`: Optional, tuning edit worker
+- Any overrides supported by `product-agent.config.ts` (model, temperature, skill packs, workspace paths, etc.)
 
 Frontend (`frontend/product-agent/.env.local`)
 - `PRD_AGENT_URL`: REQUIRED, e.g. `http://localhost:3001`
@@ -81,10 +80,10 @@ Use two terminals: one for the backend HTTP API and one for the frontend.
 
 1) Start the Backend HTTP API
 ```
-cd packages/prd-agent/agent
+cd apps/api
 # Create and populate .env with your keys/settings (see above)
-# Then start the HTTP server
-npm run start-http
+npm run dev        # watch mode
+# or npm run start # runs the built server
 # => listens on http://0.0.0.0:3001 by default
 ```
 
@@ -99,7 +98,7 @@ npm run dev
 ```
 
 Alternative: run dev scripts via turborepo
-- From root: `npm run dev` starts all available `dev` scripts (e.g., the frontend). The backend HTTP server uses `start-http`, so run it in a separate terminal as shown above.
+- From root: `npm run dev` starts all available `dev` scripts (e.g., the frontend). Start `apps/api` separately so it can stream logs clearly.
 
 
 ## Backend HTTP API
@@ -157,10 +156,10 @@ Validating changes locally:
 - Run `npm run test` from the repo root to execute the full workspace test matrix.
 - To validate a single package, scope the turbo run: e.g. `npx turbo run lint --filter=frontend/product-agent` or `npx turbo run test --filter=packages/product-agent`.
 
-PRD Agent workspaces:
-- `packages/prd-agent/agent`: `npm run start-http`, `npm run build`, `npm run dev` (build watch), `npm run test`
-- `frontend/product-agent`: `npm run dev`, `npm run build`, `npm run start`, `npm run lint`
+Core workspaces:
 - `apps/api`: `npm run dev`, `npm run build`, `npm run start`
+- `packages/product-agent`: `npm run build`, `npm run test`
+- `frontend/product-agent`: `npm run dev`, `npm run build`, `npm run start`, `npm run lint`
 
 
 ## Thin API Server
@@ -174,7 +173,7 @@ npm run start
 
 ## Troubleshooting
 - 404s from frontend API: Confirm `PRD_AGENT_URL` is set in `frontend/product-agent/.env.local`.
-- Backend errors about missing API key: Set `OPENROUTER_API_KEY` in `packages/prd-agent/agent/.env` or pass `settings.apiKey` in requests.
+- Backend errors about missing API key: Set `OPENROUTER_API_KEY` in `apps/api/.env` or pass `settings.apiKey` in requests.
 - Port conflicts: Change `PRD_AGENT_HTTP_PORT` or Next.js port (`PORT`) as needed.
 - Model list empty: Ensure `OPENROUTER_API_KEY` is set for frontend server-side or provide `x-api-key` header to `/api/models`.
 
