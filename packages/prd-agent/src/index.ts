@@ -7,4 +7,5 @@ export {
   PrdVerifier,
   createPrdVerifier
 } from './adapters'
-export const PRD_AGENT_VERSION = '0.6.0'
+export { prdAgentManifest, createPrdAgentSubagent } from './subagent'
+export { PRD_AGENT_VERSION } from './version'

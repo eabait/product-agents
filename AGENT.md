@@ -14,7 +14,7 @@ A monorepo containing multiple AI agent applications for various product develop
 ### Key Packages Structure
 ```
 packages/
-├── prd-agent/           # Product Requirements Document agent (most complete)
+├── prd-agent/           # Product Requirements Document subagent + controller wrappers
 ├── persona-agent/       # User persona generation agent
 ├── research-agent/      # Research and analysis agent
 ├── story-generator-agent/   # Story generation
@@ -150,6 +150,8 @@ The PRD agent uses an Orchestrator-Workers pattern with 6 specialized workers:
 4. **SolutionFrameworkWorker** - Designs solution approach
 5. **PRDSynthesisWorker** - Synthesizes final PRD document
 6. **ChangeWorker** - Handles PRD edits via JSON patches
+
+**PRD Subagent Package** – `@product-agents/prd-agent` now hosts the PRD-specific controller, planner, skill runner, verifier, and a registry-friendly subagent manifest. Orchestrators can call `createPrdAgentSubagent()` to run the full PRD pipeline as a single `SubagentLifecycle`, while other packages continue to import shared runtime/config utilities from `@product-agents/product-agent`.
 
 ### 3. Settings and Configuration Management
 

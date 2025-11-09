@@ -60,7 +60,7 @@
   - [x] Archive logs/results for release notes and sign-off.
 
 ## Phase 6 – Planner Intelligence & Multi-Artifact Orchestration
-- [ ] Promote the current PRD controller into a standalone `prd-agent` subagent package so Product Agent orchestrator can invoke it just like persona/research/story-map agents.
+- [x] Promote the current PRD controller into a standalone `prd-agent` subagent package so Product Agent orchestrator can invoke it just like persona/research/story-map agents.
 - [ ] Replace the hardcoded PRD planner with an intelligent planner that dynamically composes plans from registered skills and agent-grade subagents.
 - [ ] Enable plan generation for PRD, persona, and user story mapping artifacts (and transitions between them) based on the user’s prompt intent.
 - [ ] Ship artifact-aware skill/subagent registries (with discovery metadata) so the planner can reason across standalone packages (prd-agent, persona-agent, research-agent, story-mapper-agent, etc.).
@@ -89,6 +89,7 @@
    - Add `prdAgentManifest` describing `id`, `artifactKind: 'prd'`, source kinds (`prompt`, `brief`, `persona`), capabilities, and version metadata.
    - Implement `createPrdAgentSubagent(options)` that conforms to `SubagentLifecycle`, internally spins up the PRD controller, and forwards progress/telemetry to the caller via `emit`.
    - Provide serialization helpers so subagent outputs always return a valid `Artifact<PrdDocument>` with source metadata (mirroring what the controller currently writes to the workspace).
+   - ✅ Completed via `packages/prd-agent/src/subagent.ts` + `tests/prd-subagent.test.ts`.
 4. **Integrate product-agent + API surfaces with the new package**
    - Replace direct imports of `createPrdController` inside `packages/product-agent` and `apps/api/src` with the extracted factories from `@product-agents/prd-agent`.
    - Update `product-agent.config.ts` (if needed) to resolve subagent manifests from the new package so PRD shows up in the Phase 6 registry.

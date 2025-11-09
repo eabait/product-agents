@@ -5,6 +5,8 @@ PRD-focused subagent package that hosts the planner, skill runner, verifier, and
 ## Exports
 - `createPrdController` / `getDefaultPrdController` – thin wrappers that compose the planner, skill runner, verifier, workspace DAO, and current persona subagent.
 - `createPrdPlanner`, `createPrdSkillRunner`, `createPrdVerifier` – lower-level factory helpers for custom orchestration pipelines.
+- `prdAgentManifest` – metadata describing the PRD agent’s capabilities (consumes, creates, version) for registry/discovery flows.
+- `createPrdAgentSubagent` – returns a `SubagentLifecycle` that executes the PRD controller and emits workspace-friendly progress events.
 - `PRD_AGENT_VERSION` – semantic version marker for registry/telemetry.
 
 ## Usage
@@ -24,6 +26,20 @@ const summary = await controller.start({
     },
     createdBy: 'cli'
   }
+})
+
+// Subagent usage (register with a multi-artifact orchestrator)
+import { createPrdAgentSubagent } from '@product-agents/prd-agent'
+
+const prdSubagent = createPrdAgentSubagent()
+const { artifact } = await prdSubagent.execute({
+  params: {
+    input: {
+      message: 'Create a PRD for a collaborative whiteboard tool',
+      context: {}
+    }
+  },
+  run: orchestratorRunContext
 })
 ```
 
