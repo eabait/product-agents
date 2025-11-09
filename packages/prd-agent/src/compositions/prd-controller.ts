@@ -5,7 +5,8 @@ import {
   loadProductAgentConfig,
   createPersonaBuilderSubagent,
   type AgentController,
-  type ProductAgentConfig
+  type ProductAgentConfig,
+  type SubagentRegistry
 } from '@product-agents/product-agent'
 import { createPrdPlanner, createPrdSkillRunner, createPrdVerifier } from '../adapters'
 
@@ -13,6 +14,7 @@ interface CreatePrdControllerOptions {
   config?: ProductAgentConfig
   workspaceRoot?: string
   clock?: () => Date
+  subagentRegistry?: SubagentRegistry
 }
 
 export const createPrdController = (options?: CreatePrdControllerOptions): AgentController => {
@@ -57,7 +59,8 @@ export const createPrdController = (options?: CreatePrdControllerOptions): Agent
     },
     config,
     {
-      clock: options?.clock
+      clock: options?.clock,
+      subagentRegistry: options?.subagentRegistry
     }
   )
 }

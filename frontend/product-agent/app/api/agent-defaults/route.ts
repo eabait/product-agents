@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import { prdSkillPack } from '@product-agents/skills-prd';
 
 const PRD_AGENT_URL = process.env.PRD_AGENT_URL || 'http://localhost:3001';
 
@@ -29,19 +28,16 @@ export async function GET() {
         }, {})
       : {};
     
-    const manifestSubAgents = prdSkillPack.subagents ?? [];
-
     const mergedMetadata =
       data.metadata && typeof data.metadata === 'object'
         ? {
             ...data.metadata,
-            subAgents:
-              Array.isArray((data.metadata as any).subAgents) && (data.metadata as any).subAgents.length > 0
-                ? (data.metadata as any).subAgents
-                : manifestSubAgents
+            subAgents: Array.isArray((data.metadata as any).subAgents)
+              ? (data.metadata as any).subAgents
+              : []
           }
         : {
-            subAgents: manifestSubAgents
+            subAgents: []
           };
 
     return NextResponse.json({

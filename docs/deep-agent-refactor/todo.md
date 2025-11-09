@@ -63,12 +63,12 @@
 - [x] Promote the current PRD controller into a standalone `prd-agent` subagent package so Product Agent orchestrator can invoke it just like persona/research/story-map agents.
 - [ ] Replace the hardcoded PRD planner with an intelligent planner that dynamically composes plans from registered skills and agent-grade subagents.
 - [ ] Enable plan generation for PRD, persona, and user story mapping artifacts (and transitions between them) based on the user’s prompt intent.
-- [ ] Ship artifact-aware skill/subagent registries (with discovery metadata) so the planner can reason across standalone packages (prd-agent, persona-agent, research-agent, story-mapper-agent, etc.).
-- [ ] Implement the subagent registry/manifest contract:
-  - Shared manifest entries (`id`, `package`, `creates`, `consumes`, `capabilities`, `version`, optional planner hints) exported by each agent package.
-  - A `SubagentRegistry` service inside product-agent that loads manifests (from config or dynamic imports), exposes `list/filter/get`, and provides factories to create `SubagentLifecycle` instances.
-  - Planner updates to support “agent nodes” in the plan graph (`kind: 'subagent'`, `agentId`, `inputs.fromArtifact`) and query the registry for candidates matching the user’s desired artifact transitions.
-  - Surface registry metadata in `/health` so the frontend knows which artifact types/subagents are available for selection.
+- [x] Ship artifact-aware skill/subagent registries (with discovery metadata) so the planner can reason across standalone packages (prd-agent, persona-agent, research-agent, story-mapper-agent, etc.).
+- [x] Implement the subagent registry/manifest contract:
+  - [x] Shared manifest entries (`id`, `package`, `creates`, `consumes`, `capabilities`, `version`, optional planner hints) exported by each agent package.
+  - [x] A `SubagentRegistry` service inside product-agent that loads manifests (from config or dynamic imports), exposes `list/filter/get`, and provides factories to create `SubagentLifecycle` instances.
+  - [ ] Planner updates to support “agent nodes” in the plan graph (`kind: 'subagent'`, `agentId`, `inputs.fromArtifact`) and query the registry for candidates matching the user’s desired artifact transitions.
+  - [x] Surface registry metadata in `/health` so the frontend knows which artifact types/subagents are available for selection.
 - [ ] Add verification to ensure multi-artifact plans produce coherent cross-handovers (e.g., PRD → persona → story map).
 - [ ] Expand test coverage for planner reasoning, tool selection, and artifact handoff flows.
 - [ ] Keep the frontend run store/local storage as the source of truth for derived artifacts until backend persistence lands, and ensure each API call sends the serialized upstream artifact context needed for downstream subagents.
@@ -99,6 +99,22 @@
    - Add a focused test verifying `createPrdAgentSubagent().execute` produces the prior PRD artifact structure and streams subagent events to the workspace DAO.
    - Update `AGENT.md` and `docs/deep-agent-refactor/*` to mention the new package boundaries and how to consume the manifest from custom registries.
 
+### Task 6.2 – Ship Core Subagent Registry & Discovery Surface
+**Objective:** Introduce a manifest-driven registry inside `@product-agents/product-agent` so orchestrators (and `/health`) can list/filter/create subagents from standalone packages (`prd-agent`, persona, story-map, etc.) without hardcoding imports.
+
+**Plan**
+1. **Contracts & Config plumbing**
+   - [x] Define `SubagentManifest` + `SubagentRegistryEntry` types (id, package, creates, consumes, capabilities, version, entrypoint) under `packages/product-agent/src/contracts`.
+   - [x] Extend `product-agent.config.ts` with a `subagents` section (enabled manifests + optional dynamic modules) and add env parsing/helpers so deploys can register manifests without code changes.
+2. **Registry service implementation**
+   - [x] Create `SubagentRegistry` with `register`, `list`, `filterByArtifact`, `get`, and `createLifecycle` helpers; support lazy loading via dynamic `import()` based on manifest `entry`.
+   - [x] Wire the graph controller to accept a registry instance so future planner work can fetch manifests rather than relying on a static `subagents` array.
+3. **Surface manifests through `/health` + frontend defaults**
+   - [x] Update `apps/api/src/index.ts` health handler to include registry metadata (artifact kinds, labels, capabilities).
+   - [x] Teach the frontend agent defaults route to read the new metadata so UI toggles can reflect available artifact generators.
+4. **Tests & docs**
+   - [x] Add registry unit tests covering manifest loading + filtering + lifecycle creation (with the new PRD subagent manifest as a fixture).
+   - [x] Document registry usage in `AGENT.md` and `docs/deep-agent-refactor/*`, including guidance for new agent packages on exporting manifests.
 **Open Questions / Dependencies**
 - ✅ `packages/product-agent/src/adapters/prd/*` move wholesale into `packages/prd-agent`; they are PRD-specific glue, so other subagents will consume their own adapters. `@product-agents/product-agent` will re-import the planner/runner/verifier from the new package rather than hosting source copies.
 - ✅ Version `@product-agents/prd-agent` with the existing repo semver stream (start at `0.6.0` with Phase 6, bump minor for planner/subagent surface changes, patch for fixes). Publish via the current monorepo release pipeline so manifests downstream can pin to `^0.x` and watch release notes for breaking changes.

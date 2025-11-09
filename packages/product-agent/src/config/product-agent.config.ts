@@ -14,6 +14,20 @@ const RetryPolicySchema = z.object({
   backoffMs: z.number().int().min(0)
 })
 
+const SubagentManifestConfigSchema = z.object({
+  id: z.string().min(1),
+  package: z.string().min(1),
+  version: z.string().min(1),
+  label: z.string().min(1),
+  creates: z.string().min(1),
+  consumes: z.array(z.string().min(1)).default([]),
+  capabilities: z.array(z.string().min(1)).default([]),
+  description: z.string().optional(),
+  entry: z.string().min(1),
+  exportName: z.string().min(1).default('createSubagent'),
+  tags: z.array(z.string().min(1)).default([])
+})
+
 export const ProductAgentConfigSchema = z.object({
   runtime: z.object({
     defaultModel: z.string().min(1),
@@ -38,7 +52,12 @@ export const ProductAgentConfigSchema = z.object({
     enableMetrics: z.boolean(),
     logLevel: z.enum(LOG_LEVELS),
     eventThrottleMs: z.number().int().min(0)
-  })
+  }),
+  subagents: z
+    .object({
+      manifests: z.array(SubagentManifestConfigSchema)
+    })
+    .default({ manifests: [] })
 })
 
 const SkillPackInputSchema = z.object({
@@ -62,6 +81,7 @@ export type RetryPolicy = z.infer<typeof RetryPolicySchema>
 export type ProductAgentConfig = z.infer<typeof ProductAgentConfigSchema>
 export type ProductAgentApiOverrides = z.infer<typeof ProductAgentApiOverrideSchema>
 export type TelemetryLogLevel = typeof LOG_LEVELS[number]
+export type SubagentConfigEntry = z.infer<typeof SubagentManifestConfigSchema>
 
 const DEFAULT_STORAGE_ROOT = path.resolve(process.cwd(), 'data', 'runs')
 
@@ -98,6 +118,9 @@ const DEFAULT_CONFIG: ProductAgentConfig = {
     enableMetrics: true,
     logLevel: 'info',
     eventThrottleMs: 250
+  },
+  subagents: {
+    manifests: []
   }
 }
 
@@ -111,19 +134,29 @@ const cloneConfig = (config: ProductAgentConfig): ProductAgentConfig => ({
     ...config.skills,
     enabledPacks: config.skills.enabledPacks.map(pack => ({ ...pack }))
   },
-  telemetry: { ...config.telemetry }
+  telemetry: { ...config.telemetry },
+  subagents: {
+    manifests: config.subagents.manifests.map(manifest => ({
+      ...manifest,
+      consumes: [...manifest.consumes],
+      capabilities: [...manifest.capabilities],
+      tags: [...manifest.tags]
+    }))
+  }
 })
 
 type RuntimeOverrides = Partial<ProductAgentConfig['runtime']> & { retry?: Partial<RetryPolicy> }
 type WorkspaceOverrides = Partial<ProductAgentConfig['workspace']>
 type SkillsOverrides = Partial<ProductAgentConfig['skills']> & { enabledPacks?: SkillPackReference[] }
 type TelemetryOverrides = Partial<ProductAgentConfig['telemetry']>
+type SubagentOverrides = Partial<ProductAgentConfig['subagents']>
 
 type PartialProductAgentConfig = {
   runtime?: RuntimeOverrides
   workspace?: WorkspaceOverrides
   skills?: SkillsOverrides
   telemetry?: TelemetryOverrides
+  subagents?: SubagentOverrides
 }
 
 const mergeConfig = (
@@ -156,6 +189,9 @@ const mergeConfig = (
       telemetry: {
         ...acc.telemetry,
         ...override.telemetry
+      },
+      subagents: {
+        manifests: override.subagents?.manifests ?? acc.subagents.manifests
       }
     }
 
@@ -193,11 +229,36 @@ const parseSkillPackList = (value: string | undefined): SkillPackReference[] | u
   return packs.length > 0 ? packs : undefined
 }
 
+const parseSubagentManifestList = (
+  value: string | undefined
+): SubagentConfigEntry[] | undefined => {
+  if (!value) return undefined
+  try {
+    const parsed = JSON.parse(value)
+    if (!Array.isArray(parsed)) {
+      return undefined
+    }
+
+    const manifests: SubagentConfigEntry[] = []
+    parsed.forEach(entry => {
+      const result = SubagentManifestConfigSchema.safeParse(entry)
+      if (result.success) {
+        manifests.push(result.data)
+      }
+    })
+
+    return manifests.length > 0 ? manifests : undefined
+  } catch {
+    return undefined
+  }
+}
+
 const parseEnvOverrides = (env: NodeJS.ProcessEnv): PartialProductAgentConfig | undefined => {
   const runtime: RuntimeOverrides = {}
   const workspace: WorkspaceOverrides = {}
   const skills: SkillsOverrides = {}
   const telemetry: TelemetryOverrides = {}
+  const subagents: SubagentOverrides = {}
 
   if (env.PRODUCT_AGENT_MODEL) {
     runtime.defaultModel = env.PRODUCT_AGENT_MODEL
@@ -266,6 +327,11 @@ const parseEnvOverrides = (env: NodeJS.ProcessEnv): PartialProductAgentConfig | 
     telemetry.eventThrottleMs = envThrottle
   }
 
+  const envSubagents = parseSubagentManifestList(env.PRODUCT_AGENT_SUBAGENTS)
+  if (envSubagents) {
+    subagents.manifests = envSubagents
+  }
+
   const overrides: PartialProductAgentConfig = {}
   if (Object.keys(runtime as Record<string, unknown>).length > 0) {
     overrides.runtime = runtime
@@ -278,6 +344,9 @@ const parseEnvOverrides = (env: NodeJS.ProcessEnv): PartialProductAgentConfig | 
   }
   if (Object.keys(telemetry as Record<string, unknown>).length > 0) {
     overrides.telemetry = telemetry
+  }
+  if (subagents.manifests && subagents.manifests.length > 0) {
+    overrides.subagents = subagents
   }
 
   return Object.keys(overrides as Record<string, unknown>).length > 0 ? overrides : undefined

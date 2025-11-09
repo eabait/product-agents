@@ -17,6 +17,7 @@ import type { WorkspaceDAO, WorkspaceEvent, WorkspaceHandle } from '../contracts
 import type { Planner } from '../contracts/planner'
 import type { ClarificationResult } from '@product-agents/prd-shared'
 import type { SubagentLifecycle, SubagentRunSummary } from '../contracts/subagent'
+import type { SubagentRegistry } from '../subagents/subagent-registry'
 
 type Clock = () => Date
 
@@ -27,6 +28,7 @@ interface GraphControllerOptions {
     persistArtifacts?: boolean
     tempSubdir?: string
   }
+  subagentRegistry?: SubagentRegistry
 }
 
 interface ExecutionContext {
@@ -152,6 +154,7 @@ export class GraphController implements AgentController {
   readonly verifier: Verifier
   readonly workspace: WorkspaceDAO
   readonly subagents: SubagentLifecycle[]
+  readonly subagentRegistry?: SubagentRegistry
 
   private readonly config: ProductAgentConfig
   private readonly clock: Clock
@@ -170,6 +173,7 @@ export class GraphController implements AgentController {
     this.verifier = composition.verifier.primary
     this.workspace = composition.workspace
     this.subagents = composition.subagents ?? []
+    this.subagentRegistry = options?.subagentRegistry
     this.verifierGroup = composition.verifier
     this.config = config
     this.clock = options?.clock ?? (() => new Date())
@@ -561,7 +565,7 @@ export class GraphController implements AgentController {
     context: ExecutionContext,
     options?: ControllerStartOptions
   ): Promise<void> {
-    if (!context.artifact || this.subagents.length === 0) {
+    if (!context.artifact) {
       return
     }
 
@@ -569,8 +573,13 @@ export class GraphController implements AgentController {
       return
     }
 
+    const resolvedSubagents = await this.resolveSubagents(context, options)
+    if (resolvedSubagents.length === 0) {
+      return
+    }
+
     const runId = context.runContext.runId
-    const sourceKind = context.runContext.request.artifactKind
+    const sourceKind = context.artifact.kind
     const shouldRunSubagent = (subagent: SubagentLifecycle) => {
       if (
         subagent.metadata.sourceKinds.length > 0 &&
@@ -581,7 +590,7 @@ export class GraphController implements AgentController {
       return true
     }
 
-    for (const subagent of this.subagents) {
+    for (const subagent of resolvedSubagents) {
       if (!shouldRunSubagent(subagent)) {
         continue
       }
@@ -711,6 +720,76 @@ export class GraphController implements AgentController {
         context.runContext.metadata.subagentFailures = failures
       }
     }
+  }
+
+  private async resolveSubagents(
+    context: ExecutionContext,
+    options?: ControllerStartOptions
+  ): Promise<SubagentLifecycle[]> {
+    if (!context.artifact) {
+      return []
+    }
+
+    if (!this.subagentRegistry) {
+      return [...this.subagents]
+    }
+
+    const runId = context.runContext.runId
+    const resolved: SubagentLifecycle[] = [...this.subagents]
+    const seen = new Set(resolved.map(subagent => subagent.metadata.id))
+    const manifests = this.subagentRegistry.filterByArtifact(context.artifact.kind)
+
+    for (const manifest of manifests) {
+      if (seen.has(manifest.id)) {
+        continue
+      }
+
+      try {
+        const lifecycle = await this.subagentRegistry.createLifecycle(manifest.id)
+        resolved.push(lifecycle)
+        seen.add(manifest.id)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        await this.workspace.appendEvent(
+          runId,
+          createWorkspaceEvent(runId, 'subagent', {
+            action: 'failed',
+            subagentId: manifest.id,
+            stage: 'load',
+            error: message
+          })
+        )
+
+        emitEvent(
+          options,
+          toProgressEvent({
+            type: 'subagent.failed',
+            runId,
+            payload: {
+              subagentId: manifest.id,
+              error: message,
+              stage: 'load'
+            },
+            message
+          })
+        )
+
+        if (!context.runContext.metadata) {
+          context.runContext.metadata = {}
+        }
+
+        const failures =
+          (context.runContext.metadata.subagentFailures as Record<string, unknown> | undefined) ?? {}
+        failures[manifest.id] = {
+          error: message,
+          stage: 'load',
+          timestamp: this.clock().toISOString()
+        }
+        context.runContext.metadata.subagentFailures = failures
+      }
+    }
+
+    return resolved
   }
 
   private toSummary<TArtifact>(

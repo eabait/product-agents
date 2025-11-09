@@ -12,10 +12,10 @@ import {
   type ControllerRunSummary,
   type ProgressEvent,
   type ProductAgentApiOverrides,
-  type RunRequest
+  type RunRequest,
+  SubagentRegistry
 } from '@product-agents/product-agent'
 import type { SectionRoutingRequest } from '@product-agents/prd-shared'
-import { prdSkillPack } from '@product-agents/skills-prd'
 
 const loadEnvFiles = () => {
   const loadedKeys = new Set<string>()
@@ -114,7 +114,12 @@ interface RunRecord {
 
 const MAX_RUN_HISTORY = 50
 const config = loadProductAgentConfig()
-const controller = createPrdController({ config })
+const subagentRegistry = new SubagentRegistry()
+for (const manifest of config.subagents.manifests) {
+  subagentRegistry.register(manifest)
+}
+
+const controller = createPrdController({ config, subagentRegistry })
 const runRecords = new Map<string, RunRecord>()
 const streamSubscribers = new Map<string, Set<ServerResponse>>()
 const AGENT_CAPABILITIES = ['structured_output', 'streaming'] as const
@@ -461,10 +466,11 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host ?? `${HOST}:${PORT}`}`)
 
   if (req.method === 'GET' && url.pathname === '/health') {
-    const subAgentSettings = (prdSkillPack.subagents ?? []).reduce<
+    const registryManifests = subagentRegistry.list()
+    const subAgentSettings = registryManifests.reduce<
       Record<string, { model: string; temperature: number; maxTokens: number }>
-    >((acc, subagent) => {
-      acc[subagent.id] = {
+    >((acc, manifest) => {
+      acc[manifest.id] = {
         model: config.runtime.defaultModel,
         temperature: config.runtime.defaultTemperature,
         maxTokens: config.runtime.maxOutputTokens
@@ -476,12 +482,16 @@ const server = http.createServer(async (req, res) => {
       planner: controller.planner.constructor.name,
       requiredCapabilities: [...AGENT_CAPABILITIES],
       skillPacks: config.skills.enabledPacks,
-      subAgents: (prdSkillPack.subagents ?? []).map(subagent => ({
-        id: subagent.id,
-        label: subagent.label,
-        artifactKind: subagent.artifactKind,
-        description: subagent.description,
-        requiredCapabilities: ['structured_output']
+      subAgents: registryManifests.map(manifest => ({
+        id: manifest.id,
+        label: manifest.label,
+        artifactKind: manifest.creates,
+        description: manifest.description,
+        package: manifest.package,
+        version: manifest.version,
+        capabilities: manifest.capabilities,
+        consumes: manifest.consumes,
+        tags: manifest.tags
       }))
     }
 

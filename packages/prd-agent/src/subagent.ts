@@ -6,6 +6,7 @@ import {
   type ArtifactKind,
   type ProductAgentConfig,
   type SubagentLifecycle,
+  type SubagentManifest,
   type SubagentRequest,
   type SubagentResult,
   type ProgressEvent,
@@ -19,18 +20,7 @@ const DEFAULT_LABEL = 'PRD Agent'
 const DEFAULT_DESCRIPTION =
   'Generates structured Product Requirements Documents via the PRD planner, skill runner, and verifier.'
 
-export interface PrdAgentManifest {
-  id: string
-  package: string
-  version: string
-  label: string
-  description: string
-  creates: ArtifactKind
-  consumes: ArtifactKind[]
-  capabilities: string[]
-}
-
-export const prdAgentManifest: PrdAgentManifest = {
+export const prdAgentManifest: SubagentManifest = {
   id: 'prd.core.agent',
   package: '@product-agents/prd-agent',
   version: PRD_AGENT_VERSION,
@@ -38,7 +28,10 @@ export const prdAgentManifest: PrdAgentManifest = {
   description: DEFAULT_DESCRIPTION,
   creates: 'prd',
   consumes: ['prompt', 'brief', 'persona'],
-  capabilities: ['plan', 'execute', 'verify']
+  capabilities: ['plan', 'execute', 'verify'],
+  entry: '@product-agents/prd-agent',
+  exportName: 'createPrdAgentSubagent',
+  tags: ['prd', 'controller']
 }
 
 export interface PrdAgentSubagentParams {

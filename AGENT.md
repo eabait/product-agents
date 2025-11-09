@@ -153,6 +153,52 @@ The PRD agent uses an Orchestrator-Workers pattern with 6 specialized workers:
 
 **PRD Subagent Package** – `@product-agents/prd-agent` now hosts the PRD-specific controller, planner, skill runner, verifier, and a registry-friendly subagent manifest. Orchestrators can call `createPrdAgentSubagent()` to run the full PRD pipeline as a single `SubagentLifecycle`, while other packages continue to import shared runtime/config utilities from `@product-agents/product-agent`.
 
+### Subagent Registry & Discovery
+
+To orchestrate multiple artifact generators without hardcoded imports, the product agent exposes a manifest-driven `SubagentRegistry`:
+
+- **Manifest contract:** `SubagentManifest` (id, package, version, label, description, `creates`, `consumes`, `capabilities`, `tags`, `entry`, optional `exportName`). Every subagent package exports both the manifest and a factory—for example `@product-agents/prd-agent` exports `prdAgentManifest` plus `createPrdAgentSubagent`.
+- **Configuration hooks:** `product-agent.config.ts` now includes a `subagents.manifests` array. Deployments can extend it with code or via the `PRODUCT_AGENT_SUBAGENTS` env var (JSON array of manifests). On boot, `apps/api` hydrates a registry from this config and hands it to `createPrdController`.
+- **Runtime usage:** The `GraphController` requests subagents from the registry based on the produced artifact kind (`filterByArtifact`) and lazily loads factories through dynamic `import()` (`createLifecycle`). Loading failures are surfaced as workspace + progress events so operators see misconfigured manifests.
+- **Discovery surface:** The `/health` endpoint emits the resolved manifest list (id, label, package, version, capabilities). The frontend `agent-defaults` route consumes that payload to decide which artifact toggles to render.
+
+**Adding a new subagent package**
+```ts
+// packages/story-mapper-agent/src/subagent.ts
+export const storyMapperManifest: SubagentManifest = {
+  id: 'story.mapper.agent',
+  package: '@product-agents/story-mapper-agent',
+  version: '0.1.0',
+  label: 'Story Mapper',
+  creates: 'story-map',
+  consumes: ['prd', 'persona'],
+  capabilities: ['plan', 'iterate'],
+  entry: '@product-agents/story-mapper-agent',
+  exportName: 'createStoryMapperSubagent'
+}
+export const createStoryMapperSubagent = (): SubagentLifecycle => ({ /* ... */ })
+```
+
+Register the manifest by extending `subagents.manifests` in config or setting:
+
+```bash
+export PRODUCT_AGENT_SUBAGENTS='[
+  {
+    "id":"story.mapper.agent",
+    "package":"@product-agents/story-mapper-agent",
+    "version":"0.1.0",
+    "label":"Story Mapper",
+    "creates":"story-map",
+    "consumes":["prd","persona"],
+    "capabilities":["plan","iterate"],
+    "entry":"@product-agents/story-mapper-agent",
+    "exportName":"createStoryMapperSubagent"
+  }
+]'
+```
+
+Once registered, the orchestrator can call `subagentRegistry.list()` (or rely on `/health`) to discover the capability and the graph controller will automatically load and execute it whenever a compatible upstream artifact is produced.
+
 ### 3. Settings and Configuration Management
 
 **Architecture Decision**: Hierarchical settings with runtime overrides and validation.

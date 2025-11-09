@@ -12,7 +12,8 @@ export type {
   SkillPackReference,
   RetryPolicy,
   TelemetryLogLevel,
-  EffectiveRunSettings
+  EffectiveRunSettings,
+  SubagentConfigEntry
 } from './config/product-agent.config'
 
 export * from './contracts'

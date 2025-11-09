@@ -37,8 +37,16 @@
   - Workspace: `PRODUCT_AGENT_WORKSPACE_ROOT`, `PRODUCT_AGENT_WORKSPACE_PERSIST`, `PRODUCT_AGENT_WORKSPACE_RETENTION_DAYS`, `PRODUCT_AGENT_WORKSPACE_TEMP_SUBDIR`
   - Skills: `PRODUCT_AGENT_SKILL_PACKS`, `PRODUCT_AGENT_ALLOW_DYNAMIC_SKILLS`
   - Telemetry: `PRODUCT_AGENT_TELEMETRY_STREAM`, `PRODUCT_AGENT_TELEMETRY_METRICS`, `PRODUCT_AGENT_TELEMETRY_LOG_LEVEL`, `PRODUCT_AGENT_TELEMETRY_THROTTLE_MS`
+  - Subagents: `PRODUCT_AGENT_SUBAGENTS` (JSON array of `SubagentManifest` objects)
 - **Consumption:** The orchestrator imports the config at start, injects it into the workspace DAO and planner/skill runner factories, and exposes a typed helper for reading effective config per run.
 - **Hot Reload:** Keep initial implementation static (config read on process boot); document future extension if live reload becomes necessary.
+
+### Subagent Registry & Discovery (Phase 6.2)
+- **Manifest contract:** `SubagentManifest` (id, package, version, label, description, `creates`, `consumes`, `capabilities`, `tags`, `entry`, optional `exportName`) lives in `@product-agents/product-agent`. Each agent package exports both the manifest and its `createXSubagent` lifecycle factory (`prdAgentManifest` + `createPrdAgentSubagent` is the baseline).
+- **Configuration:** `product-agent.config.ts` now exposes `subagents.manifests`. Teams can extend it in code or via `PRODUCT_AGENT_SUBAGENTS`, which expects the manifest array as JSON for quick ops overrides.
+- **Registry service:** `SubagentRegistry` provides `register`, `list`, `get`, `filterByArtifact`, and `createLifecycle`. It lazily imports modules declared in the manifest (`entry`/`exportName`), caches instantiated lifecycles, and raises telemetry/workspace events when a load fails.
+- **Controller integration:** `GraphController` receives the registry (in addition to any statically provided subagents) and, after producing an artifact, asks for compatible manifests based on the artifact kind. Loaded subagents inherit the same progress/workspace instrumentation as built-ins.
+- **Discovery surfaces:** `apps/api` builds a registry from config, exposes manifest metadata via `/health`, and the frontend `/api/agent-defaults` route mirrors that data so UI toggles can reflect the real artifact catalogue.
 
 ### Skill Pack Manifest Blueprint
 - **Location:** Each pack exports a single TypeScript file (e.g., `packages/skills/prd/skillPack.ts`) re-exported via that package’s `index.ts`.

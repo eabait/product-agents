@@ -37,3 +37,22 @@ export interface SubagentRunSummary<TArtifact = unknown> {
   artifact: Artifact<TArtifact>
   metadata?: Record<string, unknown>
 }
+
+export interface SubagentManifest {
+  id: string
+  package: string
+  version: string
+  label: string
+  creates: ArtifactKind
+  consumes: ArtifactKind[]
+  capabilities?: string[]
+  description?: string
+  entry: string
+  exportName?: string
+  tags?: string[]
+}
+
+export interface SubagentRegistryEntry {
+  manifest: SubagentManifest
+  loader: () => Promise<Record<string, unknown>>
+}
