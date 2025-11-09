@@ -103,13 +103,21 @@ flowchart TB
   DELIVER --> ART
 ```
 
+### 2.2 Multi-Agent Layering & Registry
+
+* **Product Agent as orchestrator:** The top-level controller now focuses on planning cross-artifact work and delegating execution to registered subagents rather than owning the PRD flow directly.
+* **Package-per-subagent:** Each major capability ships as its own package implementing `SubagentLifecycle` (e.g., `prd-agent`, `persona-agent`, `research-agent`, `story-mapper-agent`). Every package can run independently or be invoked by the orchestrator.
+* **Registry-driven discovery:** A manifest/registry advertises each subagent’s id, artifact kind, accepted source kinds, and capability tags. The intelligent planner queries this registry to decide which subagents belong in the plan graph.
+* **Composable hand-offs:** Subagents emit workspace artifacts that the orchestrator feeds into downstream subagents (PRD → persona → story map, etc.), enforcing verification checkpoints between them.
+* **Skills remain granular:** Subagents may internally reuse the shared skill packs, but to the orchestrator they appear as coarse “agent” nodes that can plan/iterate on their own.
+
 ---
 
 ## 3. Skill vs Subagent (Decision Framework)
 
 * **Skill (default):** Stateless function with a strict contract; no internal loops.
   `run(input) → {artifact, trace}`
-* **Subagent (opt-in):** Stateful goal-seeker with internal plan/iterate/verify/tool-choice.
+* **Subagent (opt-in):** Stateful goal-seeker packaged as an agent module with internal plan/iterate/verify/tool-choice; can execute standalone or be orchestrated (e.g., `prd-agent`, `persona-agent`).
 
 **Promotion triggers (use ≥2 to justify):**
 
@@ -390,3 +398,9 @@ agent/src/verify/verifier.ts
 agent/src/store/workspace.ts
 agent/src/types/deep-agent.ts
 ```
+
+## 10. Client-State Strategy (Interim)
+
+- The frontend run store/local storage (Next.js `run-store`) remains the temporary source of truth for artifacts produced by subagents (PRD bundles, personas, story maps) until backend persistence spans multiple artifact kinds.
+- Each client request to the thin API must include the serialized artifact context that downstream subagents require (e.g., pass the PRD artifact when triggering persona/story-map runs) so the orchestrator can hydrate `sourceArtifact` without rereading server state.
+- Derived artifacts cached on the client are reattached to the run via metadata when the orchestrator responds, keeping the UI synchronized even though storage is local-first for now.

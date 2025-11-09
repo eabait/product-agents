@@ -3,9 +3,9 @@
 > Concise reference for anyone integrating with the PRD workflow after the deep-agent hardening pass.
 
 ## Breaking / notable changes
-- **Package boundary:** `@product-agents/prd-agent` has been retired. Use `@product-agents/product-agent` (controller) + `@product-agents/skills-prd` (skill pack) + `@product-agents/prd-shared` (schemas). Frontend/API integrations should only call the thin API.
+- **Package boundary:** PRD-specific planners, skill runners, and controller factories now live in the revived `@product-agents/prd-agent` package. Import orchestrator primitives (config, GraphController, workspace DAO, shared contracts) from `@product-agents/product-agent`, and artifact glue from `@product-agents/prd-agent`.
 - **Backend host:** All HTTP traffic now goes through `apps/api` (`npm run dev --workspace=apps/api`). Legacy `packages/prd-agent/agent` scripts have been removed.
-- **Config source:** Runtime/workspace/skill/telemetry defaults live in `packages/product-agent/src/config/product-agent.config.ts`. Load this once per process and pass the resulting config to `createPrdController`.
+- **Config source:** Runtime/workspace/skill/telemetry defaults live in `packages/product-agent/src/config/product-agent.config.ts`. Load this once per process and pass the resulting config to `createPrdController` from `@product-agents/prd-agent`.
 
 ## Environment variable updates
 | Subsystem | Old | New |
@@ -23,7 +23,7 @@
 - Per-run overrides accept `model`, `temperature`, `maxOutputTokens`, `skillPackId`, `additionalSkillPacks`, `workspaceRoot`, `logLevel`.
 
 ## Validation checklist for downstream teams
-1. Update imports to `@product-agents/product-agent` (controller APIs) or `@product-agents/prd-shared` (schemas).
+1. Update imports to `@product-agents/prd-agent` (controller/adapters) and `@product-agents/product-agent` (config + core contracts), plus `@product-agents/prd-shared` (schemas).
 2. Ensure deployment manifests set the new `PRODUCT_AGENT_*` env vars instead of the old `PRD_AGENT_*` names.
 3. Point all UI/SDK traffic at the `apps/api` service and remove any references to `packages/prd-agent/agent`.
 4. Re-run smoke tests (startRun → streamRun) to confirm that progress events and artifacts resolve through the new pipeline.

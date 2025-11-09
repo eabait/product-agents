@@ -17,11 +17,15 @@ import {
   DEFAULT_TEMPERATURE,
   type ClarificationResult
 } from '@product-agents/prd-shared'
-import type { SkillRunner, SkillRequest, SkillResult } from '../../contracts/skill-runner'
-import type { Artifact } from '../../contracts/core'
+import type {
+  SkillRunner,
+  SkillRequest,
+  SkillResult,
+  Artifact,
+  EffectiveRunSettings
+} from '@product-agents/product-agent'
 import type { PrdPlanTask } from './planner'
 import type { AgentSettings } from '@product-agents/agent-core'
-import type { EffectiveRunSettings } from '../../config/product-agent.config'
 
 interface RunState {
   analysisResults: Map<string, any>

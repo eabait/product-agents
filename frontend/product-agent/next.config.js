@@ -5,6 +5,7 @@ const workspaceRoot = path.resolve(__dirname, '..', '..')
 const packageAlias = {
   '@product-agents/skills-prd': path.join(workspaceRoot, 'packages/skills/prd/src'),
   '@product-agents/product-agent': path.join(workspaceRoot, 'packages/product-agent/src'),
+  '@product-agents/prd-agent': path.join(workspaceRoot, 'packages/prd-agent/src'),
   '@product-agents/prd-shared': path.join(workspaceRoot, 'packages/shared/prd-shared/src'),
   '@product-agents/agent-core': path.join(workspaceRoot, 'packages/shared/agent-core/src'),
   '@product-agents/openrouter-client': path.join(workspaceRoot, 'packages/shared/openrouter-client/src'),

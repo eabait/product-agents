@@ -40,7 +40,7 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
 
   const needsArtifactRefresh =
     Boolean(PRD_AGENT_URL) &&
-    (record.result == null || record.result === undefined) &&
+    (record.result === null || typeof record.result === 'undefined') &&
     (record.status === 'awaiting-input' || record.status === 'completed')
 
   if (needsArtifactRefresh && PRD_AGENT_URL) {

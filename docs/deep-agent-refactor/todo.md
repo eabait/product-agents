@@ -50,25 +50,61 @@
   - [x] Refresh root README + AGENT.md with the deep agent architecture diagram/text.
   - [x] Update `docs/deep-agent-refactor/*` and package-level READMEs with migration notes + new config knobs.
   - [x] Capture a short changelog blurb for PRD consumers covering API/env deltas.
-- [ ] Ensure CI/CD pipelines reference new packages and run relevant tests.
-  - [ ] Audit Turbo graph, GitHub Actions (or equivalent), and deployment manifests for old paths (`apps/mcp-server`, legacy frontend).
-  - [ ] Add/verify jobs for `run_e2e.sh`, subagent suites, and PRD skill-pack contract tests.
-  - [ ] Confirm caches/artifacts track the relocated frontend + `apps/api`.
-- [ ] Audit repo for legacy references (imports, paths) and clean up.
-  - [ ] Use `rg` (plus codemods when safe) to flag deprecated identifiers/env vars across code + docs.
-  - [ ] Add a temporary lint/prohibit rule to prevent reintroduction.
-  - [ ] Track findings in a punch list until `rg` shows zero matches.
-- [ ] Final regression pass across backend and frontend.
-  - [ ] Run unit + contract tests per package, backend smoke via `apps/api`, and UI e2e flow.
-  - [ ] Exercise persona/subagent flows introduced in Phase 4.
-  - [ ] Archive logs/results for release notes and sign-off.
+- [x] Audit repo for legacy references (imports, paths) and clean up.
+  - [x] Use `rg` (plus codemods when safe) to flag deprecated identifiers/env vars across code + docs.
+  - [x] Add a temporary lint/prohibit rule to prevent reintroduction.
+  - [x] Track findings in a punch list until `rg` shows zero matches.
+- [x] Final regression pass across backend and frontend.
+  - [x] Run unit + contract tests per package, backend smoke via `apps/api`, and UI e2e flow.
+  - [x] Exercise persona/subagent flows introduced in Phase 4.
+  - [x] Archive logs/results for release notes and sign-off.
 
 ## Phase 6 – Planner Intelligence & Multi-Artifact Orchestration
-- [ ] Replace the hardcoded PRD planner with an intelligent planner that dynamically composes plans from available skills and subagents.
+- [ ] Promote the current PRD controller into a standalone `prd-agent` subagent package so Product Agent orchestrator can invoke it just like persona/research/story-map agents.
+- [ ] Replace the hardcoded PRD planner with an intelligent planner that dynamically composes plans from registered skills and agent-grade subagents.
 - [ ] Enable plan generation for PRD, persona, and user story mapping artifacts (and transitions between them) based on the user’s prompt intent.
-- [ ] Integrate artifact-aware skill/subagent registries so the planner can reason across shared tooling.
+- [ ] Ship artifact-aware skill/subagent registries (with discovery metadata) so the planner can reason across standalone packages (prd-agent, persona-agent, research-agent, story-mapper-agent, etc.).
+- [ ] Implement the subagent registry/manifest contract:
+  - Shared manifest entries (`id`, `package`, `creates`, `consumes`, `capabilities`, `version`, optional planner hints) exported by each agent package.
+  - A `SubagentRegistry` service inside product-agent that loads manifests (from config or dynamic imports), exposes `list/filter/get`, and provides factories to create `SubagentLifecycle` instances.
+  - Planner updates to support “agent nodes” in the plan graph (`kind: 'subagent'`, `agentId`, `inputs.fromArtifact`) and query the registry for candidates matching the user’s desired artifact transitions.
+  - Surface registry metadata in `/health` so the frontend knows which artifact types/subagents are available for selection.
 - [ ] Add verification to ensure multi-artifact plans produce coherent cross-handovers (e.g., PRD → persona → story map).
 - [ ] Expand test coverage for planner reasoning, tool selection, and artifact handoff flows.
+- [ ] Keep the frontend run store/local storage as the source of truth for derived artifacts until backend persistence lands, and ensure each API call sends the serialized upstream artifact context needed for downstream subagents.
+
+### Task 6.1 – Promote PRD Controller into `prd-agent` Subagent Package
+**Objective:** Carve the PRD-specific controller/adapters out of `@product-agents/product-agent` so PRD generation ships as its own subagent package (`@product-agents/prd-agent`) that exposes a manifest + `SubagentLifecycle` factory usable by the orchestrator or any downstream caller.
+
+**Plan**
+1. **Scaffold the package + tooling wiring**
+   - Create `packages/prd-agent` with `package.json`, `tsconfig.json`, `src/index.ts`, and a README describing subagent semantics.
+   - Register the workspace in `package.json`, `tsconfig.base.json`, and `turbo.json` so `build`, `lint`, and `test` targets run automatically.
+   - Declare dependencies on `@product-agents/product-agent`, `@product-agents/skills-prd`, `@product-agents/prd-shared`, and shared infra (OpenRouter client, telemetry types).
+2. **Extract the controller + adapters into the new package**
+   - Move `createPrdController` (currently `packages/product-agent/src/compositions/prd-controller.ts:1`) plus `createPrdPlanner/SkillRunner/Verifier` factories under `packages/prd-agent/src`.
+   - Keep `GraphController`, config loading, and workspace DAO references imported from `@product-agents/product-agent` so we avoid duplicating orchestration logic.
+   - Ensure the new package exports both a controller factory (`createPrdAgentController`) and a config-aware convenience wrapper (`getDefaultPrdAgentController`) used by tests and the HTTP surface.
+3. **Implement the subagent manifest + lifecycle**
+   - Add `prdAgentManifest` describing `id`, `artifactKind: 'prd'`, source kinds (`prompt`, `brief`, `persona`), capabilities, and version metadata.
+   - Implement `createPrdAgentSubagent(options)` that conforms to `SubagentLifecycle`, internally spins up the PRD controller, and forwards progress/telemetry to the caller via `emit`.
+   - Provide serialization helpers so subagent outputs always return a valid `Artifact<PrdDocument>` with source metadata (mirroring what the controller currently writes to the workspace).
+4. **Integrate product-agent + API surfaces with the new package**
+   - Replace direct imports of `createPrdController` inside `packages/product-agent` and `apps/api/src` with the extracted factories from `@product-agents/prd-agent`.
+   - Update `product-agent.config.ts` (if needed) to resolve subagent manifests from the new package so PRD shows up in the Phase 6 registry.
+   - Preserve `/prd` endpoints by delegating to the subagent package while we build multi-artifact orchestration, and expose manifest data through `/health`.
+5. **Regression tests + documentation**
+   - Move/duplicate existing controller + persona subagent integration tests so they run against the new package and ensure subagent metadata is exported.
+   - Add a focused test verifying `createPrdAgentSubagent().execute` produces the prior PRD artifact structure and streams subagent events to the workspace DAO.
+   - Update `AGENT.md` and `docs/deep-agent-refactor/*` to mention the new package boundaries and how to consume the manifest from custom registries.
+
+**Open Questions / Dependencies**
+- ✅ `packages/product-agent/src/adapters/prd/*` move wholesale into `packages/prd-agent`; they are PRD-specific glue, so other subagents will consume their own adapters. `@product-agents/product-agent` will re-import the planner/runner/verifier from the new package rather than hosting source copies.
+- ✅ Version `@product-agents/prd-agent` with the existing repo semver stream (start at `0.6.0` with Phase 6, bump minor for planner/subagent surface changes, patch for fixes). Publish via the current monorepo release pipeline so manifests downstream can pin to `^0.x` and watch release notes for breaking changes.
+- ✅ Validation checklist for telemetry/workspace overrides once extracted:
+  1. Ensure `createPrdAgentController` accepts the same `loadProductAgentConfig` overrides and forwards `config.telemetry` + `config.workspace` into `GraphController`.
+  2. Add an integration test that instantiates the new controller with a custom `workspaceRoot` + telemetry sink to verify events persist outside the default path.
+  3. Double-check `product-agent.config.ts` continues to surface `runtime.telemetry` and `workspace.storageRoot` through `/health`, even though PRD execution happens inside the new package.
 
 ## Phase 0 – Audit & Scaffolding (Completed)
 - [x] Inventory current orchestrator flows, section writers, analyzers, and shared utilities.

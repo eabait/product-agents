@@ -1,6 +1,10 @@
-import type { Planner, PlanDraft, PlanRefinementInput } from '../../contracts/planner'
-import type { PlanGraph } from '../../contracts/core'
-import type { RunContext } from '../../contracts/core'
+import type {
+  Planner,
+  PlanDraft,
+  PlanRefinementInput,
+  PlanGraph,
+  RunContext
+} from '@product-agents/product-agent'
 import type { SectionRoutingRequest, SectionName } from '@product-agents/prd-shared'
 import { ALL_SECTION_NAMES } from '@product-agents/prd-shared'
 

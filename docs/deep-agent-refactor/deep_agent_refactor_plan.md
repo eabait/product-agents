@@ -14,7 +14,8 @@
 | `frontend/product-agent` | **Product Agent Frontend** | Next.js UI for interacting with the deep product agent | Rehomes existing PRD frontend; future-proof for multi-artifact workflows. |
 | Legacy PRD bundle (removed) | **Legacy Domain Bundle** | PRD-specific plan templates, skill wiring, prompts, config | Removed during Phase 5; domain wiring now lives in `packages/product-agent` + `packages/skills/prd`. |
 | `packages/skills/*` | **Skill Modules** | Stateless skills (section writers, analyzers, validators, formatters) | Namespaced per capability; shipped as tree-shakeable imports. |
-| `packages/subagents/*` | **Stateful Subagents** | Persona builder, research synthesizer, story mapper, etc. | Promoted when internal planning/iteration justified. |
+| `packages/prd-agent` | **PRD Agent Subpackage** | Subagent lifecycle implementation, PRD skill-pack binding, manifest export | First-class `SubagentLifecycle` that can run standalone or under the product-agent orchestrator. |
+| `packages/subagents/*` | **Stateful Subagents** | Persona builder, research synthesizer, story mapper, etc. | Promoted when internal planning/iteration justified; each ships its own manifest. |
 | `packages/shared/*` | **Shared Utilities** | Common types, schema defs, confidence utilities, client SDK | Prune/relocate code from `prd-agent` as needed. |
 | `apps/api` (replaces legacy `apps/mcp-server`) | **Thin API Surface** | HTTP/SSE endpoints, auth, rate limiting | Wraps orchestrator core via `@product-agents/product-agent`; shared across artifact types. |
 
@@ -61,6 +62,13 @@
 - **Testing:** Provide manifest-level tests ensuring every registered skill satisfies the expected contract and exports metadata (name, inputs, outputs).
 - **Future-proofing:** Allow optional `subagents` arrays but keep implementation minimal until new subagents land.
 
+### Subagent Registry & Planner Blueprint
+- **Per-package manifests:** Every agent-grade package (`packages/prd-agent`, persona, research, story-mapper) exports `SubagentManifestEntry = { id, package, creates, consumes[], capabilities[], version, plannerHints? }` plus a factory that returns a `SubagentLifecycle`.
+- **Registry service:** `packages/product-agent` owns a `SubagentRegistry` that loads manifests (from config or dynamic imports), caches metadata, exposes `list/filter/get`, and lazily instantiates implementations when the controller needs them.
+- **Planner integration:** Extend the plan graph DSL with `kind: 'skill' | 'subagent'`, `agentId`, and optional `inputs.fromArtifact`. The intelligent planner queries the registry (e.g., `filterBy({ sourceKind: 'prd', targetKind: 'persona' })`) when composing multi-artifact plans and injects the chosen subagent node(s) into the graph.
+- **API/telemetry:** Surface registry metadata via `/health` so the frontend and SDKs know which artifact types and agent IDs are available; log registry versions for debugging.
+- **Prompt footprint:** Only inject the small subset of manifest data relevant to a given planning decision to avoid unnecessary context-window overhead.
+
 ## Phase Plan
 
 ### Phase 0 – Audit & Scaffolding
@@ -102,6 +110,11 @@
 - Update tests, fixtures, and docs to reference new package structure.
 - Add migration notes for consumers (SDK/API changes, environment variables).
 - Exit Criteria: Repo lint/tests green; documentation updated; no unused legacy code remains.
+
+### Client Artifact Persistence (Interim)
+- Until backend persistence spans every artifact type, keep leveraging the frontend run store/local storage to cache derived artifacts (PRD, persona, story map).
+- Require clients to pass serialized upstream artifacts when invoking downstream subagents so the orchestrator can hydrate `sourceArtifact` even if the backend hasn’t stored it yet.
+- Attach cached artifacts back onto run summaries when responses return, keeping UI state aligned without blocking registry/subagent work.
 
 ## Testing & Tooling Strategy
 - Unit tests for core orchestrator state machine, planner adapters, skill runner, and verifier.

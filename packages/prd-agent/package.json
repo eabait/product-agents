@@ -1,0 +1,24 @@
+{
+  "name": "@product-agents/prd-agent",
+  "version": "0.6.0",
+  "description": "PRD-focused subagent package that wraps the product-agent controller",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "lint": "eslint 'src/**/*.{ts,tsx}'",
+    "clean": "rm -rf dist",
+    "test": "node --test --loader ./tests/ts-loader.mjs tests/**/*.test.ts"
+  },
+  "dependencies": {
+    "@product-agents/agent-core": "*",
+    "@product-agents/prd-shared": "*",
+    "@product-agents/product-agent": "*",
+    "@product-agents/skills-prd": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

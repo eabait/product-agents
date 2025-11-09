@@ -1,13 +1,13 @@
-import { GraphController } from '../controller/graph-controller'
 import {
+  GraphController,
+  FilesystemWorkspaceDAO,
   getDefaultProductAgentConfig,
   loadProductAgentConfig,
+  createPersonaBuilderSubagent,
+  type AgentController,
   type ProductAgentConfig
-} from '../config/product-agent.config'
-import { createPrdPlanner, createPrdSkillRunner, createPrdVerifier } from '../adapters/prd'
-import { FilesystemWorkspaceDAO } from '../workspace/filesystem-workspace-dao'
-import type { AgentController } from '../contracts/controller'
-import { createPersonaBuilderSubagent } from '../subagents'
+} from '@product-agents/product-agent'
+import { createPrdPlanner, createPrdSkillRunner, createPrdVerifier } from '../adapters'
 
 interface CreatePrdControllerOptions {
   config?: ProductAgentConfig

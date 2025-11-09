@@ -911,7 +911,8 @@ npm start
 # Serves the thin API at http://localhost:3001
 
 # Use in code
-import { createPrdController, loadProductAgentConfig } from '@product-agents/product-agent'
+import { loadProductAgentConfig } from '@product-agents/product-agent'
+import { createPrdController } from '@product-agents/prd-agent'
 const controller = createPrdController({ config: loadProductAgentConfig() })
 ```
 

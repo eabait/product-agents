@@ -6,8 +6,8 @@ import path from 'node:path'
 
 import { z } from 'zod'
 
+import { createPrdController } from '@product-agents/prd-agent'
 import {
-  createPrdController,
   loadProductAgentConfig,
   type ControllerRunSummary,
   type ProgressEvent,

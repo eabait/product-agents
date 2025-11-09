@@ -6,5 +6,10 @@ export default defineConfig({
   dts: true,
   splitting: false,
   clean: true,
-  noExternal: ['@product-agents/product-agent', '@product-agents/prd-shared', '@product-agents/agent-core']
+  noExternal: [
+    '@product-agents/product-agent',
+    '@product-agents/prd-agent',
+    '@product-agents/prd-shared',
+    '@product-agents/agent-core'
+  ]
 })

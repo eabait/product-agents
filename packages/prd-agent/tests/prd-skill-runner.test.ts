@@ -1,15 +1,14 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { PrdSkillRunner } from '../src/adapters/prd/skill-runner'
-import { resolveRunSettings, getDefaultProductAgentConfig } from '../src/config/product-agent.config'
+import { PrdSkillRunner } from '../src/adapters/skill-runner'
+import { resolveRunSettings, getDefaultProductAgentConfig, type PlanNode } from '@product-agents/product-agent'
 import {
   SECTION_NAMES,
   type SectionName,
   type SectionRoutingRequest,
   type SectionRoutingResponse
 } from '@product-agents/prd-shared'
-import type { PlanNode } from '../src/contracts/core'
 
 const fixedClock = () => new Date('2024-03-03T00:00:00.000Z')
 

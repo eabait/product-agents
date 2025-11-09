@@ -5,13 +5,14 @@ import os from 'node:os'
 import path from 'node:path'
 
 import { createPrdController } from '../src/compositions/prd-controller'
-import { loadProductAgentConfig } from '../src/config/product-agent.config'
+import { loadProductAgentConfig } from '@product-agents/product-agent'
 
 const shouldRunE2E = process.env.RUN_PRODUCT_AGENT_E2E === 'true'
 const prompt =
-  process.env.PRODUCT_AGENT_E2E_PROMPT ??
   [
-    'Create a product requirements document for a mobile budgeting assistant'
+    'Create a product requirements document for a mobile budgeting assistant',
+    'targeting US-based millennials with disposable income but poor savings habits.',
+    'Include goals, target users, key features, success metrics, and delivery constraints.'
   ].join(' ')
 
   // ,

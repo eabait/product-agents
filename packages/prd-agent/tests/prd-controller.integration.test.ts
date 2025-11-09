@@ -4,10 +4,12 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { GraphController } from '../src/controller/graph-controller'
-import { FilesystemWorkspaceDAO } from '../src/workspace/filesystem-workspace-dao'
-import { createPrdPlanner, createPrdSkillRunner, createPrdVerifier } from '../src/adapters/prd/index'
-import { getDefaultProductAgentConfig } from '../src/config/product-agent.config'
+import {
+  GraphController,
+  FilesystemWorkspaceDAO,
+  getDefaultProductAgentConfig
+} from '@product-agents/product-agent'
+import { createPrdPlanner, createPrdSkillRunner, createPrdVerifier } from '../src/adapters'
 import type { SectionName } from '@product-agents/prd-shared'
 
 const fixedClock = () => new Date('2024-04-04T00:00:00.000Z')

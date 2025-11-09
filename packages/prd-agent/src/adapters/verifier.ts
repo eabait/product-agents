@@ -1,5 +1,10 @@
-import type { Verifier, VerificationRequest, VerificationResult, VerificationIssue } from '../../contracts/verifier'
-import type { Artifact } from '../../contracts/core'
+import type {
+  Verifier,
+  VerificationRequest,
+  VerificationResult,
+  VerificationIssue,
+  Artifact
+} from '@product-agents/product-agent'
 import type { SectionRoutingResponse } from '@product-agents/prd-shared'
 
 interface PrdVerifierOptions {

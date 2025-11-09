@@ -69,9 +69,9 @@ const sanitizeStringArray = (input: unknown): string[] => {
 
   if (typeof input === 'object') {
     if (Array.isArray((input as any).items)) {
-      ;((input as any).items as unknown[]).forEach(pushIfValid)
+      ((input as any).items as unknown[]).forEach(pushIfValid)
     } else if (Array.isArray((input as any).list)) {
-      ;((input as any).list as unknown[]).forEach(pushIfValid)
+      ((input as any).list as unknown[]).forEach(pushIfValid)
     }
   }
 
@@ -222,7 +222,7 @@ const toTitleCase = (input: string): string =>
     .join(' ')
 
 const inferPersonaName = (summary: string, index: number): string => {
-  const cleaned = summary.replace(/^[•\-\–\*]+/, '').trim()
+  const cleaned = summary.replace(/^[-•–*]+/, '').trim()
   if (!cleaned) {
     return `Persona ${index + 1}`
   }

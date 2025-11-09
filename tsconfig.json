@@ -23,6 +23,7 @@
       "@product-agents/agent-core": ["./packages/shared/agent-core/src"],
       "@product-agents/openrouter-client": ["./packages/shared/openrouter-client/src"],
       "@product-agents/product-agent": ["./packages/product-agent/src"],
+      "@product-agents/prd-agent": ["./packages/prd-agent/src"],
       "@product-agents/prd-shared": ["./packages/shared/prd-shared/src/index.ts"],
       "@product-agents/skills-prd": ["./packages/skills/prd/src/index.ts"],
       "@product-agents/research-agent": ["./packages/research-agent/agent/src"],

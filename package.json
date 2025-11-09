@@ -7,6 +7,7 @@
     "apps/api",
     "packages/shared/*",
     "packages/product-agent",
+    "packages/prd-agent",
     "packages/product-agent/*",
     "packages/skills/*",
     "packages/research-agent/*",

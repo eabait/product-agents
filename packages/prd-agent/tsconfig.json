@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "noEmit": false,
+    "composite": true,
+    "declaration": true,
+    "declarationMap": true,
+    "baseUrl": ".",
+    "paths": {
+      "@product-agents/product-agent": ["../product-agent/dist/index.d.ts"],
+      "@product-agents/product-agent/*": ["../product-agent/dist/*"],
+      "@product-agents/agent-core": ["./src/types/external.d.ts"],
+      "@product-agents/prd-shared": ["./src/types/external.d.ts"],
+      "@product-agents/skills-prd": ["./src/types/external.d.ts"]
+    }
+  },
+  "include": ["src"]
+}
