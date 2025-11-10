@@ -17,6 +17,7 @@ import {
 
 const normalizePlanAction = (action: string): 'add' | 'update' | 'remove' => {
   const normalized = action.toLowerCase().trim()
+  if (normalized === 'keep') return 'update'
   if (normalized === 'modify' || normalized === 'edit') return 'update'
   if (normalized === 'delete') return 'remove'
   if (normalized === 'append' || normalized === 'insert') return 'add'
@@ -33,7 +34,8 @@ const ConstraintsPlanOperationSchema = z.object({
       z.literal('edit'),
       z.literal('delete'),
       z.literal('append'),
-      z.literal('insert')
+      z.literal('insert'),
+      z.literal('keep')
     ])
     .default('add')
     .transform(value => normalizePlanAction(value)),
@@ -47,11 +49,30 @@ const StringListPlanSchema = z.object({
   proposed: z.array(z.string()).default([])
 })
 
+const parsePlanField = (value: unknown) => {
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    const withoutTrailingComma = trimmed.replace(/,+\s*$/, '')
+    const normalized = withoutTrailingComma.replace(/,\s*([}\]])/g, '$1')
+    try {
+      return JSON.parse(normalized)
+    } catch {
+      return value
+    }
+  }
+  return value
+}
+
+const StringListPlanInputSchema = z.preprocess(parsePlanField, StringListPlanSchema)
+
 const ConstraintsSectionPlanSchema = z.object({
   mode: z.enum(['append', 'replace', 'smart_merge']).default('smart_merge'),
-  constraints: StringListPlanSchema.default({ operations: [], proposed: [] }),
-  assumptions: StringListPlanSchema.default({ operations: [], proposed: [] }),
-  summary: z.string().optional()
+  constraints: StringListPlanInputSchema.default({ operations: [], proposed: [] }),
+  assumptions: StringListPlanInputSchema.default({ operations: [], proposed: [] }),
+  summary: z.preprocess(
+    value => (typeof value === 'number' ? String(value) : value),
+    z.string().optional()
+  )
 })
 
 export interface ConstraintsSection {

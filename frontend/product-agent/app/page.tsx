@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { UsageSummary } from "@product-agents/agent-core";
 import { v4 as uuidv4 } from "uuid";
 import { Button } from "@/components/ui/button";
@@ -22,12 +22,21 @@ import {
   Trash2,
   Database,
 } from "lucide-react";
-import { Conversation, Message, AgentMetadata, AgentSettingsState, SubAgentSettingsMap } from "@/types";
+import {
+  Conversation,
+  Message,
+  AgentMetadata,
+  AgentSettingsState,
+  SubAgentSettingsMap,
+  type RunProgressCard,
+  type AgentProgressEvent,
+  type RunProgressStatus,
+  type PlanGraphSummary
+} from "@/types";
 import { NewPRD } from "@/lib/prd-schema";
 import { ContextPanel } from "@/components/context";
 import { ContextUsageIndicator } from "@/components/context/ContextUsageIndicator";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
-import { type ProgressEvent } from "@/components/chat/ProgressIndicator";
 import { contextStorage } from "@/lib/context-storage";
 import { buildEnhancedContextPayload, getContextSummary } from "@/lib/context-utils";
 import { getRun, startRun, streamRun } from "@/lib/run-client";
@@ -157,12 +166,19 @@ function PRDAgentPageContent() {
   const [agentMetadata, setAgentMetadata] = useState<AgentMetadata | null>(null);
   
   // Streaming state
-  const [progressEvents, setProgressEvents] = useState<ProgressEvent[]>([]);
+  const [progressByConversation, setProgressByConversation] = useState<Record<string, RunProgressCard[]>>({});
+  const progressCardRunMap = useRef(new Map<string, string>());
+  const progressCardConversationMap = useRef(new Map<string, string>());
+  const activeProgressCardRef = useRef<string | null>(null);
 
   const activeArtifactType = settings.artifactTypes?.[0] ?? 'prd'
   const isPersonaMode = activeArtifactType === 'persona'
   // Derive streaming state from settings (persona runs are batch-only)
   const isStreamingEnabled = settings.streaming !== false && !isPersonaMode;
+  const activeProgressCards = useMemo(() => {
+    if (!activeId) return [];
+    return progressByConversation[activeId] ?? [];
+  }, [activeId, progressByConversation]);
   
   // Context panel state
   const [contextOpen, setContextOpen] = useState(false);
@@ -316,6 +332,123 @@ function PRDAgentPageContent() {
     },
     [pricingByModel]
   );
+
+  const registerProgressCard = (card: RunProgressCard) => {
+    progressCardConversationMap.current.set(card.id, card.conversationId);
+    setProgressByConversation(prev => ({
+      ...prev,
+      [card.conversationId]: [...(prev[card.conversationId] ?? []), card]
+    }));
+  };
+
+  const updateProgressCard = (
+    cardId: string,
+    updater: (card: RunProgressCard) => RunProgressCard
+  ) => {
+    const conversationId = progressCardConversationMap.current.get(cardId);
+    if (!conversationId) return;
+    setProgressByConversation(prev => {
+      const cards = prev[conversationId];
+      if (!cards) return prev;
+      const index = cards.findIndex(card => card.id === cardId);
+      if (index === -1) return prev;
+      const updatedCard = updater(cards[index]);
+      if (updatedCard === cards[index]) {
+        return prev;
+      }
+      const nextCards = [...cards];
+      nextCards[index] = updatedCard;
+      return { ...prev, [conversationId]: nextCards };
+    });
+  };
+
+  const extractPlanFromPayload = (payload?: Record<string, unknown>): PlanGraphSummary | undefined => {
+    if (!payload) return undefined;
+    const planCandidate = payload.plan;
+    if (!planCandidate || typeof planCandidate !== 'object') {
+      return undefined;
+    }
+    return planCandidate as PlanGraphSummary;
+  };
+
+  const appendProgressEventToCard = (cardId: string, event: AgentProgressEvent) => {
+    updateProgressCard(cardId, card => {
+      const updatedEvents = [...card.events, event];
+      const payload = event.payload as Record<string, unknown> | undefined;
+      const planUpdate =
+        event.type === 'plan.created' ? extractPlanFromPayload(payload) ?? card.plan : card.plan;
+      return {
+        ...card,
+        events: updatedEvents,
+        plan: planUpdate
+      };
+    });
+  };
+
+  const finalizeProgressCard = (cardId: string, nextStatus: RunProgressStatus) => {
+    updateProgressCard(cardId, card => {
+      if (card.status === nextStatus && card.completedAt) {
+        return card;
+      }
+      return {
+        ...card,
+        status: nextStatus,
+        completedAt: nextStatus === 'active' ? card.completedAt : new Date().toISOString()
+      };
+    });
+
+    for (const [runId, mappedCardId] of progressCardRunMap.current.entries()) {
+      if (mappedCardId === cardId) {
+        progressCardRunMap.current.delete(runId);
+        break;
+      }
+    }
+
+    if (nextStatus !== 'active' && activeProgressCardRef.current === cardId) {
+      activeProgressCardRef.current = null;
+    }
+  };
+
+  const routeProgressEvent = (event: AgentProgressEvent, fallbackCardId?: string | null) => {
+    const runId = event.runId;
+    const targetCardId =
+      (runId ? progressCardRunMap.current.get(runId) : undefined) ?? fallbackCardId ?? null;
+    if (!targetCardId) return;
+
+    appendProgressEventToCard(targetCardId, event);
+
+    if (event.type === 'run.status' && event.status) {
+      if (event.status === 'failed') {
+        finalizeProgressCard(targetCardId, 'failed');
+      } else if (event.status === 'awaiting-input') {
+        finalizeProgressCard(targetCardId, 'awaiting-input');
+      }
+    }
+  };
+
+  const clearProgressForConversation = (conversationId: string) => {
+    setProgressByConversation(prev => {
+      if (!prev[conversationId]) return prev;
+      const next = { ...prev };
+      delete next[conversationId];
+      return next;
+    });
+
+    for (const [cardId, convId] of Array.from(progressCardConversationMap.current.entries())) {
+      if (convId === conversationId) {
+        progressCardConversationMap.current.delete(cardId);
+        if (activeProgressCardRef.current === cardId) {
+          activeProgressCardRef.current = null;
+        }
+        for (const [runId, mappedCardId] of progressCardRunMap.current.entries()) {
+          if (mappedCardId === cardId) {
+            progressCardRunMap.current.delete(runId);
+          }
+        }
+      }
+    }
+  };
+
 
   // No cleanup needed since we handle streaming directly in the fetch response
   
@@ -552,6 +685,8 @@ function PRDAgentPageContent() {
 
     // Clear delete confirmation state
     setDeletingConversationId(null);
+
+    clearProgressForConversation(conversationId);
   };
 
   // Confirm deletion
@@ -967,9 +1102,23 @@ function PRDAgentPageContent() {
     updateActiveConversation(conv => ({ ...conv, messages: newMessages }));
     setInput("");
     setIsChatLoading(true);
-    
-    // Reset progress events for new request
-    setProgressEvents([]);
+
+    let progressCardId: string | null = null;
+    if (isStreamingEnabled && activeId) {
+      progressCardId = uuidv4();
+      registerProgressCard({
+        id: progressCardId,
+        runId: null,
+        conversationId: activeId,
+        messageId: userMessage.id,
+        status: 'active',
+        startedAt: new Date().toISOString(),
+        events: [],
+        plan: undefined,
+        completedAt: undefined
+      });
+      activeProgressCardRef.current = progressCardId;
+    }
 
     try {
       // Sync conversation messages to selectable messages storage
@@ -993,7 +1142,7 @@ function PRDAgentPageContent() {
       }
 
       if (isStreamingEnabled) {
-        await handleStreamingSubmit(newMessages, contextPayload, userMessage, existingPRD);
+        await handleStreamingSubmit(newMessages, contextPayload, userMessage, existingPRD, progressCardId, activeId);
       } else {
         await handleNonStreamingSubmit(newMessages, contextPayload, userMessage, existingPRD);
       }
@@ -1025,7 +1174,14 @@ function PRDAgentPageContent() {
   };
 
   // Streaming submission handler with proper cleanup and error handling
-  const handleStreamingSubmit = async (newMessages: Message[], contextPayload: any, userMessage: Message, existingPRD: any) => {
+  const handleStreamingSubmit = async (
+    newMessages: Message[],
+    contextPayload: any,
+    userMessage: Message,
+    existingPRD: any,
+    progressCardId?: string | null,
+    conversationId?: string | null
+  ) => {
     let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
     let timeoutId: NodeJS.Timeout | null = null;
     let hasFinalArtifact = false;
@@ -1033,6 +1189,9 @@ function PRDAgentPageContent() {
     let streamedUsageSummary: any = null;
     let streamedMetadata: any = null;
     let streamedModel: string | null = settings.model ?? null;
+    let streamStatus: RunProgressStatus | null = null;
+    const fallbackCardId = progressCardId ?? null;
+    const conversationForProgress = conversationId ?? activeId;
 
     try {
       const run = await startRun({
@@ -1048,6 +1207,13 @@ function PRDAgentPageContent() {
       }
 
       runId = run.runId;
+      if (fallbackCardId && runId) {
+        progressCardRunMap.current.set(runId, fallbackCardId);
+        updateProgressCard(fallbackCardId, card => ({
+          ...card,
+          runId
+        }));
+      }
 
       const response = await streamRun(run.runId);
 
@@ -1069,14 +1235,18 @@ function PRDAgentPageContent() {
           if (reader) {
             reader.cancel('Stream timeout');
           }
-          setProgressEvents(prev => [
-            ...prev,
-            {
-              type: 'final',
-              timestamp: new Date().toISOString(),
-              error: `Stream timeout after ${STREAM_TIMEOUT_MS / 1000 / 60} minutes`
-            }
-          ]);
+          if (fallbackCardId) {
+            routeProgressEvent(
+              {
+                type: 'run.status',
+                timestamp: new Date().toISOString(),
+                message: `Stream timeout after ${STREAM_TIMEOUT_MS / 1000 / 60} minutes`,
+                status: 'failed',
+                runId: runId ?? undefined
+              },
+              fallbackCardId
+            );
+          }
         }, STREAM_TIMEOUT_MS);
       };
 
@@ -1133,8 +1303,7 @@ function PRDAgentPageContent() {
               
               // Handle different event types
               if (eventData.type) {
-                // Progress event
-                setProgressEvents(prev => [...prev, eventData]);
+                routeProgressEvent(eventData as AgentProgressEvent, fallbackCardId);
               } else if (eventData.error) {
                 throw new Error(eventData.error);
               } else if (eventData.artifact) {
@@ -1187,6 +1356,10 @@ function PRDAgentPageContent() {
                 });
                 streamedUsageSummary = null;
                 streamedMetadata = null;
+                streamStatus = 'completed';
+                if (fallbackCardId) {
+                  finalizeProgressCard(fallbackCardId, 'completed');
+                }
               } else if (eventData.content) {
                 const contentPayload = eventData.content;
                 const messageContent =
@@ -1221,6 +1394,10 @@ function PRDAgentPageContent() {
                 });
                 streamedUsageSummary = null;
                 streamedMetadata = null;
+                streamStatus = 'completed';
+                if (fallbackCardId) {
+                  finalizeProgressCard(fallbackCardId, 'completed');
+                }
               } else if (eventData.needsClarification) {
                 // Handle clarification request
                 const questionsText = eventData.questions?.map((q: string, index: number) => 
@@ -1253,6 +1430,10 @@ function PRDAgentPageContent() {
                 });
                 streamedUsageSummary = null;
                 streamedMetadata = null;
+                streamStatus = 'awaiting-input';
+                if (fallbackCardId) {
+                  finalizeProgressCard(fallbackCardId, 'awaiting-input');
+                }
               }
             } catch (parseError) {
               console.warn('Failed to parse SSE data:', dataStr, parseError);
@@ -1260,10 +1441,12 @@ function PRDAgentPageContent() {
           }
         }
       }
+    } catch (error) {
+      streamStatus = 'failed';
+      throw error;
     } finally {
       // Reset loading state
       setIsChatLoading(false);
-      setProgressEvents([]); // Clear progress events
       
       // Clear timeout
       if (timeoutId) {
@@ -1325,10 +1508,19 @@ function PRDAgentPageContent() {
                 title: shouldUpdateTitle ? generateTitleFromMessage(userMessage.content) : conv.title
               };
             });
+            streamStatus = 'completed';
+            if (fallbackCardId) {
+              finalizeProgressCard(fallbackCardId, 'completed');
+            }
           }
         } catch (fallbackError) {
           console.warn('Failed to fetch run summary after stream completion', fallbackError);
         }
+      }
+
+      if (fallbackCardId) {
+        const finalStatus = streamStatus ?? (hasFinalArtifact ? 'completed' : 'failed');
+        finalizeProgressCard(fallbackCardId, finalStatus);
       }
     }
   };
@@ -1674,7 +1866,7 @@ function PRDAgentPageContent() {
                 copied={copied}
                 onCopy={handleCopy}
                 onPRDUpdate={handlePRDUpdate}
-                progressEvents={progressEvents}
+                progressCards={activeProgressCards}
                 isStreaming={isChatLoading && isStreamingEnabled}
               />
             )}
@@ -1738,3 +1930,31 @@ export default function PRDAgentPage() {
     </AppStateProvider>
   );
 }
+  const registerProgressCard = (card: RunProgressCard) => {
+    progressCardConversationMap.current.set(card.id, card.conversationId);
+    setProgressByConversation(prev => ({
+      ...prev,
+      [card.conversationId]: [...(prev[card.conversationId] ?? []), card]
+    }));
+  };
+
+  const updateProgressCard = (
+    cardId: string,
+    updater: (card: RunProgressCard) => RunProgressCard
+  ) => {
+    const conversationId = progressCardConversationMap.current.get(cardId);
+    if (!conversationId) return;
+    setProgressByConversation(prev => {
+      const cards = prev[conversationId];
+      if (!cards) return prev;
+      const index = cards.findIndex(card => card.id === cardId);
+      if (index === -1) return prev;
+      const updatedCard = updater(cards[index]);
+      if (updatedCard === cards[index]) {
+        return prev;
+      }
+      const nextCards = [...cards];
+      nextCards[index] = updatedCard;
+      return { ...prev, [conversationId]: nextCards };
+    });
+  };

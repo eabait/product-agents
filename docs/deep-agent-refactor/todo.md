@@ -61,7 +61,13 @@
 
 ## Phase 6 – Planner Intelligence & Multi-Artifact Orchestration
 - [x] Promote the current PRD controller into a standalone `prd-agent` subagent package so Product Agent orchestrator can invoke it just like persona/research/story-map agents.
-- [ ] Replace the hardcoded PRD planner with an intelligent planner that dynamically composes plans from registered skills and agent-grade subagents.
+- [x] Replace the hardcoded PRD planner with an intelligent planner that dynamically composes plans from registered skills and agent-grade subagents.
+  - [x] Catalog every registered skill/subagent (capabilities, inputs/outputs, dependencies) via the manifest registry so the planner can query live metadata.
+  - [x] Define the planning DSL (node/edge types, ordering constraints, gating rules) and intent-to-plan heuristics so artifacts and transitions can be reasoned about uniformly.
+  - [x] Implement a planner engine that converts manifest metadata + user intent into executable plan graphs (supports branching, retries, verifier inserts) and exports an evaluable structure.
+  - [x] Add planner selection + config wiring inside `product-agent` (feature flag, env overrides, fallback to legacy planner) and ensure runtime logs/telemetry expose chosen strategies.
+  - [x] Update orchestrator + controller integration points to consume the new plan graph format, including progress events for composite plans spanning multiple subagents.
+  - [x] Write contract/integration tests covering representative intents (PRD-only, persona-only, mixed artifacts) and regression tests that compare legacy vs. intelligent planner outcomes.
 - [ ] Enable plan generation for PRD, persona, and user story mapping artifacts (and transitions between them) based on the user’s prompt intent.
 - [x] Ship artifact-aware skill/subagent registries (with discovery metadata) so the planner can reason across standalone packages (prd-agent, persona-agent, research-agent, story-mapper-agent, etc.).
 - [x] Implement the subagent registry/manifest contract:

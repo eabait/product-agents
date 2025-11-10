@@ -2,6 +2,7 @@ import path from 'node:path'
 import { z } from 'zod'
 
 const LOG_LEVELS = ['debug', 'info', 'warn', 'error'] as const
+const PLANNER_STRATEGIES = ['intelligent', 'legacy-prd'] as const
 
 const SkillPackReferenceSchema = z.object({
   id: z.string().min(1),
@@ -26,6 +27,10 @@ const SubagentManifestConfigSchema = z.object({
   entry: z.string().min(1),
   exportName: z.string().min(1).default('createSubagent'),
   tags: z.array(z.string().min(1)).default([])
+})
+
+const PlannerConfigSchema = z.object({
+  strategy: z.enum(PLANNER_STRATEGIES)
 })
 
 export const ProductAgentConfigSchema = z.object({
@@ -57,7 +62,8 @@ export const ProductAgentConfigSchema = z.object({
     .object({
       manifests: z.array(SubagentManifestConfigSchema)
     })
-    .default({ manifests: [] })
+    .default({ manifests: [] }),
+  planner: PlannerConfigSchema
 })
 
 const SkillPackInputSchema = z.object({
@@ -82,6 +88,8 @@ export type ProductAgentConfig = z.infer<typeof ProductAgentConfigSchema>
 export type ProductAgentApiOverrides = z.infer<typeof ProductAgentApiOverrideSchema>
 export type TelemetryLogLevel = typeof LOG_LEVELS[number]
 export type SubagentConfigEntry = z.infer<typeof SubagentManifestConfigSchema>
+export type PlannerConfig = z.infer<typeof PlannerConfigSchema>
+export type PlannerStrategy = typeof PLANNER_STRATEGIES[number]
 
 const DEFAULT_STORAGE_ROOT = path.resolve(process.cwd(), 'data', 'runs')
 
@@ -121,6 +129,9 @@ const DEFAULT_CONFIG: ProductAgentConfig = {
   },
   subagents: {
     manifests: []
+  },
+  planner: {
+    strategy: 'intelligent'
   }
 }
 
@@ -142,7 +153,8 @@ const cloneConfig = (config: ProductAgentConfig): ProductAgentConfig => ({
       capabilities: [...manifest.capabilities],
       tags: [...manifest.tags]
     }))
-  }
+  },
+  planner: { ...config.planner }
 })
 
 type RuntimeOverrides = Partial<ProductAgentConfig['runtime']> & { retry?: Partial<RetryPolicy> }
@@ -150,6 +162,7 @@ type WorkspaceOverrides = Partial<ProductAgentConfig['workspace']>
 type SkillsOverrides = Partial<ProductAgentConfig['skills']> & { enabledPacks?: SkillPackReference[] }
 type TelemetryOverrides = Partial<ProductAgentConfig['telemetry']>
 type SubagentOverrides = Partial<ProductAgentConfig['subagents']>
+type PlannerOverrides = Partial<ProductAgentConfig['planner']>
 
 type PartialProductAgentConfig = {
   runtime?: RuntimeOverrides
@@ -157,6 +170,7 @@ type PartialProductAgentConfig = {
   skills?: SkillsOverrides
   telemetry?: TelemetryOverrides
   subagents?: SubagentOverrides
+  planner?: PlannerOverrides
 }
 
 const mergeConfig = (
@@ -192,6 +206,10 @@ const mergeConfig = (
       },
       subagents: {
         manifests: override.subagents?.manifests ?? acc.subagents.manifests
+      },
+      planner: {
+        ...acc.planner,
+        ...override.planner
       }
     }
 
@@ -259,6 +277,7 @@ const parseEnvOverrides = (env: NodeJS.ProcessEnv): PartialProductAgentConfig | 
   const skills: SkillsOverrides = {}
   const telemetry: TelemetryOverrides = {}
   const subagents: SubagentOverrides = {}
+  const planner: PlannerOverrides = {}
 
   if (env.PRODUCT_AGENT_MODEL) {
     runtime.defaultModel = env.PRODUCT_AGENT_MODEL
@@ -332,6 +351,14 @@ const parseEnvOverrides = (env: NodeJS.ProcessEnv): PartialProductAgentConfig | 
     subagents.manifests = envSubagents
   }
 
+  const envPlannerStrategy = env.PRODUCT_AGENT_PLANNER_STRATEGY
+  if (
+    envPlannerStrategy &&
+    (PLANNER_STRATEGIES as readonly string[]).includes(envPlannerStrategy as PlannerStrategy)
+  ) {
+    planner.strategy = envPlannerStrategy as PlannerStrategy
+  }
+
   const overrides: PartialProductAgentConfig = {}
   if (Object.keys(runtime as Record<string, unknown>).length > 0) {
     overrides.runtime = runtime
@@ -347,6 +374,9 @@ const parseEnvOverrides = (env: NodeJS.ProcessEnv): PartialProductAgentConfig | 
   }
   if (subagents.manifests && subagents.manifests.length > 0) {
     overrides.subagents = subagents
+  }
+  if (Object.keys(planner as Record<string, unknown>).length > 0) {
+    overrides.planner = planner
   }
 
   return Object.keys(overrides as Record<string, unknown>).length > 0 ? overrides : undefined

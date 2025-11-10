@@ -12,7 +12,7 @@ import type { SkillResult, SkillRunner } from '../contracts/skill-runner'
 import type { VerificationResult, Verifier } from '../contracts/verifier'
 import type { ProductAgentConfig, ProductAgentApiOverrides } from '../config/product-agent.config'
 import { resolveRunSettings } from '../config/product-agent.config'
-import type { Artifact, StepId } from '../contracts/core'
+import type { Artifact, ArtifactKind, PlanNode, StepId } from '../contracts/core'
 import type { WorkspaceDAO, WorkspaceEvent, WorkspaceHandle } from '../contracts/workspace'
 import type { Planner } from '../contracts/planner'
 import type { ClarificationResult } from '@product-agents/prd-shared'
@@ -40,6 +40,8 @@ interface ExecutionContext {
   status: RunStatus
   clarification?: ClarificationResult
   subagentResults: SubagentRunSummary[]
+  artifactsByStep: Map<StepId, Artifact>
+  artifactsByKind: Map<ArtifactKind, Artifact>
 }
 
 const STATUS_RUNNING: RunStatus = 'running'
@@ -236,8 +238,15 @@ export class GraphController implements AgentController {
         type: 'plan.created',
         runId,
         payload: {
-          planId: plan.id,
-          version: plan.version
+          plan: {
+            id: plan.id,
+            artifactKind: plan.artifactKind,
+            entryId: plan.entryId,
+            version: plan.version,
+            createdAt: plan.createdAt instanceof Date ? plan.createdAt.toISOString() : plan.createdAt,
+            nodes: plan.nodes,
+            metadata: plan.metadata
+          }
         }
       })
     )
@@ -255,7 +264,9 @@ export class GraphController implements AgentController {
       plan,
       skillResults: [],
       status: STATUS_RUNNING,
-      subagentResults: []
+      subagentResults: [],
+      artifactsByStep: new Map(),
+      artifactsByKind: new Map()
     }
 
     try {
@@ -268,12 +279,16 @@ export class GraphController implements AgentController {
           throw new Error('Run completed without producing an artifact')
         }
 
-        const verification = await this.runVerification(executionContext, options)
-        executionContext.verification = verification
-        executionContext.status = mapVerificationStatusToRunStatus(verification)
+        if (executionContext.artifact.kind === 'prd') {
+          const verification = await this.runVerification(executionContext, options)
+          executionContext.verification = verification
+          executionContext.status = mapVerificationStatusToRunStatus(verification)
 
-        if (executionContext.status === STATUS_FAILED) {
-          throw new Error('Verification failed')
+          if (executionContext.status === STATUS_FAILED) {
+            throw new Error('Verification failed')
+          }
+        } else {
+          executionContext.status = STATUS_COMPLETED
         }
       }
 
@@ -357,6 +372,12 @@ export class GraphController implements AgentController {
         })
       )
 
+      const nodeKind = this.getPlanNodeKind(node)
+      if (nodeKind === 'subagent') {
+        await this.executeSubagentStep(node, context, options)
+        continue
+      }
+
       await this.workspace.appendEvent(
         context.runContext.runId,
         createWorkspaceEvent(context.runContext.runId, 'skill', {
@@ -383,6 +404,7 @@ export class GraphController implements AgentController {
         const artifactCandidate = (result.metadata as { artifact?: Artifact })?.artifact
         if (artifactCandidate) {
           context.artifact = artifactCandidate
+          this.trackArtifactForContext(stepId, artifactCandidate, context)
           await this.workspace.writeArtifact(context.runContext.runId, artifactCandidate)
           await this.workspace.appendEvent(
             context.runContext.runId,
@@ -561,6 +583,246 @@ export class GraphController implements AgentController {
     return aggregatedResult
   }
 
+  private trackArtifactForContext(stepId: StepId, artifact: Artifact, context: ExecutionContext) {
+    context.artifactsByStep.set(stepId, artifact)
+    context.artifactsByKind.set(artifact.kind, artifact)
+  }
+
+  private getPlanNodeKind(node: PlanNode): 'skill' | 'subagent' {
+    return node.metadata?.kind === 'subagent' ? 'subagent' : 'skill'
+  }
+
+  private async executeSubagentStep(
+    node: PlanNode,
+    context: ExecutionContext,
+    options?: ControllerStartOptions
+  ): Promise<void> {
+    const subagentId = node.metadata?.subagentId as string | undefined
+    if (!subagentId) {
+      throw new Error(`Subagent node "${node.id}" is missing a subagentId`)
+    }
+
+    const lifecycle = await this.getSubagentLifecycle(subagentId)
+    const sourceArtifact = this.resolveSubagentSourceArtifact(node, context)
+    if (!sourceArtifact) {
+      throw new Error(`Subagent "${subagentId}" requires a source artifact but none was available`)
+    }
+
+    emitEvent(
+      options,
+      toProgressEvent({
+        type: 'subagent.started',
+        runId: context.runContext.runId,
+        stepId: node.id,
+        payload: {
+          subagentId,
+          artifactKind: lifecycle.metadata.artifactKind,
+          label: lifecycle.metadata.label
+        },
+        message: `${lifecycle.metadata.label ?? subagentId} started`
+      })
+    )
+
+    await this.workspace.appendEvent(
+      context.runContext.runId,
+      createWorkspaceEvent(context.runContext.runId, 'subagent', {
+        action: 'start',
+        stepId: node.id,
+        subagentId,
+        artifactKind: lifecycle.metadata.artifactKind
+      })
+    )
+
+    try {
+      const result = await lifecycle.execute({
+        params: (node.metadata?.params as Record<string, unknown>) ?? {},
+        run: context.runContext,
+        sourceArtifact,
+        emit: event =>
+          emitEvent(
+            options,
+            toProgressEvent({
+              type: 'subagent.progress',
+              runId: context.runContext.runId,
+              payload: {
+                subagentId,
+                event
+              }
+            })
+          )
+      })
+
+      await this.workspace.writeArtifact(context.runContext.runId, result.artifact)
+      this.trackArtifactForContext(node.id, result.artifact, context)
+
+      const shouldPromote =
+        (node.metadata?.promoteResult as boolean | undefined) === true ||
+        result.artifact.kind === context.plan.artifactKind
+
+      if (shouldPromote || !context.artifact) {
+        context.artifact = result.artifact
+      }
+
+      context.subagentResults.push({
+        subagentId,
+        artifact: result.artifact,
+        metadata: result.metadata
+      })
+      this.recordSubagentArtifactMetadata(context, subagentId, result.artifact, result.metadata)
+
+      await this.workspace.appendEvent(
+        context.runContext.runId,
+        createWorkspaceEvent(context.runContext.runId, 'subagent', {
+          action: 'complete',
+          stepId: node.id,
+          subagentId,
+          artifactId: result.artifact.id,
+          artifactKind: result.artifact.kind
+        })
+      )
+
+      emitEvent(
+        options,
+        toProgressEvent({
+          type: 'subagent.completed',
+          runId: context.runContext.runId,
+          stepId: node.id,
+          payload: {
+            subagentId,
+            artifactId: result.artifact.id,
+            artifactKind: result.artifact.kind
+          },
+          message: `${lifecycle.metadata.label ?? subagentId} completed`
+        })
+      )
+
+      emitEvent(
+        options,
+        toProgressEvent({
+          type: 'step.completed',
+          runId: context.runContext.runId,
+          stepId: node.id,
+          payload: {
+            subagentId
+          }
+        })
+      )
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Subagent failed'
+      this.recordSubagentFailureMetadata(context, subagentId, message, 'plan')
+
+      await this.workspace.appendEvent(
+        context.runContext.runId,
+        createWorkspaceEvent(context.runContext.runId, 'subagent', {
+          action: 'failed',
+          stepId: node.id,
+          subagentId,
+          error: message
+        })
+      )
+
+      emitEvent(
+        options,
+        toProgressEvent({
+          type: 'subagent.failed',
+          runId: context.runContext.runId,
+          stepId: node.id,
+          payload: {
+            subagentId,
+            error: message
+          },
+          message
+        })
+      )
+
+      throw error
+    }
+  }
+
+  private resolveSubagentSourceArtifact(
+    node: PlanNode,
+    context: ExecutionContext
+  ): Artifact | undefined {
+    const source = node.metadata?.source as
+      | {
+          fromNode?: StepId
+          artifactKind?: ArtifactKind
+        }
+      | undefined
+
+    if (source?.fromNode) {
+      const byNode = context.artifactsByStep.get(source.fromNode)
+      if (byNode) {
+        return byNode
+      }
+    }
+
+    if (source?.artifactKind) {
+      const byKind = context.artifactsByKind.get(source.artifactKind)
+      if (byKind) {
+        return byKind
+      }
+    }
+
+    return context.artifact
+  }
+
+  private async getSubagentLifecycle(subagentId: string): Promise<SubagentLifecycle> {
+    const local = this.subagents.find(subagent => subagent.metadata.id === subagentId)
+    if (local) {
+      return local
+    }
+
+    if (!this.subagentRegistry) {
+      throw new Error(`Subagent "${subagentId}" is not registered with the controller`)
+    }
+
+    return this.subagentRegistry.createLifecycle(subagentId)
+  }
+
+  private recordSubagentArtifactMetadata(
+    context: ExecutionContext,
+    subagentId: string,
+    artifact: Artifact,
+    metadata?: Record<string, unknown>
+  ): void {
+    if (!context.runContext.metadata) {
+      context.runContext.metadata = {}
+    }
+
+    const existing =
+      (context.runContext.metadata.subagents as Record<string, unknown> | undefined) ?? {}
+    existing[subagentId] = {
+      artifactId: artifact.id,
+      artifactKind: artifact.kind,
+      metadata: metadata ?? {},
+      label: artifact.label,
+      version: artifact.version
+    }
+
+    context.runContext.metadata.subagents = existing
+  }
+
+  private recordSubagentFailureMetadata(
+    context: ExecutionContext,
+    subagentId: string,
+    error: string,
+    stage?: string
+  ): void {
+    if (!context.runContext.metadata) {
+      context.runContext.metadata = {}
+    }
+
+    const failures =
+      (context.runContext.metadata.subagentFailures as Record<string, unknown> | undefined) ?? {}
+    failures[subagentId] = {
+      error,
+      stage,
+      timestamp: this.clock().toISOString()
+    }
+    context.runContext.metadata.subagentFailures = failures
+  }
+
   private async runSubagents(
     context: ExecutionContext,
     options?: ControllerStartOptions
@@ -580,6 +842,7 @@ export class GraphController implements AgentController {
 
     const runId = context.runContext.runId
     const sourceKind = context.artifact.kind
+    const executedSubagents = new Set(context.subagentResults.map(result => result.subagentId))
     const shouldRunSubagent = (subagent: SubagentLifecycle) => {
       if (
         subagent.metadata.sourceKinds.length > 0 &&
@@ -591,6 +854,10 @@ export class GraphController implements AgentController {
     }
 
     for (const subagent of resolvedSubagents) {
+      if (executedSubagents.has(subagent.metadata.id)) {
+        continue
+      }
+
       if (!shouldRunSubagent(subagent)) {
         continue
       }
@@ -638,6 +905,8 @@ export class GraphController implements AgentController {
         })
 
         await this.workspace.writeArtifact(runId, result.artifact)
+        const syntheticStepId = (`subagent-auto-${subagent.metadata.id}-${context.subagentResults.length + 1}`) as StepId
+        this.trackArtifactForContext(syntheticStepId, result.artifact, context)
 
         context.subagentResults.push({
           subagentId: subagent.metadata.id,
@@ -645,22 +914,13 @@ export class GraphController implements AgentController {
           metadata: result.metadata
         })
 
-        if (!context.runContext.metadata) {
-          context.runContext.metadata = {}
-        }
-
-        const existingSubagents =
-          (context.runContext.metadata.subagents as Record<string, unknown> | undefined) ?? {}
-
-        existingSubagents[subagent.metadata.id] = {
-          artifactId: result.artifact.id,
-          artifactKind: result.artifact.kind,
-          metadata: result.metadata ?? {},
-          label: result.artifact.label,
-          version: result.artifact.version
-        }
-
-        context.runContext.metadata.subagents = existingSubagents
+        this.recordSubagentArtifactMetadata(
+          context,
+          subagent.metadata.id,
+          result.artifact,
+          result.metadata
+        )
+        executedSubagents.add(subagent.metadata.id)
 
         await this.workspace.appendEvent(
           runId,
@@ -708,16 +968,11 @@ export class GraphController implements AgentController {
           })
         )
 
-        if (!context.runContext.metadata) {
-          context.runContext.metadata = {}
-        }
-        const failures =
-          (context.runContext.metadata.subagentFailures as Record<string, unknown> | undefined) ?? {}
-        failures[subagent.metadata.id] = {
-          error: error instanceof Error ? error.message : String(error),
-          timestamp: this.clock().toISOString()
-        }
-        context.runContext.metadata.subagentFailures = failures
+        this.recordSubagentFailureMetadata(
+          context,
+          subagent.metadata.id,
+          error instanceof Error ? error.message : String(error)
+        )
       }
     }
   }
@@ -774,18 +1029,7 @@ export class GraphController implements AgentController {
           })
         )
 
-        if (!context.runContext.metadata) {
-          context.runContext.metadata = {}
-        }
-
-        const failures =
-          (context.runContext.metadata.subagentFailures as Record<string, unknown> | undefined) ?? {}
-        failures[manifest.id] = {
-          error: message,
-          stage: 'load',
-          timestamp: this.clock().toISOString()
-        }
-        context.runContext.metadata.subagentFailures = failures
+        this.recordSubagentFailureMetadata(context, manifest.id, message, 'load')
       }
     }
 

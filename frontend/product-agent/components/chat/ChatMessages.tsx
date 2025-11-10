@@ -1,9 +1,9 @@
 import { motion } from 'framer-motion';
 import { MessageBubble } from './MessageBubble';
 import { TypingIndicator } from './TypingIndicator';
-import { ProgressIndicator, type ProgressEvent } from './ProgressIndicator';
+import { ProgressIndicator } from './ProgressIndicator';
 import { NewPRD } from '@/lib/prd-schema';
-import { Message } from '../../types';
+import { Message, type RunProgressCard } from '../../types';
 import { useState, useEffect, useMemo } from 'react';
 
 interface ChatMessagesProps {
@@ -12,7 +12,7 @@ interface ChatMessagesProps {
   copied: string | null;
   onCopy: (_content: string, _messageId: string) => void;
   onPRDUpdate?: (_messageId: string, _updatedPRD: NewPRD) => void;
-  progressEvents?: ProgressEvent[];
+  progressCards?: RunProgressCard[];
   isStreaming?: boolean;
 }
 
@@ -22,7 +22,7 @@ export function ChatMessages({
   copied,
   onCopy,
   onPRDUpdate,
-  progressEvents = [],
+  progressCards = [],
   isStreaming = false,
 }: ChatMessagesProps) {
   const [expandedPRDs, setExpandedPRDs] = useState<Set<string>>(new Set());
@@ -71,19 +71,21 @@ export function ChatMessages({
     });
   };
 
-  // Find the index where we should insert the progress indicator
-  // It should be after the last user message when streaming
-  const lastUserMessageIndex = useMemo(() => {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].role === 'user') {
-        return i;
+  const progressCardsByMessage = useMemo(() => {
+    const map = new Map<string, RunProgressCard[]>();
+    const FALLBACK_KEY = '__tail__';
+    progressCards.forEach(card => {
+      const key = card.messageId ?? FALLBACK_KEY;
+      if (!map.has(key)) {
+        map.set(key, []);
       }
-    }
-    return -1;
-  }, [messages]);
-
-  // Determine if we should show progress indicator and where
-  const shouldShowProgress = isStreaming && (progressEvents.length > 0 || isProcessing);
+      map.get(key)!.push(card);
+    });
+    return {
+      map,
+      fallbackKey: FALLBACK_KEY,
+    };
+  }, [progressCards]);
   
   return (
     <div className="max-w-4xl mx-auto px-6 py-4 space-y-6">
@@ -103,40 +105,48 @@ export function ChatMessages({
               onToggleExpanded={handleToggleExpanded}
             />
           </motion.div>
-          
-          {/* Insert progress indicator after last user message when streaming */}
-          {shouldShowProgress && index === lastUserMessageIndex && (
+
+          {(progressCardsByMessage.map.get(message.id) ?? []).map(card => (
             <motion.div
+              key={`${card.id}-${card.status}`}
               className="mt-6"
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.3 }}
             >
               <ProgressIndicator 
-                events={progressEvents}
-                isActive={isProcessing}
-                defaultCollapsed={true}
+                events={card.events}
+                plan={card.plan}
+                isActive={card.status === 'active'}
+                status={card.status}
+                startedAt={card.startedAt}
+                completedAt={card.completedAt}
+                defaultCollapsed={card.status !== 'active'}
               />
             </motion.div>
-          )}
+          ))}
         </div>
       ))}
 
-      {/* Fallback: show progress indicator at the end if no user messages exist */}
-      {shouldShowProgress && lastUserMessageIndex === -1 && (
+      {(progressCardsByMessage.map.get(progressCardsByMessage.fallbackKey) ?? []).map(card => (
         <motion.div
+          key={`${card.id}-${card.status}`}
           className="mt-6"
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3 }}
         >
           <ProgressIndicator 
-            events={progressEvents}
-            isActive={isProcessing}
-            defaultCollapsed={true}
+            events={card.events}
+            plan={card.plan}
+            isActive={card.status === 'active'}
+            status={card.status}
+            startedAt={card.startedAt}
+            completedAt={card.completedAt}
+            defaultCollapsed={card.status !== 'active'}
           />
         </motion.div>
-      )}
+      ))}
 
       {isProcessing && !isStreaming && <TypingIndicator />}
     </div>

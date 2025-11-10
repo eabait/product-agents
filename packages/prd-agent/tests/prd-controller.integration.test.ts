@@ -7,7 +7,8 @@ import path from 'node:path'
 import {
   GraphController,
   FilesystemWorkspaceDAO,
-  getDefaultProductAgentConfig
+  getDefaultProductAgentConfig,
+  createPersonaBuilderSubagent
 } from '@product-agents/product-agent'
 import { createPrdPlanner, createPrdSkillRunner, createPrdVerifier } from '../src/adapters'
 import type { SectionName } from '@product-agents/prd-shared'
@@ -217,6 +218,88 @@ test('graph controller stops early when clarification is required', async () => 
     ])
   } finally {
     await workspace.teardown('run-prd-int-clar').catch(() => {})
+    await fs.rm(workspaceRoot, { recursive: true, force: true })
+  }
+})
+
+test('graph controller persona run promotes persona artifact via intelligent planner', async () => {
+  const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'product-agent-int-persona-'))
+  const config = getDefaultProductAgentConfig()
+  config.workspace.storageRoot = workspaceRoot
+  config.workspace.persistArtifacts = true
+
+  const personaSubagent = createPersonaBuilderSubagent({ clock: fixedClock })
+  const planner = createPrdPlanner({ clock: fixedClock, subagents: [personaSubagent] })
+
+  const skillRunner = createPrdSkillRunner({
+    clock: fixedClock,
+    factories: {
+      createClarificationAnalyzer: () => new IntegrationClarificationAnalyzer() as any,
+      createContextAnalyzer: () => ({
+        async analyze() {
+          return {
+            name: 'contextAnalysis',
+            data: {
+              themes: ['focus'],
+              requirements: {
+                functional: ['Collect insights'],
+                technical: ['API-first'],
+                user_experience: ['Fast responses']
+              },
+              constraints: []
+            },
+            confidence: {
+              level: 'high',
+              reasons: ['integration analyzer stub']
+            },
+            metadata: {}
+          }
+        }
+      }) as any,
+      createSectionWriter: section => new IntegrationSectionWriter(section) as any
+    }
+  })
+
+  const verifier = createPrdVerifier({ clock: fixedClock })
+  const workspace = new FilesystemWorkspaceDAO({ root: workspaceRoot, clock: fixedClock })
+
+  const controller = new GraphController(
+    {
+      planner,
+      skillRunner,
+      verifier: { primary: verifier },
+      workspace,
+      subagents: [personaSubagent]
+    },
+    config,
+    { clock: fixedClock, idFactory: () => 'run-persona-int' }
+  )
+
+  const runRequest = {
+    artifactKind: 'persona' as const,
+    input: {
+      message: 'Create personas for a research workflow.',
+      context: {}
+    },
+    createdBy: 'integration-test'
+  }
+
+  try {
+    const summary = await controller.start({ request: runRequest })
+
+    assert.equal(summary.status, 'completed')
+    assert.ok(summary.artifact)
+    assert.equal(summary.artifact?.kind, 'persona')
+    assert.ok(summary.subagents)
+    assert.equal(summary.subagents?.length, 1)
+    assert.equal(summary.subagents?.[0].artifact.kind, 'persona')
+
+    const artifacts = await workspace.listArtifacts(summary.runId)
+    assert.equal(artifacts.length, 2)
+    const personaArtifact = artifacts.find(entry => entry.kind === 'persona')
+    assert.ok(personaArtifact)
+  } finally {
+    await workspace.teardown('run-persona-int').catch(() => {})
     await fs.rm(workspaceRoot, { recursive: true, force: true })
   }
 })

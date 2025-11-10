@@ -27,6 +27,65 @@ export type Conversation = {
   createdAt: string;
 }
 
+export type ProgressEventType =
+  | 'plan.created'
+  | 'plan.updated'
+  | 'step.started'
+  | 'step.completed'
+  | 'step.failed'
+  | 'verification.started'
+  | 'verification.completed'
+  | 'verification.issue'
+  | 'artifact.delivered'
+  | 'run.status'
+  | 'subagent.started'
+  | 'subagent.progress'
+  | 'subagent.completed'
+  | 'subagent.failed'
+
+export interface AgentProgressEvent {
+  type: ProgressEventType | string
+  timestamp: string
+  runId?: string
+  stepId?: string
+  payload?: Record<string, unknown>
+  message?: string
+  status?: 'pending' | 'running' | 'awaiting-input' | 'blocked' | 'failed' | 'completed'
+}
+
+export interface PlanNodeSummary {
+  id: string
+  label: string
+  description?: string
+  dependsOn: string[]
+  metadata?: Record<string, unknown>
+  task?: Record<string, unknown>
+}
+
+export interface PlanGraphSummary {
+  id: string
+  artifactKind: string
+  entryId: string
+  version: string
+  createdAt?: string
+  nodes: Record<string, PlanNodeSummary>
+  metadata?: Record<string, unknown>
+}
+
+export type RunProgressStatus = 'active' | 'completed' | 'failed' | 'awaiting-input'
+
+export interface RunProgressCard {
+  id: string
+  runId: string | null
+  conversationId: string
+  messageId: string | null
+  status: RunProgressStatus
+  startedAt: string
+  completedAt?: string
+  events: AgentProgressEvent[]
+  plan?: PlanGraphSummary
+}
+
 // PRD-specific types
 export type { FlattenedPRD, SuccessMetric } from '@/lib/prd-schema';
 

@@ -7,6 +7,7 @@ import path from 'node:path'
 import { GraphController } from '../src/controller/graph-controller'
 import { FilesystemWorkspaceDAO } from '../src/workspace/filesystem-workspace-dao'
 import { getDefaultProductAgentConfig } from '../src/config/product-agent.config'
+import type { SubagentLifecycle } from '../src/contracts/subagent'
 
 const fixedClock = () => new Date('2024-01-01T00:00:00.000Z')
 
@@ -103,6 +104,155 @@ test('GraphController executes plan and delivers artifact', async () => {
     assert.equal(artifacts.length, 1)
   } finally {
     await workspaceDao.teardown('test-run').catch(() => {})
+    await fs.rm(workspaceRoot, { recursive: true, force: true })
+  }
+})
+
+test('GraphController executes inline subagent plan nodes without duplicate runs', async () => {
+  const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'product-agent-inline-'))
+  const workspaceDao = new FilesystemWorkspaceDAO({ root: workspaceRoot, clock: fixedClock })
+  const config = getDefaultProductAgentConfig()
+  config.workspace.storageRoot = workspaceRoot
+
+  const plan = {
+    id: 'plan-inline',
+    artifactKind: 'prd',
+    entryId: 'generate-prd',
+    createdAt: fixedClock(),
+    version: 'test-plan',
+    nodes: {
+      'generate-prd': {
+        id: 'generate-prd',
+        label: 'Generate PRD',
+        task: { kind: 'legacy-prd-run' },
+        status: 'pending' as const,
+        dependsOn: [] as string[],
+        metadata: { skillId: 'prd.legacy-orchestrator', kind: 'skill' }
+      },
+      'persona-builder': {
+        id: 'persona-builder',
+        label: 'Persona Builder',
+        task: { kind: 'subagent', subagentId: 'persona.builder' },
+        status: 'pending' as const,
+        dependsOn: ['generate-prd'],
+        metadata: {
+          kind: 'subagent',
+          subagentId: 'persona.builder',
+          source: {
+            fromNode: 'generate-prd',
+            artifactKind: 'prd'
+          },
+          promoteResult: false
+        }
+      }
+    }
+  }
+
+  const planner = {
+    async createPlan(context: any) {
+      return { plan, context }
+    },
+    async refinePlan(input: any) {
+      return { plan: input.currentPlan, context: input.context }
+    }
+  }
+
+  const baseArtifact = {
+    id: 'artifact-prd-inline',
+    kind: 'prd',
+    version: '1.0.0',
+    data: { sections: {}, metadata: {}, validation: { is_valid: true, issues: [], warnings: [] } },
+    metadata: {}
+  }
+
+  const skillRunner = {
+    async invoke() {
+      return {
+        output: baseArtifact.data,
+        metadata: { artifact: baseArtifact },
+        confidence: 0.9
+      }
+    }
+  }
+
+  const personaArtifact = {
+    id: 'artifact-persona-inline',
+    kind: 'persona',
+    version: '0.1.0',
+    label: 'Persona Artifact',
+    data: { personas: [] },
+    metadata: {}
+  }
+
+  let subagentExecutions = 0
+  const subagent: SubagentLifecycle = {
+    metadata: {
+      id: 'persona.builder',
+      label: 'Persona Builder',
+      version: '0.1.0',
+      artifactKind: 'persona',
+      sourceKinds: ['prd']
+    },
+    async execute({ sourceArtifact }) {
+      subagentExecutions += 1
+      assert.equal(sourceArtifact?.id, baseArtifact.id)
+      return {
+        artifact: personaArtifact,
+        metadata: {
+          notes: 'inline subagent test'
+        }
+      }
+    }
+  }
+
+  const verifier = {
+    async verify({ artifact }: any) {
+      assert.equal(artifact.id, baseArtifact.id)
+      return {
+        status: 'pass' as const,
+        artifact,
+        issues: []
+      }
+    }
+  }
+
+  const controller = new GraphController(
+    {
+      planner,
+      skillRunner,
+      verifier: { primary: verifier },
+      workspace: workspaceDao,
+      subagents: [subagent]
+    },
+    config,
+    {
+      clock: fixedClock,
+      idFactory: () => 'run-inline'
+    }
+  )
+
+  try {
+    const summary = await controller.start({
+      request: {
+        artifactKind: 'prd',
+        input: { message: 'generate product requirements' },
+        createdBy: 'unit-test'
+      }
+    })
+
+    assert.equal(summary.status, 'completed')
+    assert.equal(summary.artifact?.kind, 'prd')
+    assert.ok(summary.subagents)
+    assert.equal(summary.subagents?.length, 1)
+    assert.equal(summary.subagents?.[0].artifact.id, personaArtifact.id)
+    assert.equal(subagentExecutions, 1)
+
+    const artifacts = await workspaceDao.listArtifacts('run-inline')
+    assert.equal(artifacts.length, 2)
+    const personaStored = artifacts.find(entry => entry.id === personaArtifact.id)
+    assert.ok(personaStored, 'persona artifact should be persisted')
+  } finally {
+    await workspaceDao.teardown('run-inline').catch(() => {})
     await fs.rm(workspaceRoot, { recursive: true, force: true })
   }
 })

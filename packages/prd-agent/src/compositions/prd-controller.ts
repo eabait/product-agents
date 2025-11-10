@@ -32,13 +32,19 @@ export const createPrdController = (options?: CreatePrdControllerOptions): Agent
         : undefined
     )
 
-  const planner = createPrdPlanner({ clock: options?.clock })
+  const subagents = [createPersonaBuilderSubagent({ clock: options?.clock })]
+
+  const planner = createPrdPlanner({
+    config,
+    clock: options?.clock,
+    subagentRegistry: options?.subagentRegistry,
+    subagents
+  })
   const skillRunner = createPrdSkillRunner({
     fallbackModel: config.runtime.fallbackModel,
     clock: options?.clock
   })
   const verifier = createPrdVerifier({ clock: options?.clock })
-  const subagents = [createPersonaBuilderSubagent({ clock: options?.clock })]
 
   const workspace = new FilesystemWorkspaceDAO({
     root: options?.workspaceRoot ?? config.workspace.storageRoot,
