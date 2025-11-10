@@ -10,11 +10,18 @@ import {
   Map as MapIcon,
   GitBranch
 } from 'lucide-react';
-import type { AgentProgressEvent, PlanGraphSummary, PlanNodeSummary, RunProgressStatus } from '../../types';
+import type {
+  AgentProgressEvent,
+  PlanGraphSummary,
+  PlanNodeSummary,
+  PlanNodeState,
+  RunProgressStatus
+} from '../../types';
 
 interface ProgressIndicatorProps {
   events: AgentProgressEvent[]
   plan?: PlanGraphSummary
+  nodeStates?: Record<string, PlanNodeState>
   isActive: boolean
   status?: RunProgressStatus
   defaultCollapsed?: boolean
@@ -37,6 +44,7 @@ interface ProgressStep {
 export const ProgressIndicator = memo(function ProgressIndicator({
   events,
   plan,
+  nodeStates,
   isActive,
   status,
   defaultCollapsed = true,
@@ -80,6 +88,13 @@ export const ProgressIndicator = memo(function ProgressIndicator({
     if (!isActive) return 'text-green-600';
     return 'animate-spin text-blue-600';
   })();
+
+  const planStatusConfig: Record<PlanNodeState['status'], { label: string; badge: string }> = {
+    pending: { label: 'Pending', badge: 'bg-gray-100 text-gray-600' },
+    active: { label: 'Active', badge: 'bg-blue-100 text-blue-700' },
+    complete: { label: 'Complete', badge: 'bg-green-100 text-green-700' },
+    error: { label: 'Error', badge: 'bg-red-100 text-red-700' }
+  };
 
   return (
     <div className="bg-gray-50 border rounded-lg mb-4 overflow-hidden">
@@ -146,21 +161,29 @@ export const ProgressIndicator = memo(function ProgressIndicator({
                   </button>
                   {!isPlanCollapsed && (
                     <div className="px-4 pb-3 space-y-3 bg-white">
-                      {orderedPlanNodes.map(node => (
-                        <div key={node.id} className="border rounded-md p-3 bg-gray-50">
-                          <div className="flex items-center justify-between gap-2">
-                            <div>
-                              <p className="text-sm font-semibold text-gray-800">
-                                {node.label || node.id}
-                              </p>
-                              <p className="text-xs text-gray-500">ID: {node.id}</p>
+                      {orderedPlanNodes.map(node => {
+                        const nodeState = nodeStates?.[node.id] ?? { status: 'pending' }
+                        const statusChip = planStatusConfig[nodeState.status]
+                        return (
+                          <div key={node.id} className="border rounded-md p-3 bg-gray-50">
+                            <div className="flex items-center justify-between gap-2">
+                              <div>
+                                <p className="text-sm font-semibold text-gray-800">
+                                  {node.label || node.id}
+                                </p>
+                                <p className="text-xs text-gray-500">ID: {node.id}</p>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className={`text-xs px-2 py-0.5 rounded-full ${statusChip.badge}`}>
+                                  {statusChip.label}
+                                </span>
+                                {node.metadata?.kind && (
+                                  <span className="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 capitalize">
+                                    {String(node.metadata.kind)}
+                                  </span>
+                                )}
+                              </div>
                             </div>
-                            {node.metadata?.kind && (
-                              <span className="text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-700 capitalize">
-                                {String(node.metadata.kind)}
-                              </span>
-                            )}
-                          </div>
                           {node.metadata?.skillId && (
                             <p className="text-xs text-gray-500 mt-1">
                               Skill: {String(node.metadata.skillId)}
@@ -177,8 +200,22 @@ export const ProgressIndicator = memo(function ProgressIndicator({
                               Depends on: {node.dependsOn.join(', ')}
                             </p>
                           )}
-                        </div>
-                      ))}
+                            {nodeState.startedAt && (
+                              <p className="text-[11px] text-gray-400 mt-1">
+                                Started at {formatTime(nodeState.startedAt)}
+                              </p>
+                            )}
+                            {nodeState.completedAt && (
+                              <p className="text-[11px] text-gray-400">
+                                Completed at {formatTime(nodeState.completedAt)}
+                              </p>
+                            )}
+                            {nodeState.message && (
+                              <p className="text-[11px] text-gray-500 mt-1">{nodeState.message}</p>
+                            )}
+                          </div>
+                        )
+                      })}
                     </div>
                   )}
                 </div>

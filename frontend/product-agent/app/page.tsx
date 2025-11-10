@@ -31,7 +31,8 @@ import {
   type RunProgressCard,
   type AgentProgressEvent,
   type RunProgressStatus,
-  type PlanGraphSummary
+  type PlanGraphSummary,
+  type PlanNodeState
 } from "@/types";
 import { NewPRD } from "@/lib/prd-schema";
 import { ContextPanel } from "@/components/context";
@@ -334,10 +335,14 @@ function PRDAgentPageContent() {
   );
 
   const registerProgressCard = (card: RunProgressCard) => {
-    progressCardConversationMap.current.set(card.id, card.conversationId);
+    const normalizedCard = {
+      ...card,
+      nodeStates: card.nodeStates ?? {}
+    };
+    progressCardConversationMap.current.set(normalizedCard.id, normalizedCard.conversationId);
     setProgressByConversation(prev => ({
       ...prev,
-      [card.conversationId]: [...(prev[card.conversationId] ?? []), card]
+      [normalizedCard.conversationId]: [...(prev[normalizedCard.conversationId] ?? []), normalizedCard]
     }));
   };
 
@@ -352,7 +357,11 @@ function PRDAgentPageContent() {
       if (!cards) return prev;
       const index = cards.findIndex(card => card.id === cardId);
       if (index === -1) return prev;
-      const updatedCard = updater(cards[index]);
+      const baselineCard = {
+        ...cards[index],
+        nodeStates: cards[index].nodeStates ?? {}
+      };
+      const updatedCard = updater(baselineCard);
       if (updatedCard === cards[index]) {
         return prev;
       }
@@ -360,6 +369,126 @@ function PRDAgentPageContent() {
       nextCards[index] = updatedCard;
       return { ...prev, [conversationId]: nextCards };
     });
+  };
+
+  const initializeNodeStates = (
+    plan?: PlanGraphSummary,
+    existing: Record<string, PlanNodeState> = {}
+  ): Record<string, PlanNodeState> => {
+    if (!plan) {
+      return existing;
+    }
+    const next = { ...existing };
+    Object.keys(plan.nodes).forEach(nodeId => {
+      if (!next[nodeId]) {
+        next[nodeId] = { status: 'pending' };
+      }
+    });
+    return next;
+  };
+
+  const resolveEventNodeId = (event: AgentProgressEvent): string | undefined => {
+    if (event.stepId) {
+      return event.stepId;
+    }
+    const payload = event.payload;
+    if (payload && typeof payload === 'object') {
+      const candidate = (payload as Record<string, unknown>).stepId;
+      if (typeof candidate === 'string') {
+        return candidate;
+      }
+      const subagentId = (payload as Record<string, unknown>).subagentId;
+      if (typeof subagentId === 'string') {
+        return subagentId.startsWith('subagent-') ? subagentId : `subagent-${subagentId}`;
+      }
+    }
+    return undefined;
+  };
+
+  const applyNodeStateEvent = (
+    event: AgentProgressEvent,
+    currentStates: Record<string, PlanNodeState>
+  ): Record<string, PlanNodeState> => {
+    const nodeId = resolveEventNodeId(event);
+    if (!nodeId) {
+      return currentStates;
+    }
+    const existing = currentStates[nodeId] ?? { status: 'pending' };
+    let nextState: PlanNodeState | null = null;
+
+    const markActive = () => {
+      nextState = {
+        ...existing,
+        status: 'active',
+        startedAt: existing.startedAt ?? event.timestamp,
+        message: event.message || existing.message
+      };
+    };
+    const markComplete = () => {
+      nextState = {
+        ...existing,
+        status: 'complete',
+        completedAt: event.timestamp,
+        message: event.message || existing.message
+      };
+    };
+    const markError = () => {
+      nextState = {
+        ...existing,
+        status: 'error',
+        completedAt: event.timestamp,
+        message: event.message || existing.message
+      };
+    };
+
+    switch (event.type) {
+      case 'step.started':
+      case 'subagent.started':
+        markActive();
+        break;
+      case 'step.completed':
+      case 'subagent.completed':
+        markComplete();
+        break;
+      case 'step.failed':
+      case 'subagent.failed':
+        markError();
+        break;
+      default:
+        break;
+    }
+
+    if (!nextState || nextState === existing) {
+      return currentStates;
+    }
+    return {
+      ...currentStates,
+      [nodeId]: nextState
+    };
+  };
+
+  const finalizeNodeStates = (
+    states: Record<string, PlanNodeState>,
+    finalStatus: RunProgressStatus
+  ): Record<string, PlanNodeState> => {
+    if (finalStatus !== 'failed') {
+      return states;
+    }
+    let changed = false;
+    const next: Record<string, PlanNodeState> = {};
+    Object.entries(states).forEach(([nodeId, nodeState]) => {
+      if (nodeState.status === 'active') {
+        next[nodeId] = {
+          ...nodeState,
+          status: 'error',
+          completedAt: nodeState.completedAt ?? new Date().toISOString()
+        };
+        changed = true;
+      } else {
+        next[nodeId] = nodeState;
+      }
+    });
+    return changed ? next : states;
   };
 
   const extractPlanFromPayload = (payload?: Record<string, unknown>): PlanGraphSummary | undefined => {
@@ -373,14 +502,25 @@ function PRDAgentPageContent() {
 
   const appendProgressEventToCard = (cardId: string, event: AgentProgressEvent) => {
     updateProgressCard(cardId, card => {
-      const updatedEvents = [...card.events, event];
       const payload = event.payload as Record<string, unknown> | undefined;
-      const planUpdate =
-        event.type === 'plan.created' ? extractPlanFromPayload(payload) ?? card.plan : card.plan;
+      let planUpdate = card.plan;
+      let nodeStates = card.nodeStates ?? {};
+
+      if (event.type === 'plan.created') {
+        const resolvedPlan = extractPlanFromPayload(payload) ?? card.plan;
+        if (resolvedPlan) {
+          planUpdate = resolvedPlan;
+          nodeStates = initializeNodeStates(resolvedPlan, nodeStates);
+        }
+      }
+
+      const updatedNodeStates = applyNodeStateEvent(event, nodeStates);
+
       return {
         ...card,
-        events: updatedEvents,
-        plan: planUpdate
+        events: [...card.events, event],
+        plan: planUpdate,
+        nodeStates: updatedNodeStates
       };
     });
   };
@@ -390,10 +530,12 @@ function PRDAgentPageContent() {
       if (card.status === nextStatus && card.completedAt) {
         return card;
       }
+      const nodeStates = finalizeNodeStates(card.nodeStates ?? {}, nextStatus);
       return {
         ...card,
         status: nextStatus,
-        completedAt: nextStatus === 'active' ? card.completedAt : new Date().toISOString()
+        completedAt: nextStatus === 'active' ? card.completedAt : new Date().toISOString(),
+        nodeStates
       };
     });
 
@@ -422,6 +564,8 @@ function PRDAgentPageContent() {
         finalizeProgressCard(targetCardId, 'failed');
       } else if (event.status === 'awaiting-input') {
         finalizeProgressCard(targetCardId, 'awaiting-input');
+      } else if (event.status === 'completed') {
+        finalizeProgressCard(targetCardId, 'completed');
       }
     }
   };
@@ -1115,7 +1259,8 @@ function PRDAgentPageContent() {
         startedAt: new Date().toISOString(),
         events: [],
         plan: undefined,
-        completedAt: undefined
+        completedAt: undefined,
+        nodeStates: {}
       });
       activeProgressCardRef.current = progressCardId;
     }
@@ -1930,31 +2075,3 @@ export default function PRDAgentPage() {
     </AppStateProvider>
   );
 }
-  const registerProgressCard = (card: RunProgressCard) => {
-    progressCardConversationMap.current.set(card.id, card.conversationId);
-    setProgressByConversation(prev => ({
-      ...prev,
-      [card.conversationId]: [...(prev[card.conversationId] ?? []), card]
-    }));
-  };
-
-  const updateProgressCard = (
-    cardId: string,
-    updater: (card: RunProgressCard) => RunProgressCard
-  ) => {
-    const conversationId = progressCardConversationMap.current.get(cardId);
-    if (!conversationId) return;
-    setProgressByConversation(prev => {
-      const cards = prev[conversationId];
-      if (!cards) return prev;
-      const index = cards.findIndex(card => card.id === cardId);
-      if (index === -1) return prev;
-      const updatedCard = updater(cards[index]);
-      if (updatedCard === cards[index]) {
-        return prev;
-      }
-      const nextCards = [...cards];
-      nextCards[index] = updatedCard;
-      return { ...prev, [conversationId]: nextCards };
-    });
-  };

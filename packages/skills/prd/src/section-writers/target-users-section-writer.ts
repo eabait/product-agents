@@ -11,18 +11,67 @@ import {
   DEFAULT_TEMPERATURE
 } from '@product-agents/prd-shared'
 
+const normalizePlanAction = (action: string): 'add' | 'update' | 'remove' => {
+  const normalized = action.toLowerCase().trim()
+  if (normalized === 'modify' || normalized === 'edit' || normalized === 'keep') {
+    return 'update'
+  }
+  if (normalized === 'delete') {
+    return 'remove'
+  }
+  return normalized === 'add' || normalized === 'update' || normalized === 'remove' ? (normalized as 'add' | 'update' | 'remove') : 'add'
+}
+
 const TargetUserPlanOperationSchema = z.object({
-  action: z.enum(['add', 'update', 'remove']).default('add'),
+  action: z
+    .union([
+      z.literal('add'),
+      z.literal('update'),
+      z.literal('remove'),
+      z.literal('modify'),
+      z.literal('edit'),
+      z.literal('keep'),
+      z.literal('delete')
+    ])
+    .default('add')
+    .transform(value => normalizePlanAction(value)),
   referenceUser: z.string().optional(),
   user: z.string().optional(),
   rationale: z.string().optional()
 })
 
+const parseJsonField = (value: unknown) => {
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    const withoutTrailingComma = trimmed.replace(/,+\s*$/, '')
+    const normalized = withoutTrailingComma.replace(/,\s*([}\]])/g, '$1')
+    try {
+      return JSON.parse(normalized)
+    } catch {
+      return value
+    }
+  }
+  return value
+}
+
+const TargetUserOperationsInputSchema = z.preprocess(
+  parseJsonField,
+  z.array(TargetUserPlanOperationSchema).default([])
+)
+
+const TargetUserProposedInputSchema = z.preprocess(
+  parseJsonField,
+  z.array(z.string()).default([])
+)
+
 const TargetUsersSectionPlanSchema = z.object({
   mode: z.enum(['append', 'replace', 'smart_merge']).default('smart_merge'),
-  operations: z.array(TargetUserPlanOperationSchema).default([]),
-  proposedUsers: z.array(z.string()).default([]),
-  summary: z.string().optional()
+  operations: TargetUserOperationsInputSchema,
+  proposedUsers: TargetUserProposedInputSchema,
+  summary: z.preprocess(
+    value => (typeof value === 'number' ? String(value) : value),
+    z.string().optional()
+  )
 })
 
 export interface TargetUsersSection {
@@ -195,7 +244,7 @@ const findUserIndex = (users: string[], reference?: string): number => {
 const normalizeTargetUsersPlan = (plan: TargetUsersPlanInput): TargetUsersPlan => ({
   mode: plan.mode ?? 'smart_merge',
   operations: (plan.operations ?? []).map(operation => ({
-    action: operation.action ?? 'add',
+    action: normalizePlanAction(operation.action ?? 'add'),
     referenceUser: operation.referenceUser,
     user: operation.user,
     rationale: operation.rationale

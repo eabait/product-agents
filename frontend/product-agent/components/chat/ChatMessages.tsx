@@ -117,6 +117,7 @@ export function ChatMessages({
               <ProgressIndicator 
                 events={card.events}
                 plan={card.plan}
+                nodeStates={card.nodeStates}
                 isActive={card.status === 'active'}
                 status={card.status}
                 startedAt={card.startedAt}
@@ -139,6 +140,7 @@ export function ChatMessages({
           <ProgressIndicator 
             events={card.events}
             plan={card.plan}
+            nodeStates={card.nodeStates}
             isActive={card.status === 'active'}
             status={card.status}
             startedAt={card.startedAt}

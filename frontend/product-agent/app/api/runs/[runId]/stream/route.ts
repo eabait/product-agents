@@ -94,7 +94,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     backendResponse = await fetch(`${PRD_AGENT_URL}/runs/${record.id}/stream`, {
       method: 'GET',
       headers: { Accept: 'text/event-stream' },
-      signal: upstreamController.signal
+      signal: upstreamController.signal,
+      cache: 'no-store',
+      next: { revalidate: 0 }
     })
   } catch (error) {
     request.signal.removeEventListener('abort', abortHandler)

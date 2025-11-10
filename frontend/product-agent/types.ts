@@ -74,6 +74,13 @@ export interface PlanGraphSummary {
 
 export type RunProgressStatus = 'active' | 'completed' | 'failed' | 'awaiting-input'
 
+export interface PlanNodeState {
+  status: 'pending' | 'active' | 'complete' | 'error'
+  startedAt?: string
+  completedAt?: string
+  message?: string
+}
+
 export interface RunProgressCard {
   id: string
   runId: string | null
@@ -84,6 +91,7 @@ export interface RunProgressCard {
   completedAt?: string
   events: AgentProgressEvent[]
   plan?: PlanGraphSummary
+  nodeStates: Record<string, PlanNodeState>
 }
 
 // PRD-specific types
