@@ -202,7 +202,8 @@ export class GraphController implements AgentController {
       settings,
       workspace: workspaceHandle,
       startedAt: startTime,
-      metadata: options?.metadata ? { ...options.metadata } : {}
+      metadata: options?.metadata ? { ...options.metadata } : {},
+      intentPlan: input.request.intentPlan
     }
 
     emitEvent(

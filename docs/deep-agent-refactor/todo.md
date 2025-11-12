@@ -129,6 +129,71 @@
   2. Add an integration test that instantiates the new controller with a custom `workspaceRoot` + telemetry sink to verify events persist outside the default path.
   3. Double-check `product-agent.config.ts` continues to surface `runtime.telemetry` and `workspace.storageRoot` through `/health`, even though PRD execution happens inside the new package.
 
+### Task 6.3 – Intent-Aware Multi-Artifact Planning
+**Objective:** Interpret the user’s prompt (plus explicit toggles) to decide whether to produce a PRD, persona, story map, or a chained sequence (e.g., PRD → persona → story map), and emit a plan graph that reflects the necessary transitions and subagents.
+
+**Plan**
+1. **Intent schema + payload plumbing**
+   - [x] Extend `apps/api/src/index.ts` `StartRunSchema` to accept an optional `requestedArtifacts: string[]` (UI override) and persist the inferred intent inside `RunRequest.attributes.intent`.
+   - [x] Add a shared `ArtifactIntent`/`ArtifactTransition` type under `packages/product-agent/src/contracts/intent.ts`, update `RunRequest`/`RunContext` usage to carry `intentPlan`, and document the payload shape in `AGENT.md`.
+   - [x] Thread intent metadata through `packages/prd-agent/src/subagent.ts` so downstream controllers/subagents can inspect which artifact(s) are being targeted without re-parsing the prompt.
+2. **Intent resolver service**
+   - [ ] Implement `packages/product-agent/src/planner/intent-resolver.ts` that inspects the conversation text (`SectionRoutingRequest.message`), explicit `requestedArtifacts`, and registry manifests to output `{ targetArtifact: ArtifactKind; chain: ArtifactKind[]; confidence }`.
+   - [ ] Ship a dedicated `intent-classifier` skill (LLM-backed) under `packages/skills/intent` that receives the prompt summary and returns normalized artifact probabilities; wire it into the resolver so every run uses the skill instead of local heuristics.
+   - [ ] Cache resolver results on the `RunContext.metadata.intent` to avoid recomputing during plan refinement and so downstream subagents can reuse the classification without re-triggering the skill.
+3. **Planner transition graph composition**
+   - [ ] Refactor `packages/product-agent/src/planner/intelligent-planner.ts` so `createPlan` consumes the intent resolver output instead of hardcoded `switch` logic; split PRD core segment building from downstream artifact chaining.
+   - [ ] Introduce a helper (e.g., `buildTransitionSegments`) that walks the manifest graph (`SubagentRegistry` + `registeredSubagents`) to build sequential `PlanNode`s for persona/story-map agents, wiring `dependsOn` so each node waits for its source artifact.
+   - [ ] Annotate plan metadata with `requestedArtifacts`, `intentConfidence`, and `transitionPath` so the frontend can render upcoming artifacts and run summaries remain traceable.
+4. **Controller + progress event wiring**
+   - [ ] Ensure `packages/product-agent/src/controller/graph-controller.ts` stores intermediate artifacts per step (`artifactsByKind`) and emits `progress` payloads that specify which transition produced each artifact, enabling downstream verification of handoffs.
+   - [ ] Update SSE payloads in `apps/api/src/index.ts` to include `plan.metadata.intent` and downstream artifact previews so UI clients can gate persona/story map viewers.
+5. **Tests & documentation**
+   - [ ] Add resolver unit tests (`packages/product-agent/tests/intent-resolver.test.ts`) that cover prompt keyword detection, explicit overrides, and fallback scenarios.
+   - [ ] Expand `packages/product-agent/tests/intelligent-planner.test.ts` with personas + story-map manifests to verify PRD-only, persona-only, and chained PRD → persona → story-map plans.
+   - [ ] Capture the new flow in `docs/deep-agent-refactor/todo.md` (this section) and `AGENT.md`, outlining how to request multi-artifact plans and interpret the returned graph metadata.
+
+**Open Questions / Dependencies**
+- Need finalized persona/story-map manifests (with accurate `consumes` arrays) so the resolver can distinguish whether story maps require personas or can jump directly from PRDs.
+- Confirm whether the UI will pass explicit artifact selections; if not, ensure the `intent-classifier` skill prompt covers those cases so the LLM can infer transitions.
+- Validate that existing telemetry pipelines can handle larger plan graphs; if not, increase payload limits or paginate `plan.created` events before rollout.
+
+#### Intent Resolver Design Notes
+The resolver ingests the conversation payload (`SectionRoutingRequest.message`), explicit `requestedArtifacts`, and registry metadata to yield a normalized `ArtifactIntent`. Every run triggers the LLM-powered `intent-classifier` skill so we leverage consistent reasoning instead of hand-rolled heuristics; the skill returns artifact confidence scores plus recommended transition order.
+
+```mermaid
+flowchart LR
+  A[Prompt & UI settings] --> B{Context Builder}
+  B --> C[Intent Skill Payload]
+  C --> D[LLM Intent Skill]
+  D --> E[Artifact Probabilities]
+  B --> F[Explicit Artifact Overrides]
+  E --> G[Resolver Merge]
+  F --> G
+  G --> H[Intent Plan]
+  H --> I[Planner Metadata]
+  H --> J[Graph Controller]
+```
+
+```mermaid
+sequenceDiagram
+  participant API as apps/api
+  participant Resolver as IntentResolver
+  participant Registry as SubagentRegistry
+  participant Planner as IntelligentPlanner
+
+  API->>Resolver: resolveIntent(message, requestedArtifacts)
+  Resolver->>Registry: list()
+  Registry-->>Resolver: manifests (creates/consumes)
+  Resolver->>Skill: runIntentClassifier(prompt summary)
+  Skill-->>Resolver: probabilities + suggested chain
+  Resolver-->>API: ArtifactIntent {target, chain, confidence}
+  API->>Planner: RunContext(metadata.intent = ArtifactIntent)
+  Planner->>Planner: compose plan graph per transition chain
+```
+
+**LLM usage:** The `intent-classifier` skill is always invoked, ensuring consistent reasoning across artifact types. Deployments configure the underlying model/prompt via existing skill pack runtime settings; confidence thresholds still gate whether the planner chains downstream artifacts, but there is no heuristic fallback path.
+
 ## Phase 0 – Audit & Scaffolding (Completed)
 - [x] Inventory current orchestrator flows, section writers, analyzers, and shared utilities.
   - **Orchestrator:** `packages/product-agent/src/compositions/prd-controller.ts` composes the planner, skill runner, verifier, subagents, and workspace DAO. The thin HTTP surface in `apps/api/src/index.ts` loads `product-agent.config.ts`, streams progress events, and exposes `/prd` + `/runs` endpoints.

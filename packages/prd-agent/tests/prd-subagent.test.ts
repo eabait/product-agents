@@ -7,6 +7,7 @@ import {
 } from '../src/subagent'
 import {
   type AgentController,
+  type ArtifactIntent,
   type ControllerRunSummary,
   type EffectiveRunSettings,
   type ProgressEvent,
@@ -99,12 +100,24 @@ class StubController implements AgentController {
 const buildRunContext = () => {
   const config = getDefaultProductAgentConfig()
   const settings: EffectiveRunSettings = resolveRunSettings(config)
+  const intentPlan: ArtifactIntent = {
+    source: 'user',
+    requestedArtifacts: ['prd'],
+    targetArtifact: 'prd',
+    transitions: [
+      {
+        toArtifact: 'prd'
+      }
+    ],
+    confidence: 0.9
+  }
   return {
     runId: 'parent-run',
     request: {
       artifactKind: 'orchestrator',
       input: { message: 'Generate product brief' },
-      createdBy: 'unit-test'
+      createdBy: 'unit-test',
+      intentPlan
     },
     settings,
     workspace: {
@@ -116,7 +129,8 @@ const buildRunContext = () => {
       },
       resolve: (...segments: string[]) => segments.join('/')
     },
-    startedAt: new Date()
+    startedAt: new Date(),
+    intentPlan
   }
 }
 
@@ -146,6 +160,7 @@ test('createPrdAgentSubagent executes controller and returns enriched artifact',
   })
 
   assert.equal(stubController.lastRequest?.artifactKind, 'prd')
+  assert.deepEqual(stubController.lastRequest?.intentPlan, runContext.intentPlan)
   assert.equal(result.artifact.kind, 'prd')
   assert.equal(result.metadata?.originatingSubagent, prdAgentManifest.id)
   assert.ok(result.artifact.metadata?.extras?.source)

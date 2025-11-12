@@ -117,15 +117,23 @@ export const createPrdAgentSubagent = (
 
       const controller = ensureController()
       const prdRunId = request.params.runId ?? `prd-subagent-${randomUUID()}`
+      const inheritedIntentPlan = request.run.intentPlan ?? request.run.request.intentPlan
+      const runAttributes: Record<string, unknown> = {
+        ...(request.params.attributes ?? {}),
+        parentRunId: request.run.runId,
+        subagentId: prdAgentManifest.id
+      }
+
+      if (inheritedIntentPlan) {
+        runAttributes.intent = inheritedIntentPlan
+      }
+
       const runRequest: RunRequest<SectionRoutingRequest> = {
         artifactKind: 'prd',
         input: request.params.input,
         createdBy: request.params.createdBy ?? request.run.request.createdBy ?? DEFAULT_LABEL,
-        attributes: {
-          ...(request.params.attributes ?? {}),
-          parentRunId: request.run.runId,
-          subagentId: prdAgentManifest.id
-        }
+        attributes: runAttributes,
+        intentPlan: inheritedIntentPlan
       }
 
       const progress: ProgressEvent[] = []

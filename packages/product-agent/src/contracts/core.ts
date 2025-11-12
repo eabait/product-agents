@@ -1,4 +1,5 @@
 import type { EffectiveRunSettings } from '../config/product-agent.config'
+import type { ArtifactIntent } from './intent'
 
 export type RunId = string
 export type PlanId = string
@@ -32,6 +33,7 @@ export interface RunRequest<TInput = unknown> {
   createdBy: string
   correlationId?: string
   attributes?: Record<string, unknown>
+  intentPlan?: ArtifactIntent
 }
 
 export interface RunContext<TInput = unknown, TWorkspace = unknown> {
@@ -41,6 +43,7 @@ export interface RunContext<TInput = unknown, TWorkspace = unknown> {
   workspace: TWorkspace
   startedAt: Date
   metadata?: Record<string, unknown>
+  intentPlan?: ArtifactIntent
 }
 
 export type PlanNodeStatus = 'pending' | 'ready' | 'running' | 'complete' | 'blocked' | 'failed'
