@@ -6,6 +6,7 @@ import type { SubagentRegistry } from '../subagents/subagent-registry'
 import { LegacyPrdPlanner, createLegacyPrdPlanner, type PrdPlanTask } from './legacy-prd-planner'
 import { SkillCatalog } from './skill-catalog'
 import { IntelligentPlanner, type IntelligentPlannerTask } from './intelligent-planner'
+import { IntentResolver } from './intent-resolver'
 
 export { LegacyPrdPlanner, createLegacyPrdPlanner, SkillCatalog }
 export type { PrdPlanTask, IntelligentPlannerTask }
@@ -31,4 +32,4 @@ export const createPlanner = (options: PlannerFactoryOptions): Planner => {
   })
 }
 
-export { IntelligentPlanner }
+export { IntelligentPlanner, IntentResolver }

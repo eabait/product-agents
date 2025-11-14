@@ -138,9 +138,9 @@
    - [x] Add a shared `ArtifactIntent`/`ArtifactTransition` type under `packages/product-agent/src/contracts/intent.ts`, update `RunRequest`/`RunContext` usage to carry `intentPlan`, and document the payload shape in `AGENT.md`.
    - [x] Thread intent metadata through `packages/prd-agent/src/subagent.ts` so downstream controllers/subagents can inspect which artifact(s) are being targeted without re-parsing the prompt.
 2. **Intent resolver service**
-   - [ ] Implement `packages/product-agent/src/planner/intent-resolver.ts` that inspects the conversation text (`SectionRoutingRequest.message`), explicit `requestedArtifacts`, and registry manifests to output `{ targetArtifact: ArtifactKind; chain: ArtifactKind[]; confidence }`.
-   - [ ] Ship a dedicated `intent-classifier` skill (LLM-backed) under `packages/skills/intent` that receives the prompt summary and returns normalized artifact probabilities; wire it into the resolver so every run uses the skill instead of local heuristics.
-   - [ ] Cache resolver results on the `RunContext.metadata.intent` to avoid recomputing during plan refinement and so downstream subagents can reuse the classification without re-triggering the skill.
+   - [x] Implement `packages/product-agent/src/planner/intent-resolver.ts` that inspects the conversation text (`SectionRoutingRequest.message`), explicit `requestedArtifacts`, and registry manifests to output `{ targetArtifact: ArtifactKind; chain: ArtifactKind[]; confidence }`.
+   - [x] Ship a dedicated `intent-classifier` skill (LLM-backed) under `packages/skills/intent` that receives the prompt summary and returns normalized artifact probabilities; wire it into the resolver so every run uses the skill instead of local heuristics.
+   - [x] Cache resolver results on the `RunContext.metadata.intent` to avoid recomputing during plan refinement and so downstream subagents can reuse the classification without re-triggering the skill.
 3. **Planner transition graph composition**
    - [ ] Refactor `packages/product-agent/src/planner/intelligent-planner.ts` so `createPlan` consumes the intent resolver output instead of hardcoded `switch` logic; split PRD core segment building from downstream artifact chaining.
    - [ ] Introduce a helper (e.g., `buildTransitionSegments`) that walks the manifest graph (`SubagentRegistry` + `registeredSubagents`) to build sequential `PlanNode`s for persona/story-map agents, wiring `dependsOn` so each node waits for its source artifact.
