@@ -3,14 +3,8 @@ import { randomUUID } from 'node:crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 
-import {
-  createPersonaBuilderSubagent,
-  loadProductAgentConfig,
-  resolveRunSettings,
-  type Artifact,
-  type RunContext,
-  type WorkspaceHandle
-} from '@product-agents/product-agent'
+import { loadProductAgentConfig, resolveRunSettings, type Artifact, type RunContext, type WorkspaceHandle } from '@product-agents/product-agent'
+import { createPersonaBuilderSubagent } from '@product-agents/persona-agent'
 import type { SectionRoutingRequest, SectionRoutingResponse } from '@product-agents/prd-shared'
 import { attachSubagentArtifact, getRunRecord } from '../../runs/run-store'
 

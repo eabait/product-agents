@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { createPersonaBuilderSubagent } from '../src/subagents/persona-builder'
+import { createPersonaBuilderSubagent } from '@product-agents/persona-agent'
 import type { RunContext } from '../src/contracts/core'
 import type { SectionRoutingRequest } from '@product-agents/prd-shared'
 

@@ -11,7 +11,7 @@ import type { PlanGraph, RunContext } from '../src/contracts/core'
 import type { VerificationResult } from '../src/contracts/verifier'
 import { FilesystemWorkspaceDAO } from '../src/workspace/filesystem-workspace-dao'
 import { getDefaultProductAgentConfig } from '../src/config/product-agent.config'
-import { createPersonaBuilderSubagent } from '../src/subagents/persona-builder'
+import { createPersonaBuilderSubagent } from '@product-agents/persona-agent'
 
 const fixedClock = () => new Date('2024-09-18T00:00:00.000Z')
 

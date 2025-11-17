@@ -3,11 +3,11 @@ import {
   FilesystemWorkspaceDAO,
   getDefaultProductAgentConfig,
   loadProductAgentConfig,
-  createPersonaBuilderSubagent,
   type AgentController,
   type ProductAgentConfig,
   type SubagentRegistry
 } from '@product-agents/product-agent'
+import { createPersonaBuilderSubagent } from '@product-agents/persona-agent'
 import { createPrdPlanner, createPrdSkillRunner, createPrdVerifier } from '../adapters'
 
 interface CreatePrdControllerOptions {

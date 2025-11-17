@@ -4,12 +4,8 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import {
-  GraphController,
-  FilesystemWorkspaceDAO,
-  getDefaultProductAgentConfig,
-  createPersonaBuilderSubagent
-} from '@product-agents/product-agent'
+import { GraphController, FilesystemWorkspaceDAO, getDefaultProductAgentConfig } from '@product-agents/product-agent'
+import { createPersonaBuilderSubagent } from '@product-agents/persona-agent'
 import { createPrdPlanner, createPrdSkillRunner, createPrdVerifier } from '../src/adapters'
 import type { SectionName } from '@product-agents/prd-shared'
 

@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto'
 
-import type { Artifact } from '../contracts/core'
-import type { SubagentLifecycle } from '../contracts/subagent'
+import type { Artifact, SubagentLifecycle } from '@product-agents/product-agent'
 import type { SectionRoutingRequest, SectionRoutingResponse } from '@product-agents/prd-shared'
 
 interface PersonaBuilderOptions {
