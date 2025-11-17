@@ -1282,10 +1282,6 @@ function PRDAgentPageContent() {
       const existingPRD = getPRDFromMessages(newMessages);
       const contextPayload = buildEnhancedContextPayload(newMessages, existingPRD);
 
-      if (activeArtifactType === 'persona' && !existingPRD) {
-        throw new Error('Please generate a PRD before running the persona builder.');
-      }
-
       if (isStreamingEnabled) {
         await handleStreamingSubmit(newMessages, contextPayload, userMessage, existingPRD, progressCardId, activeId);
       } else {

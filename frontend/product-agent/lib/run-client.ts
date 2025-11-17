@@ -23,25 +23,45 @@ interface StartRunResult {
 
 export const startRun = async (params: StartRunParams): Promise<StartRunResult> => {
   const artifactType = params.artifactType ?? params.settings.artifactTypes?.[0] ?? 'prd'
+  const requestedArtifacts = (() => {
+    if (artifactType === 'persona') {
+      return ['persona']
+    }
+    const configured = params.settings.artifactTypes && params.settings.artifactTypes.length > 0
+      ? params.settings.artifactTypes
+      : [artifactType]
+    return Array.from(new Set(configured))
+  })()
   if (artifactType === 'persona') {
-    if (!params.sourceArtifact) {
-      throw new Error('Persona generation requires an existing PRD artifact.')
+    const latestUserMessage = [...params.messages]
+      .reverse()
+      .find(message => message.role === 'user')?.content
+    const personaInputMessage = latestUserMessage ?? 'Persona creation request'
+
+    const requestPayload: Record<string, unknown> = {
+      runId: params.runId,
+      overrides: {
+        model: params.settings.model,
+        temperature: params.settings.temperature,
+        maxOutputTokens: params.settings.maxTokens
+      },
+      input: {
+        message: personaInputMessage,
+        contextPayload: params.contextPayload
+      }
+    }
+
+    if (params.sourceArtifact) {
+      requestPayload.artifact = {
+        data: params.sourceArtifact
+      }
+      delete requestPayload.input
     }
 
     const response = await fetch('/api/subagents/persona', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        runId: params.runId,
-        artifact: {
-          data: params.sourceArtifact
-        },
-        overrides: {
-          model: params.settings.model,
-          temperature: params.settings.temperature,
-          maxOutputTokens: params.settings.maxTokens
-        }
-      })
+      body: JSON.stringify(requestPayload)
     })
 
     if (!response.ok) {
@@ -70,6 +90,7 @@ export const startRun = async (params: StartRunParams): Promise<StartRunResult> 
         settings: params.settings,
         contextPayload: params.contextPayload,
         targetSections: params.targetSections,
+        requestedArtifacts,
         stream: false
       })
     })
@@ -97,7 +118,8 @@ export const startRun = async (params: StartRunParams): Promise<StartRunResult> 
       messages: params.messages,
       settings: params.settings,
       contextPayload: params.contextPayload,
-      targetSections: params.targetSections
+      targetSections: params.targetSections,
+      requestedArtifacts
     })
   })
 

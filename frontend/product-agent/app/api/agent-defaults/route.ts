@@ -17,9 +17,14 @@ export async function GET() {
     
     const data = await response.json();
     console.log('Agent defaults received:', data);
-    
+
     // Extract the default settings from the health endpoint response
-    const defaults = data.defaultSettings || {};
+    const defaults = {
+      model: data.defaultSettings?.model ?? 'anthropic/claude-3-5-sonnet',
+      temperature: data.defaultSettings?.temperature ?? 0.2,
+      maxTokens: data.defaultSettings?.maxTokens ?? 8000,
+      subAgentSettings: { ...(data.defaultSettings?.subAgentSettings ?? {}) }
+    };
 
     const subAgentSettings = defaults.subAgentSettings
       ? Object.entries(defaults.subAgentSettings).reduce<Record<string, any>>((acc, [key, value]: [string, any]) => {
@@ -39,6 +44,29 @@ export async function GET() {
         : {
             subAgents: []
           };
+
+    if (!mergedMetadata.subAgents?.some((agent: any) => agent?.id === 'persona.builder')) {
+      mergedMetadata.subAgents = [
+        ...(mergedMetadata.subAgents ?? []),
+        {
+          id: 'persona.builder',
+          label: 'Persona Builder',
+          artifactKind: 'persona',
+          description: 'Transforms PRD context or prompt inputs into structured persona bundles.',
+          capabilities: ['analysis', 'synthesis'],
+          consumes: ['prd', 'prompt'],
+          tags: ['persona', 'derived']
+        }
+      ]
+    }
+
+    if (!defaults.subAgentSettings['persona.builder']) {
+      defaults.subAgentSettings['persona.builder'] = {
+        model: defaults.model,
+        temperature: defaults.temperature,
+        maxTokens: defaults.maxTokens
+      }
+    }
 
     return NextResponse.json({
       settings: {
@@ -60,9 +88,27 @@ export async function GET() {
         model: 'anthropic/claude-3-5-sonnet',
         temperature: 0.3,
         maxTokens: 8000,
-        subAgentSettings: {}
+        subAgentSettings: {
+          'persona.builder': {
+            model: 'anthropic/claude-3-5-sonnet',
+            temperature: 0.3,
+            maxTokens: 8000
+          }
+        }
       },
-      metadata: null,
+      metadata: {
+        subAgents: [
+          {
+            id: 'persona.builder',
+            label: 'Persona Builder',
+            artifactKind: 'persona',
+            description: 'Transforms PRD context or prompt inputs into structured persona bundles.',
+            capabilities: ['analysis', 'synthesis'],
+            consumes: ['prd', 'prompt'],
+            tags: ['persona', 'derived']
+          }
+        ]
+      },
       agentInfo: null
     });
   }

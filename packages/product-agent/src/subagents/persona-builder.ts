@@ -2,11 +2,20 @@ import { randomUUID } from 'node:crypto'
 
 import type { Artifact } from '../contracts/core'
 import type { SubagentLifecycle } from '../contracts/subagent'
-import type { SectionRoutingResponse } from '@product-agents/prd-shared'
+import type { SectionRoutingRequest, SectionRoutingResponse } from '@product-agents/prd-shared'
 
 interface PersonaBuilderOptions {
   clock?: () => Date
   idFactory?: () => string
+}
+
+interface PersonaBuilderParams {
+  targetUsers?: string[]
+  keyFeatures?: string[]
+  constraints?: string[]
+  successMetrics?: Array<{ metric: string; target?: string; timeline?: string } | string>
+  contextPayload?: unknown
+  description?: string
 }
 
 export interface PersonaProfile {
@@ -34,6 +43,193 @@ export interface PersonaArtifact {
 }
 
 type SectionsMap = Record<string, unknown>
+
+const isRecord = (candidate: unknown): candidate is Record<string, unknown> =>
+  !!candidate && typeof candidate === 'object' && !Array.isArray(candidate)
+
+const collectFromContextItems = (
+  payload: unknown,
+  predicate: (item: Record<string, unknown>) => boolean
+): string[] => {
+  if (!isRecord(payload)) {
+    return []
+  }
+
+  const items = payload.categorizedContext
+  if (!Array.isArray(items)) {
+    return []
+  }
+
+  const results: string[] = []
+  for (const raw of items) {
+    if (!isRecord(raw)) {
+      continue
+    }
+    if (!predicate(raw)) {
+      continue
+    }
+    const content = typeof raw.content === 'string' && raw.content.trim().length > 0 ? raw.content.trim() : undefined
+    const title = typeof raw.title === 'string' && raw.title.trim().length > 0 ? raw.title.trim() : undefined
+    if (content) {
+      results.push(content)
+    } else if (title) {
+      results.push(title)
+    }
+  }
+  return results
+}
+
+const collectFromSelectedMessages = (payload: unknown): string[] => {
+  if (!isRecord(payload)) {
+    return []
+  }
+  const messages = payload.selectedMessages
+  if (!Array.isArray(messages)) {
+    return []
+  }
+  const snippets: string[] = []
+  messages.forEach(entry => {
+    if (!isRecord(entry)) {
+      return
+    }
+    const content = typeof entry.content === 'string' ? entry.content.trim() : ''
+    if (content) {
+      snippets.push(content)
+    }
+  })
+  return snippets
+}
+
+const PERSONA_KEYWORDS = /(persona|user|customer|stakeholder|manager|lead|designer|engineer|analyst|operator|strategist|researcher)/i
+const FEATURE_KEYWORDS = /(feature|workflow|allows|enable|build|design|support|helps|optimise|optimize|dashboard|automation)/i
+const CONSTRAINT_KEYWORDS = /(constraint|limitation|must|need to|blocked|cannot|compliance|deadline|restriction|budget|limited)/i
+const METRIC_KEYWORDS = /(increase|improve|reduce|grow|target)/i
+
+const splitTextIntoCandidates = (text: string): string[] =>
+  text
+    .split(/\n+/)
+    .flatMap(chunk => chunk.split(/(?<=[.!?])\s+/))
+    .map(entry => entry.replace(/^[-•–*]+/, '').trim())
+    .filter(Boolean)
+
+const extractByKeyword = (text: string, matcher: RegExp): string[] =>
+  splitTextIntoCandidates(text).filter(sentence => matcher.test(sentence)).map(sentence => sentence.trim())
+
+const normalizeMetricInput = (input: PersonaBuilderParams['successMetrics']): Array<{
+  metric: string
+  target?: string
+  timeline?: string
+}> => {
+  if (!input) {
+    return []
+  }
+  return input
+    .map(entry => {
+      if (typeof entry === 'string') {
+        const trimmed = entry.trim()
+        return trimmed ? { metric: trimmed } : null
+      }
+      if (!entry || typeof entry.metric !== 'string') {
+        return null
+      }
+      return {
+        metric: entry.metric.trim(),
+        target: entry.target?.trim(),
+        timeline: entry.timeline?.trim()
+      }
+    })
+    .filter((entry): entry is { metric: string; target?: string; timeline?: string } => !!entry && !!entry.metric)
+}
+
+const buildSectionsFromPrompt = (
+  params: PersonaBuilderParams | undefined,
+  input: SectionRoutingRequest | undefined
+): { sections: SectionsMap; summary?: string } => {
+  const sections: SectionsMap = {}
+  const summaryCandidates = [params?.description, input?.message].filter(
+    (entry): entry is string => typeof entry === 'string' && entry.trim().length > 0
+  )
+  const summary = summaryCandidates[0]?.trim()
+
+  const targetUsers: string[] = []
+  const features: string[] = []
+  const constraints: string[] = []
+
+  sanitizeStringArray(params?.targetUsers).forEach(entry => targetUsers.push(entry))
+  sanitizeStringArray(params?.keyFeatures).forEach(entry => features.push(entry))
+  sanitizeStringArray(params?.constraints).forEach(entry => constraints.push(entry))
+
+  const metricEntries = normalizeMetricInput(params?.successMetrics)
+
+  const payloads = [params?.contextPayload, input?.context?.contextPayload].filter(Boolean)
+  payloads.forEach(payload => {
+    collectFromContextItems(payload, candidate => {
+      const tagList = sanitizeStringArray(candidate.tags)
+      const category = typeof candidate.category === 'string' ? candidate.category.toLowerCase() : ''
+      return category === 'stakeholder' || tagList.some(tag => /persona|user|audience/i.test(tag))
+    }).forEach(entry => targetUsers.push(entry))
+
+    collectFromContextItems(payload, candidate => {
+      const category = typeof candidate.category === 'string' ? candidate.category.toLowerCase() : ''
+      return category === 'requirement'
+    }).forEach(entry => features.push(entry))
+
+    collectFromContextItems(payload, candidate => {
+      const category = typeof candidate.category === 'string' ? candidate.category.toLowerCase() : ''
+      return category === 'constraint'
+    }).forEach(entry => constraints.push(entry))
+
+    collectFromSelectedMessages(payload).forEach(snippet => {
+      extractByKeyword(snippet, PERSONA_KEYWORDS).forEach(entry => targetUsers.push(entry))
+      extractByKeyword(snippet, FEATURE_KEYWORDS).forEach(entry => features.push(entry))
+      extractByKeyword(snippet, CONSTRAINT_KEYWORDS).forEach(entry => constraints.push(entry))
+    })
+  })
+
+  if (summary) {
+    extractByKeyword(summary, PERSONA_KEYWORDS).forEach(entry => targetUsers.push(entry))
+    extractByKeyword(summary, FEATURE_KEYWORDS).forEach(entry => features.push(entry))
+    extractByKeyword(summary, CONSTRAINT_KEYWORDS).forEach(entry => constraints.push(entry))
+  }
+
+  const uniqueTargets = dedupe(targetUsers).slice(0, 6)
+  if (uniqueTargets.length > 0) {
+    sections.targetUsers = {
+      targetUsers: uniqueTargets
+    }
+  }
+
+  const uniqueFeatures = dedupe(features).slice(0, 8)
+  if (uniqueFeatures.length > 0) {
+    sections.keyFeatures = {
+      keyFeatures: uniqueFeatures
+    }
+  }
+
+  const uniqueConstraints = dedupe(constraints).slice(0, 6)
+  if (uniqueConstraints.length > 0) {
+    sections.constraints = {
+      constraints: uniqueConstraints
+    }
+  }
+
+  if (metricEntries.length > 0) {
+    sections.successMetrics = {
+      successMetrics: metricEntries
+    }
+  }
+
+  if (summary) {
+    sections.solution = {
+      solutionOverview: summary
+    }
+  }
+
+  return {
+    sections,
+    summary
+  }
+}
 
 const normalizeKey = (key: string): string => key.toLowerCase().replace(/[\s_-]/g, '')
 
@@ -76,6 +272,20 @@ const sanitizeStringArray = (input: unknown): string[] => {
   }
 
   return Array.from(new Set(collect))
+}
+
+const dedupe = (values: string[]): string[] => {
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const value of values) {
+    const key = value.toLowerCase()
+    if (seen.has(key)) {
+      continue
+    }
+    seen.add(key)
+    result.push(value)
+  }
+  return result
 }
 
 const extractNestedStrings = (input: unknown, key: string): string[] => {
@@ -251,20 +461,6 @@ const inferPersonaName = (summary: string, index: number): string => {
   return toTitleCase(words.join(' '))
 }
 
-const dedupe = (values: string[]): string[] => {
-  const seen = new Set<string>()
-  const result: string[] = []
-  for (const value of values) {
-    const key = value.toLowerCase()
-    if (seen.has(key)) {
-      continue
-    }
-    seen.add(key)
-    result.push(value)
-  }
-  return result
-}
-
 const toSentenceCase = (input: string): string => {
   if (!input) return ''
   const trimmed = input.trim()
@@ -380,9 +576,35 @@ const buildPersonaProfiles = (
   return personas
 }
 
+const resolveSectionsContext = (
+  sourceArtifact: Artifact<SectionRoutingResponse> | undefined,
+  params: PersonaBuilderParams | undefined,
+  input: unknown
+): { sections: SectionsMap; summary?: string; derivedFromPrompt: boolean } => {
+  if (sourceArtifact) {
+    const sourceData = sourceArtifact.data as SectionRoutingResponse | undefined
+    if (!sourceData || typeof sourceData !== 'object' || !('sections' in sourceData)) {
+      throw new Error('Persona builder expected PRD sections in the source artifact.')
+    }
+    return {
+      sections: ((sourceData.sections ?? {}) as SectionsMap) ?? {},
+      summary: undefined,
+      derivedFromPrompt: false
+    }
+  }
+
+  const sectionInput = (input as SectionRoutingRequest | undefined) ?? undefined
+  const fallback = buildSectionsFromPrompt(params, sectionInput)
+  return {
+    sections: fallback.sections,
+    summary: fallback.summary,
+    derivedFromPrompt: true
+  }
+}
+
 export const createPersonaBuilderSubagent = (
   options?: PersonaBuilderOptions
-): SubagentLifecycle<unknown, SectionRoutingResponse, PersonaArtifact> => {
+): SubagentLifecycle<PersonaBuilderParams, SectionRoutingResponse, PersonaArtifact> => {
   const clock = options?.clock ?? (() => new Date())
   const idFactory = options?.idFactory ?? (() => randomUUID())
 
@@ -392,33 +614,54 @@ export const createPersonaBuilderSubagent = (
       label: 'Persona Builder',
       version: '0.1.0',
       artifactKind: 'persona',
-      sourceKinds: ['prd'],
+      sourceKinds: ['prd', 'prompt'],
       description: 'Transforms PRD sections into structured persona summaries.',
       tags: ['persona', 'analysis', 'synthesis']
     },
     async execute(request) {
-      if (!request.sourceArtifact) {
-        throw new Error('Persona builder requires a PRD artifact to operate.')
-      }
-
-      const sourceData = request.sourceArtifact.data as SectionRoutingResponse | undefined
-      if (!sourceData || typeof sourceData !== 'object' || !('sections' in sourceData)) {
-        throw new Error('Persona builder expected PRD sections in the source artifact.')
-      }
-
-      const sections = (sourceData.sections ?? {}) as SectionsMap
+      const sectionInput = request.run.request.input as SectionRoutingRequest | undefined
+      const { sections, summary: promptSummary, derivedFromPrompt } = resolveSectionsContext(
+        request.sourceArtifact as Artifact<SectionRoutingResponse> | undefined,
+        (request.params as PersonaBuilderParams | undefined) ?? undefined,
+        sectionInput
+      )
       const sectionsUsed = new Set<string>()
+      if (derivedFromPrompt) {
+        sectionsUsed.add('promptContext')
+      }
 
       const targetUsers = extractTargetUsers(sections, sectionsUsed)
       const keyFeatures = extractKeyFeatures(sections, sectionsUsed)
       const constraints = extractConstraints(sections, sectionsUsed)
       const successMetrics = extractSuccessMetrics(sections, sectionsUsed)
-      const solutionSummary = extractSolutionSummary(sections, sectionsUsed)
+      let solutionSummary = extractSolutionSummary(sections, sectionsUsed)
+      if (!solutionSummary && promptSummary) {
+        solutionSummary = promptSummary
+        sectionsUsed.add('promptSummary')
+      }
 
       const personas = buildPersonaProfiles(targetUsers, keyFeatures, constraints, successMetrics, solutionSummary)
 
       const generatedAt = clock().toISOString()
       const artifactId = `artifact-${idFactory()}`
+
+      const sourceArtifactId =
+        request.sourceArtifact?.id ?? (request.run.request.attributes?.sourceArtifactId as string | undefined)
+      const derivedSourceId = sourceArtifactId ?? `input-${request.run.runId}`
+      const sourceKind = request.sourceArtifact?.kind ?? request.run.request.artifactKind ?? 'prompt'
+
+      const notes: string | undefined = (() => {
+        const entries: string[] = []
+        if (!request.sourceArtifact) {
+          entries.push('Personas generated directly from prompt/context inputs without a PRD artifact.')
+        }
+        if (targetUsers.length === 0) {
+          entries.push(
+            'Personas inferred from broader PRD context due to missing target users section.'
+          )
+        }
+        return entries.length > 0 ? entries.join(' ') : undefined
+      })()
 
       const personaArtifact: Artifact<PersonaArtifact> = {
         id: artifactId,
@@ -428,24 +671,25 @@ export const createPersonaBuilderSubagent = (
         data: {
           personas,
           source: {
-            artifactId: request.sourceArtifact.id,
-            artifactKind: request.sourceArtifact.kind,
+            artifactId: derivedSourceId,
+            artifactKind: sourceKind,
             runId: request.run.runId,
             sectionsUsed: Array.from(sectionsUsed)
           },
           generatedAt,
-          notes: targetUsers.length === 0 ? 'Personas inferred from broader PRD context due to missing target users section.' : undefined
+          notes
         },
         metadata: {
           createdAt: generatedAt,
           createdBy: request.run.request.createdBy,
           tags: ['persona', 'derived'],
-          confidence: request.sourceArtifact.metadata?.confidence ?? 0.6,
+          confidence: request.sourceArtifact?.metadata?.confidence ?? 0.58,
           extras: {
-            sourceArtifactId: request.sourceArtifact.id,
+            sourceArtifactId: derivedSourceId,
             personaCount: personas.length,
             sectionsUsed: Array.from(sectionsUsed),
-            sourceArtifactKind: request.sourceArtifact.kind
+            sourceArtifactKind: sourceKind,
+            sourceMode: request.sourceArtifact ? 'artifact' : 'prompt'
           }
         }
       }
@@ -455,7 +699,7 @@ export const createPersonaBuilderSubagent = (
         metadata: {
           personaCount: personas.length,
           sectionsUsed: Array.from(sectionsUsed),
-          sourceArtifactId: request.sourceArtifact.id
+          sourceArtifactId: derivedSourceId
         }
       }
     }

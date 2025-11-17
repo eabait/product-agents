@@ -11,7 +11,7 @@ import {
   type RunContext,
   type WorkspaceHandle
 } from '@product-agents/product-agent'
-import type { SectionRoutingResponse } from '@product-agents/prd-shared'
+import type { SectionRoutingRequest, SectionRoutingResponse } from '@product-agents/prd-shared'
 import { attachSubagentArtifact, getRunRecord } from '../../runs/run-store'
 
 const PRD_AGENT_URL = process.env.PRD_AGENT_URL
@@ -30,6 +30,27 @@ const PersonaRequestSchema = z
     runId: z.string().optional(),
     artifact: ArtifactSchema.optional(),
     createdBy: z.string().optional(),
+    input: z
+      .object({
+        message: z.string().min(1).optional(),
+        targetUsers: z.array(z.string().min(1)).optional(),
+        keyFeatures: z.array(z.string().min(1)).optional(),
+        constraints: z.array(z.string().min(1)).optional(),
+        successMetrics: z
+          .array(
+            z.union([
+              z.string().min(1),
+              z.object({
+                metric: z.string().min(1),
+                target: z.string().optional(),
+                timeline: z.string().optional()
+              })
+            ])
+          )
+          .optional(),
+        contextPayload: z.any().optional()
+      })
+      .optional(),
     overrides: z
       .object({
         model: z.string().min(1).optional(),
@@ -38,8 +59,8 @@ const PersonaRequestSchema = z
       })
       .optional()
   })
-  .refine(payload => Boolean(payload.artifact) || Boolean(payload.runId), {
-    message: 'Provide either a completed PRD runId or an artifact payload.',
+  .refine(payload => Boolean(payload.artifact) || Boolean(payload.runId) || Boolean(payload.input), {
+    message: 'Provide a PRD runId, artifact payload, or persona input.',
     path: ['artifact']
   })
 
@@ -174,7 +195,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { runId, artifact: artifactInput, overrides, createdBy } = parsed.data
+    const { runId, artifact: artifactInput, overrides, createdBy, input: personaInput } = parsed.data
 
     let sourceArtifact: Artifact<SectionRoutingResponse> | null = null
     if (artifactInput) {
@@ -183,7 +204,7 @@ export async function POST(request: NextRequest) {
       sourceArtifact = await findArtifactFromRun(runId)
     }
 
-    if (!sourceArtifact) {
+    if (!sourceArtifact && !personaInput) {
       return NextResponse.json(
         {
           error: 'Unable to locate PRD artifact for persona generation',
@@ -207,24 +228,43 @@ export async function POST(request: NextRequest) {
         : undefined
     )
 
-    const subagent = createPersonaBuilderSubagent()
+    const subagent = createPersonaBuilderSubagent({
+      idFactory: () => randomUUID()
+    })
     const personaRunId = runId ? `${runId}-persona` : `persona-${randomUUID()}`
+
+    const personaInputMessage =
+      personaInput?.message ??
+      (sourceArtifact
+        ? `Persona builder invoked from artifact ${sourceArtifact.id}`
+        : 'Persona bootstrap request')
+
+    const sectionRequest: SectionRoutingRequest = {
+      message: personaInputMessage,
+      context: personaInput?.contextPayload
+        ? { contextPayload: personaInput.contextPayload }
+        : sourceArtifact
+          ? { existingPRD: sourceArtifact.data }
+          : undefined
+    }
+
+    const workspaceArtifactKind = sourceArtifact?.kind ?? (personaInput ? 'persona' : 'prd')
 
     const runContext: RunContext = {
       runId: personaRunId,
       request: {
-        artifactKind: sourceArtifact.kind,
-        input: {
-          sourceArtifactId: sourceArtifact.id,
-          sourceRunId: runId
-        },
-        createdBy: createdBy ?? (sourceArtifact.metadata as any)?.createdBy ?? 'persona-subagent',
+        artifactKind: workspaceArtifactKind,
+        input: sectionRequest,
+        createdBy:
+          createdBy ??
+          (sourceArtifact?.metadata as any)?.createdBy ??
+          'persona-subagent',
         attributes: {
           trigger: 'persona-builder'
         }
       },
       settings,
-      workspace: toWorkspaceHandle(personaRunId, sourceArtifact.kind),
+      workspace: toWorkspaceHandle(personaRunId, workspaceArtifactKind),
       startedAt: new Date(),
       metadata: {
         parentRunId: runId ?? null
@@ -232,12 +272,21 @@ export async function POST(request: NextRequest) {
     }
 
     const result = await subagent.execute({
-      params: {},
+      params: personaInput
+        ? {
+            targetUsers: personaInput.targetUsers,
+            keyFeatures: personaInput.keyFeatures,
+            constraints: personaInput.constraints,
+            successMetrics: personaInput.successMetrics,
+            contextPayload: personaInput.contextPayload,
+            description: personaInput.message
+          }
+        : undefined,
       run: runContext,
-      sourceArtifact
+      sourceArtifact: sourceArtifact ?? undefined
     })
 
-    if (runId) {
+    if (runId && sourceArtifact) {
       attachSubagentArtifact(runId, subagent.metadata.id, result.artifact, result.metadata ?? null)
     }
 

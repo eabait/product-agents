@@ -571,7 +571,56 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && url.pathname === '/health') {
     const registryManifests = subagentRegistry.list()
-    const subAgentSettings = registryManifests.reduce<
+    const builtInSubagents = controller.subagents ?? []
+
+    const subagentMap = new Map<
+      string,
+      {
+        id: string
+        label: string
+        artifactKind: ArtifactKind
+        description?: string
+        package?: string
+        version?: string
+        capabilities?: string[]
+        consumes?: ArtifactKind[]
+        tags?: string[]
+      }
+    >()
+
+    registryManifests.forEach(manifest => {
+      subagentMap.set(manifest.id, {
+        id: manifest.id,
+        label: manifest.label,
+        artifactKind: manifest.creates,
+        description: manifest.description,
+        package: manifest.package,
+        version: manifest.version,
+        capabilities: manifest.capabilities,
+        consumes: manifest.consumes,
+        tags: manifest.tags
+      })
+    })
+
+    builtInSubagents.forEach(subagent => {
+      if (subagentMap.has(subagent.metadata.id)) {
+        return
+      }
+      subagentMap.set(subagent.metadata.id, {
+        id: subagent.metadata.id,
+        label: subagent.metadata.label ?? subagent.metadata.id,
+        artifactKind: subagent.metadata.artifactKind,
+        description: subagent.metadata.description,
+        package: '@product-agents/product-agent',
+        version: subagent.metadata.version,
+        capabilities: subagent.metadata.tags,
+        consumes: subagent.metadata.sourceKinds,
+        tags: subagent.metadata.tags
+      })
+    })
+
+    const allSubagents = Array.from(subagentMap.values())
+    const subAgentSettings = allSubagents.reduce<
       Record<string, { model: string; temperature: number; maxTokens: number }>
     >((acc, manifest) => {
       acc[manifest.id] = {
@@ -586,17 +635,7 @@ const server = http.createServer(async (req, res) => {
       planner: controller.planner.constructor.name,
       requiredCapabilities: [...AGENT_CAPABILITIES],
       skillPacks: config.skills.enabledPacks,
-      subAgents: registryManifests.map(manifest => ({
-        id: manifest.id,
-        label: manifest.label,
-        artifactKind: manifest.creates,
-        description: manifest.description,
-        package: manifest.package,
-        version: manifest.version,
-        capabilities: manifest.capabilities,
-        consumes: manifest.consumes,
-        tags: manifest.tags
-      }))
+      subAgents: allSubagents
     }
 
     writeJson(res, 200, {

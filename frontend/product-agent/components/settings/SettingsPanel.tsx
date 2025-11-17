@@ -270,7 +270,7 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
 
       return {
         ...prev,
-        artifactTypes: [...selection, artifactId]
+        artifactTypes: [artifactId, ...selection]
       }
     })
   }
@@ -333,12 +333,15 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
   }
 
   const getCompatibleModels = (subAgent: SubAgentMetadata) => {
-    if (subAgent.requiredCapabilities.length === 0) {
+    const requiredCaps = Array.isArray(subAgent.requiredCapabilities)
+      ? subAgent.requiredCapabilities
+      : []
+    if (requiredCaps.length === 0) {
       return models
     }
     return models.filter(model => {
       const caps = model.capabilities || []
-      return subAgent.requiredCapabilities.every(capability => caps.includes(capability))
+      return requiredCaps.every(capability => caps.includes(capability))
     })
   }
 
@@ -960,7 +963,7 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
 
                           {compatibleModels.length === 0 ? (
                             <div className="rounded-md bg-red-50 p-3 text-xs text-red-600">
-                              No models available that satisfy {subAgent.requiredCapabilities.join(', ')}. Fetch models with a broader API key or adjust requirements.
+                              No models available that satisfy {(Array.isArray(subAgent.requiredCapabilities) ? subAgent.requiredCapabilities : []).join(', ') || 'the required capabilities'}. Fetch models with a broader API key or adjust requirements.
                             </div>
                           ) : (
                             <>
