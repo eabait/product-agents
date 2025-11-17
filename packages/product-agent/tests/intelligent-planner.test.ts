@@ -47,6 +47,20 @@ const personaSubagent: SubagentLifecycle = {
   }
 }
 
+const storyMapSubagent: SubagentLifecycle = {
+  metadata: {
+    id: 'story.mapper',
+    label: 'Story Map Builder',
+    version: '0.2.0',
+    artifactKind: 'story-map',
+    sourceKinds: ['persona', 'prd'],
+    description: 'turns personas into story maps'
+  },
+  async execute() {
+    throw new Error('execute should not be invoked during planning tests')
+  }
+}
+
 class StubIntentResolver {
   constructor(private readonly plan: ArtifactIntent) {}
 
@@ -129,4 +143,39 @@ test('intelligent planner promotes persona artifact when requested', async () =>
   assert.deepEqual(plan.metadata?.requestedArtifacts, ['prd', 'persona'])
   assert.equal(plan.metadata?.intentConfidence, 0.93)
   assert.deepEqual(plan.metadata?.transitionPath, ['prd', 'persona'])
+})
+
+test('intelligent planner chains persona before story map when requested', async () => {
+  const config = getDefaultProductAgentConfig()
+  const intent: ArtifactIntent = {
+    source: 'resolver',
+    requestedArtifacts: ['prd', 'persona', 'story-map'],
+    targetArtifact: 'story-map',
+    transitions: [
+      { fromArtifact: 'prd', toArtifact: 'persona' },
+      { fromArtifact: 'persona', toArtifact: 'story-map' }
+    ],
+    confidence: 0.91
+  }
+  const planner = new IntelligentPlanner({
+    config,
+    clock: fixedClock,
+    registeredSubagents: [personaSubagent, storyMapSubagent],
+    intentResolver: new StubIntentResolver(intent) as any
+  })
+  const context = createRunContext('story-map')
+
+  const { plan } = await planner.createPlan(context)
+
+  assert.equal(plan.artifactKind, 'story-map')
+  const personaNode = plan.nodes['subagent-persona.builder']
+  const storyMapNode = plan.nodes['subagent-story.mapper']
+  assert.ok(personaNode, 'persona node missing from chain plan')
+  assert.ok(storyMapNode, 'story map node missing from chain plan')
+  assert.deepEqual(personaNode.dependsOn, ['assemble-prd'])
+  assert.deepEqual(storyMapNode.dependsOn, ['subagent-persona.builder'])
+  assert.equal(storyMapNode.metadata?.source?.artifactKind, 'persona')
+  assert.deepEqual(plan.metadata?.requestedArtifacts, ['prd', 'persona', 'story-map'])
+  assert.deepEqual(plan.metadata?.transitionPath, ['prd', 'persona', 'story-map'])
+  assert.equal(plan.metadata?.intentConfidence, 0.91)
 })

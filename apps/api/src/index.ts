@@ -98,6 +98,11 @@ const HOST = process.env.PRODUCT_AGENT_API_HOST ?? '0.0.0.0'
 
 type RunStatus = ControllerRunSummary['status'] | 'pending' | 'running' | 'blocked'
 
+type RunMetadata = Record<string, unknown> & {
+  intent?: ArtifactIntent
+  previewArtifacts?: Array<Record<string, unknown>>
+}
+
 interface RunRecord {
   id: string
   artifactType: string
@@ -109,7 +114,7 @@ interface RunRecord {
   clarification?: unknown
   error?: string
   events: ProgressEvent[]
-  metadata?: Record<string, unknown> | null
+  metadata?: RunMetadata | null
   result?: unknown
   usage?: Record<string, unknown> | null
 }
@@ -394,7 +399,7 @@ const registerRun = (payload: StartRunPayload): RunRecord => {
     updatedAt: timestamp,
     request: payload,
     events: [],
-    metadata: null,
+    metadata: {},
     result: null,
     usage: null
   }
@@ -435,6 +440,49 @@ const startRunExecution = async (record: RunRecord) => {
     intentPlan
   }
 
+  const ensureRecordMetadata = (): RunMetadata => {
+    if (!record.metadata || typeof record.metadata !== 'object') {
+      record.metadata = {}
+    }
+    return record.metadata as RunMetadata
+  }
+
+  const enrichProgressEvent = (event: ProgressEvent): ProgressEvent => {
+    if (event.type === 'plan.created') {
+      const plan = event.payload?.plan as { metadata?: Record<string, unknown> } | undefined
+      const intentMetadata = plan?.metadata?.intent as ArtifactIntent | undefined
+      if (intentMetadata) {
+        const metadata = ensureRecordMetadata()
+        metadata.intent = intentMetadata
+        return {
+          ...event,
+          payload: {
+            ...event.payload,
+            intent: intentMetadata
+          }
+        }
+      }
+      return event
+    }
+
+    if (event.type === 'artifact.delivered') {
+      const artifactPreview = event.payload?.artifact as Record<string, unknown> | undefined
+      if (artifactPreview) {
+        const metadata = ensureRecordMetadata()
+        metadata.previewArtifacts = metadata.previewArtifacts ?? []
+        metadata.previewArtifacts?.push({
+          id: artifactPreview.id,
+          kind: artifactPreview.artifactKind ?? artifactPreview.kind,
+          label: artifactPreview.label,
+          transition: event.payload?.transition
+        })
+      }
+      return event
+    }
+
+    return event
+  }
+
   try {
     updateRunRecord(record.id, { status: 'running' })
     const summary = await controller.start(
@@ -444,20 +492,27 @@ const startRunExecution = async (record: RunRecord) => {
       },
       {
         emit(event) {
-          appendProgressEvent(record.id, event)
-          broadcastEvent(record.id, 'progress', event)
+          const enriched = enrichProgressEvent(event)
+          appendProgressEvent(record.id, enriched)
+          broadcastEvent(record.id, 'progress', enriched)
         }
       }
     )
 
     const artifact = summary.artifact ?? null
+    const metadataSnapshot = ensureRecordMetadata()
+    const mergedMetadata =
+      summary.metadata && typeof summary.metadata === 'object'
+        ? ({ ...summary.metadata, ...metadataSnapshot } as RunMetadata)
+        : metadataSnapshot
+    record.metadata = mergedMetadata
     updateRunRecord(record.id, {
       status: summary.status,
       summary,
       clarification: summary.status === 'awaiting-input' ? summary.metadata?.clarification ?? null : null,
       error: undefined,
       result: artifact,
-      metadata: summary.metadata ?? null,
+      metadata: mergedMetadata,
       usage: (summary.metadata?.usage as Record<string, unknown> | undefined) ?? null
     })
 
@@ -470,9 +525,11 @@ const startRunExecution = async (record: RunRecord) => {
 
     broadcastEvent(record.id, 'complete', {
       artifact,
-      metadata: summary.metadata ?? null,
+      metadata: mergedMetadata ?? null,
       usage: summary.metadata?.usage ?? null,
-      status: summary.status
+      status: summary.status,
+      intent: mergedMetadata.intent ?? null,
+      previews: mergedMetadata.previewArtifacts ?? []
     })
     closeSubscribers(record.id)
   } catch (error) {

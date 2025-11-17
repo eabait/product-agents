@@ -68,16 +68,16 @@
   - [x] Add planner selection + config wiring inside `product-agent` (feature flag, env overrides, fallback to legacy planner) and ensure runtime logs/telemetry expose chosen strategies.
   - [x] Update orchestrator + controller integration points to consume the new plan graph format, including progress events for composite plans spanning multiple subagents.
   - [x] Write contract/integration tests covering representative intents (PRD-only, persona-only, mixed artifacts) and regression tests that compare legacy vs. intelligent planner outcomes.
-- [ ] Enable plan generation for PRD, persona, and user story mapping artifacts (and transitions between them) based on the user’s prompt intent.
+- [x] Enable plan generation for PRD, persona, and user story mapping artifacts (and transitions between them) based on the user’s prompt intent.
 - [x] Ship artifact-aware skill/subagent registries (with discovery metadata) so the planner can reason across standalone packages (prd-agent, persona-agent, research-agent, story-mapper-agent, etc.).
 - [x] Implement the subagent registry/manifest contract:
   - [x] Shared manifest entries (`id`, `package`, `creates`, `consumes`, `capabilities`, `version`, optional planner hints) exported by each agent package.
   - [x] A `SubagentRegistry` service inside product-agent that loads manifests (from config or dynamic imports), exposes `list/filter/get`, and provides factories to create `SubagentLifecycle` instances.
-  - [ ] Planner updates to support “agent nodes” in the plan graph (`kind: 'subagent'`, `agentId`, `inputs.fromArtifact`) and query the registry for candidates matching the user’s desired artifact transitions.
+  - [x] Planner updates to support “agent nodes” in the plan graph (`kind: 'subagent'`, `agentId`, `inputs.fromArtifact`) and query the registry for candidates matching the user’s desired artifact transitions.
   - [x] Surface registry metadata in `/health` so the frontend knows which artifact types/subagents are available for selection.
-- [ ] Add verification to ensure multi-artifact plans produce coherent cross-handovers (e.g., PRD → persona → story map).
-- [ ] Expand test coverage for planner reasoning, tool selection, and artifact handoff flows.
-- [ ] Keep the frontend run store/local storage as the source of truth for derived artifacts until backend persistence lands, and ensure each API call sends the serialized upstream artifact context needed for downstream subagents.
+- [x] Add verification to ensure multi-artifact plans produce coherent cross-handovers (e.g., PRD → persona → story map).
+- [x] Expand test coverage for planner reasoning, tool selection, and artifact handoff flows.
+- [x] Keep the frontend run store/local storage as the source of truth for derived artifacts until backend persistence lands, and ensure each API call sends the serialized upstream artifact context needed for downstream subagents.
 
 ### Task 6.1 – Promote PRD Controller into `prd-agent` Subagent Package
 **Objective:** Carve the PRD-specific controller/adapters out of `@product-agents/product-agent` so PRD generation ships as its own subagent package (`@product-agents/prd-agent`) that exposes a manifest + `SubagentLifecycle` factory usable by the orchestrator or any downstream caller.
@@ -146,12 +146,12 @@
    - [x] Introduce a helper (e.g., `buildTransitionSegments`) that walks the manifest graph (`SubagentRegistry` + `registeredSubagents`) to build sequential `PlanNode`s for persona/story-map agents, wiring `dependsOn` so each node waits for its source artifact.
    - [x] Annotate plan metadata with `requestedArtifacts`, `intentConfidence`, and `transitionPath` so the frontend can render upcoming artifacts and run summaries remain traceable.
 4. **Controller + progress event wiring**
-   - [ ] Ensure `packages/product-agent/src/controller/graph-controller.ts` stores intermediate artifacts per step (`artifactsByKind`) and emits `progress` payloads that specify which transition produced each artifact, enabling downstream verification of handoffs.
-   - [ ] Update SSE payloads in `apps/api/src/index.ts` to include `plan.metadata.intent` and downstream artifact previews so UI clients can gate persona/story map viewers.
+   - [x] Ensure `packages/product-agent/src/controller/graph-controller.ts` stores intermediate artifacts per step (`artifactsByKind`) and emits `progress` payloads that specify which transition produced each artifact, enabling downstream verification of handoffs.
+   - [x] Update SSE payloads in `apps/api/src/index.ts` to include `plan.metadata.intent` and downstream artifact previews so UI clients can gate persona/story map viewers.
 5. **Tests & documentation**
    - [x] Add resolver unit tests (`packages/product-agent/tests/intent-resolver.test.ts`) that cover prompt keyword detection, explicit overrides, and fallback scenarios.
-   - [ ] Expand `packages/product-agent/tests/intelligent-planner.test.ts` with personas + story-map manifests to verify PRD-only, persona-only, and chained PRD → persona → story-map plans.
-   - [ ] Capture the new flow in `docs/deep-agent-refactor/todo.md` (this section) and `AGENT.md`, outlining how to request multi-artifact plans and interpret the returned graph metadata.
+   - [x] Expand `packages/product-agent/tests/intelligent-planner.test.ts` with personas + story-map manifests to verify PRD-only, persona-only, and chained PRD → persona → story-map plans.
+   - [x] Capture the new flow in `docs/deep-agent-refactor/todo.md` (this section) and `AGENT.md`, outlining how to request multi-artifact plans and interpret the returned graph metadata.
 
 **Open Questions / Dependencies**
 - Need finalized persona/story-map manifests (with accurate `consumes` arrays) so the resolver can distinguish whether story maps require personas or can jump directly from PRDs.

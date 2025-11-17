@@ -41,7 +41,7 @@ interface ExecutionContext {
   clarification?: ClarificationResult
   subagentResults: SubagentRunSummary[]
   artifactsByStep: Map<StepId, Artifact>
-  artifactsByKind: Map<ArtifactKind, Artifact>
+  artifactsByKind: Map<ArtifactKind, Artifact[]>
 }
 
 const STATUS_RUNNING: RunStatus = 'running'
@@ -415,18 +415,19 @@ export class GraphController implements AgentController {
               version: artifactCandidate.version
             })
           )
-          emitEvent(
-            options,
-            toProgressEvent({
-              type: 'artifact.delivered',
-              runId: context.runContext.runId,
-              stepId,
-              payload: {
-                artifactId: artifactCandidate.id,
-                kind: artifactCandidate.kind
-              }
-            })
-          )
+        emitEvent(
+          options,
+          toProgressEvent({
+            type: 'artifact.delivered',
+            runId: context.runContext.runId,
+            stepId,
+            payload: {
+              artifactId: artifactCandidate.id,
+              artifactKind: artifactCandidate.kind,
+              artifact: artifactCandidate
+            }
+          })
+        )
         }
 
         emitEvent(
@@ -586,7 +587,47 @@ export class GraphController implements AgentController {
 
   private trackArtifactForContext(stepId: StepId, artifact: Artifact, context: ExecutionContext) {
     context.artifactsByStep.set(stepId, artifact)
-    context.artifactsByKind.set(artifact.kind, artifact)
+    const existing = context.artifactsByKind.get(artifact.kind) ?? []
+    existing.push(artifact)
+    context.artifactsByKind.set(artifact.kind, existing)
+  }
+
+  private buildTransitionPayload(
+    node: PlanNode,
+    artifact: Artifact | undefined,
+    context: ExecutionContext
+  ):
+    | {
+        fromArtifactKind?: ArtifactKind
+        toArtifactKind?: ArtifactKind
+        promotesRunArtifact?: boolean
+        intentTargetArtifact?: ArtifactKind
+        transitionPath?: ArtifactKind[]
+      }
+    | undefined {
+    if (node.metadata?.kind !== 'subagent') {
+      return undefined
+    }
+
+    const inputsFromArtifact = node.inputs?.fromArtifact as ArtifactKind | undefined
+    const metadataSource = node.metadata?.source as { artifactKind?: ArtifactKind } | undefined
+    const sourceArtifactKind = inputsFromArtifact ?? metadataSource?.artifactKind
+    const targetKind =
+      (node.metadata?.artifactKind as ArtifactKind | undefined) ?? artifact?.kind ?? undefined
+    const planMetadata = context.plan.metadata as Record<string, unknown> | undefined
+    const transitionPath = Array.isArray(planMetadata?.transitionPath)
+      ? (planMetadata?.transitionPath as ArtifactKind[])
+      : undefined
+
+    return {
+      fromArtifactKind: sourceArtifactKind,
+      toArtifactKind: targetKind,
+      promotesRunArtifact: node.metadata?.promoteResult === true,
+      intentTargetArtifact:
+        (planMetadata?.requestedArtifactKind as ArtifactKind | undefined) ??
+        context.plan.artifactKind,
+      transitionPath
+    }
   }
 
   private getPlanNodeKind(node: PlanNode): 'skill' | 'subagent' {
@@ -598,7 +639,8 @@ export class GraphController implements AgentController {
     context: ExecutionContext,
     options?: ControllerStartOptions
   ): Promise<void> {
-    const subagentId = node.metadata?.subagentId as string | undefined
+    const task = node.task as { kind?: string; agentId?: string; subagentId?: string } | undefined
+    const subagentId = task?.agentId ?? task?.subagentId ?? (node.metadata?.subagentId as string | undefined)
     if (!subagentId) {
       throw new Error(`Subagent node "${node.id}" is missing a subagentId`)
     }
@@ -653,6 +695,8 @@ export class GraphController implements AgentController {
           )
       })
 
+      const transitionPayload = this.buildTransitionPayload(node, result.artifact, context)
+
       await this.workspace.writeArtifact(context.runContext.runId, result.artifact)
       this.trackArtifactForContext(node.id, result.artifact, context)
 
@@ -685,13 +729,29 @@ export class GraphController implements AgentController {
       emitEvent(
         options,
         toProgressEvent({
+          type: 'artifact.delivered',
+          runId: context.runContext.runId,
+          stepId: node.id,
+          payload: {
+            artifactId: result.artifact.id,
+            artifactKind: result.artifact.kind,
+            artifact: result.artifact,
+            transition: transitionPayload
+          }
+        })
+      )
+
+      emitEvent(
+        options,
+        toProgressEvent({
           type: 'subagent.completed',
           runId: context.runContext.runId,
           stepId: node.id,
           payload: {
             subagentId,
             artifactId: result.artifact.id,
-            artifactKind: result.artifact.kind
+            artifactKind: result.artifact.kind,
+            transition: transitionPayload
           },
           message: `${lifecycle.metadata.label ?? subagentId} completed`
         })
@@ -760,8 +820,8 @@ export class GraphController implements AgentController {
 
     if (source?.artifactKind) {
       const byKind = context.artifactsByKind.get(source.artifactKind)
-      if (byKind) {
-        return byKind
+      if (byKind && byKind.length > 0) {
+        return byKind[byKind.length - 1]
       }
     }
 

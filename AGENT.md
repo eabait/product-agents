@@ -199,6 +199,32 @@ export PRODUCT_AGENT_SUBAGENTS='[
 
 Once registered, the orchestrator can call `subagentRegistry.list()` (or rely on `/health`) to discover the capability and the graph controller will automatically load and execute it whenever a compatible upstream artifact is produced.
 
+### Intent-Aware Multi-Artifact Flow
+
+The Phase 6 planner upgrades introduce a consistent path from user prompt → intent classification → plan graph → artifact handoffs. Key integration points:
+
+1. **Request contract** – `apps/api` now accepts an optional `requestedArtifacts: string[]` field (mirrored in the frontend payload). The thin API normalizes those selections, stores an `intentPlan` on the `RunRequest`, and passes it to the controller.
+2. **Intent resolver** – `IntentClassifierSkill` (LLM-backed) inspects the concatenated conversation text plus explicit selections and returns `{ targetArtifact, chain, confidence, probabilities }`. The resolver caches this plan on `RunContext.metadata.intent`, so planners/subagents never re-classify.
+3. **Planner metadata** – `IntelligentPlanner` consumes the resolver output, builds the PRD core segment, and appends subagent nodes that match the requested transitions. It annotates `plan.metadata` with `requestedArtifacts`, `intentConfidence`, and a `transitionPath` array that the UI can render as an upcoming-artifacts ribbon.
+4. **Progress events + SSE** – The `GraphController` tracks artifacts per step/kind and emits `artifact.delivered` + `subagent.completed` events that include the transition payload (source artifact kind, destination kind, whether the result promotes to the run artifact). `apps/api` enriches SSE payloads with the full `plan.metadata.intent` and a lightweight preview of downstream artifacts so the frontend can gate persona/story map viewers without re-fetching storage.
+5. **Frontend guidance** – Until backend persistence for derived artifacts ships, the Next.js run store remains the source of truth. Each API request should resend the serialized upstream artifact context (PRD JSON, persona payload, etc.) so downstream subagents can consume it deterministically, even if the browser reloads.
+
+To request specific artifact combinations from the SDK or frontend, send:
+
+```ts
+await fetch('/api/chat', {
+  method: 'POST',
+  body: JSON.stringify({
+    artifactType: 'story-map',
+    requestedArtifacts: ['prd', 'persona', 'story-map'],
+    messages,
+    settings
+  })
+})
+```
+
+The SSE stream will emit `plan.created` with the classified intent plus `artifact.delivered` events showing each handoff. Consumers can watch `transitionPath` to render breadcrumbs like “PRD → Persona → Story map” and block persona/story-map viewers until their respective nodes complete.
+
 ### 3. Settings and Configuration Management
 
 **Architecture Decision**: Hierarchical settings with runtime overrides and validation.

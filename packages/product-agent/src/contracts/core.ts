@@ -56,6 +56,7 @@ export interface PlanNode<TTask = unknown> {
   status: PlanNodeStatus
   dependsOn: StepId[]
   metadata?: Record<string, unknown>
+  inputs?: Record<string, unknown>
 }
 
 export interface PlanGraph<TTask = unknown> {

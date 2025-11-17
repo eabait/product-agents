@@ -19,7 +19,7 @@ type PlannerRunContext = RunContext<SectionRoutingRequest>
 
 type SubagentPlanTask = {
   kind: 'subagent'
-  subagentId: string
+  agentId: string
 }
 
 export type IntelligentPlannerTask = PrdPlanTask | SubagentPlanTask
@@ -343,10 +343,13 @@ export class IntelligentPlanner implements Planner<IntelligentPlannerTask> {
         label: entry.label ?? `Run ${entry.id}`,
         task: {
           kind: 'subagent',
-          subagentId: entry.id
+          agentId: entry.id
         },
         status: 'pending',
         dependsOn: [currentNodeId],
+        inputs: {
+          fromArtifact: fromArtifact
+        },
         metadata: {
           kind: 'subagent',
           subagentId: entry.id,
