@@ -7,6 +7,7 @@ import { LegacyPrdPlanner, createLegacyPrdPlanner, type PrdPlanTask } from './le
 import { SkillCatalog } from './skill-catalog'
 import { IntelligentPlanner, type IntelligentPlannerTask } from './intelligent-planner'
 import { IntentResolver } from './intent-resolver'
+import { IntentClassifierSkill } from '@product-agents/skills-intent'
 
 export { LegacyPrdPlanner, createLegacyPrdPlanner, SkillCatalog }
 export type { PrdPlanTask, IntelligentPlannerTask }
@@ -24,11 +25,24 @@ export const createPlanner = (options: PlannerFactoryOptions): Planner => {
     return createLegacyPrdPlanner({ clock: options.clock })
   }
 
+  const intentResolver = new IntentResolver({
+    classifier: new IntentClassifierSkill({
+      settings: {
+        model: options.config.runtime.defaultModel,
+        temperature: options.config.runtime.defaultTemperature,
+        maxTokens: options.config.runtime.maxOutputTokens
+      }
+    }),
+    subagentRegistry: options.subagentRegistry,
+    defaultArtifactKind: 'prd'
+  })
+
   return new IntelligentPlanner({
     config: options.config,
     clock: options.clock,
     subagentRegistry: options.subagentRegistry,
-    registeredSubagents: options.subagents ?? []
+    registeredSubagents: options.subagents ?? [],
+    intentResolver
   })
 }
 

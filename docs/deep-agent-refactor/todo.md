@@ -142,14 +142,14 @@
    - [x] Ship a dedicated `intent-classifier` skill (LLM-backed) under `packages/skills/intent` that receives the prompt summary and returns normalized artifact probabilities; wire it into the resolver so every run uses the skill instead of local heuristics.
    - [x] Cache resolver results on the `RunContext.metadata.intent` to avoid recomputing during plan refinement and so downstream subagents can reuse the classification without re-triggering the skill.
 3. **Planner transition graph composition**
-   - [ ] Refactor `packages/product-agent/src/planner/intelligent-planner.ts` so `createPlan` consumes the intent resolver output instead of hardcoded `switch` logic; split PRD core segment building from downstream artifact chaining.
-   - [ ] Introduce a helper (e.g., `buildTransitionSegments`) that walks the manifest graph (`SubagentRegistry` + `registeredSubagents`) to build sequential `PlanNode`s for persona/story-map agents, wiring `dependsOn` so each node waits for its source artifact.
-   - [ ] Annotate plan metadata with `requestedArtifacts`, `intentConfidence`, and `transitionPath` so the frontend can render upcoming artifacts and run summaries remain traceable.
+   - [x] Refactor `packages/product-agent/src/planner/intelligent-planner.ts` so `createPlan` consumes the intent resolver output instead of hardcoded `switch` logic; split PRD core segment building from downstream artifact chaining.
+   - [x] Introduce a helper (e.g., `buildTransitionSegments`) that walks the manifest graph (`SubagentRegistry` + `registeredSubagents`) to build sequential `PlanNode`s for persona/story-map agents, wiring `dependsOn` so each node waits for its source artifact.
+   - [x] Annotate plan metadata with `requestedArtifacts`, `intentConfidence`, and `transitionPath` so the frontend can render upcoming artifacts and run summaries remain traceable.
 4. **Controller + progress event wiring**
    - [ ] Ensure `packages/product-agent/src/controller/graph-controller.ts` stores intermediate artifacts per step (`artifactsByKind`) and emits `progress` payloads that specify which transition produced each artifact, enabling downstream verification of handoffs.
    - [ ] Update SSE payloads in `apps/api/src/index.ts` to include `plan.metadata.intent` and downstream artifact previews so UI clients can gate persona/story map viewers.
 5. **Tests & documentation**
-   - [ ] Add resolver unit tests (`packages/product-agent/tests/intent-resolver.test.ts`) that cover prompt keyword detection, explicit overrides, and fallback scenarios.
+   - [x] Add resolver unit tests (`packages/product-agent/tests/intent-resolver.test.ts`) that cover prompt keyword detection, explicit overrides, and fallback scenarios.
    - [ ] Expand `packages/product-agent/tests/intelligent-planner.test.ts` with personas + story-map manifests to verify PRD-only, persona-only, and chained PRD → persona → story-map plans.
    - [ ] Capture the new flow in `docs/deep-agent-refactor/todo.md` (this section) and `AGENT.md`, outlining how to request multi-artifact plans and interpret the returned graph metadata.
 

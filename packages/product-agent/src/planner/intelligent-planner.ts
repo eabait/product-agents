@@ -1,5 +1,6 @@
 import type { Planner, PlanDraft, PlanRefinementInput } from '../contracts/planner'
 import type { ArtifactKind, PlanGraph, PlanNode, RunContext } from '../contracts/core'
+import type { ArtifactIntent, ArtifactTransition } from '../contracts/intent'
 import type { ProductAgentConfig } from '../config/product-agent.config'
 import type { SubagentLifecycle, SubagentManifest } from '../contracts/subagent'
 import type { SubagentRegistry } from '../subagents/subagent-registry'
@@ -9,6 +10,10 @@ import { ALL_SECTION_NAMES } from '@product-agents/prd-shared'
 import type { CatalogSkill } from './skill-catalog'
 import { SkillCatalog } from './skill-catalog'
 import type { PrdPlanTask } from './legacy-prd-planner'
+
+type IntentResolverLike = {
+  resolve: (context: PlannerRunContext) => Promise<ArtifactIntent>
+}
 
 type PlannerRunContext = RunContext<SectionRoutingRequest>
 
@@ -25,6 +30,7 @@ interface IntelligentPlannerOptions {
   skillCatalog?: SkillCatalog
   subagentRegistry?: SubagentRegistry
   registeredSubagents?: SubagentLifecycle[]
+  intentResolver: IntentResolverLike
 }
 
 interface SubagentPlanEntry {
@@ -53,6 +59,8 @@ interface SubagentPlanResult {
     consumes: ArtifactKind[]
     label?: string
   }>
+  terminalNodeId: string
+  transitionPath: ArtifactKind[]
 }
 
 const PLAN_VERSION = '3.0.0'
@@ -66,6 +74,8 @@ export class IntelligentPlanner implements Planner<IntelligentPlannerTask> {
   private readonly subagentRegistry?: SubagentRegistry
   private readonly registeredSubagents: SubagentLifecycle[]
   private readonly skillPackIds: string[]
+  private readonly intentResolver: IntentResolverLike
+  private readonly defaultArtifactKind: ArtifactKind = 'prd'
 
   constructor(options: IntelligentPlannerOptions) {
     this.config = options.config
@@ -74,14 +84,58 @@ export class IntelligentPlanner implements Planner<IntelligentPlannerTask> {
     this.subagentRegistry = options.subagentRegistry
     this.registeredSubagents = options.registeredSubagents ?? []
     this.skillPackIds = options.config.skills.enabledPacks.map(pack => pack.id)
+    this.intentResolver = options.intentResolver
   }
 
   async createPlan(context: PlannerRunContext): Promise<PlanDraft<IntelligentPlannerTask>> {
-    switch (context.request.artifactKind) {
-      case 'persona':
-        return this.createPersonaPlan(context)
-      default:
-        return this.createPrdPlan(context)
+    const intent = await this.intentResolver.resolve(context)
+    const createdAt = this.clock()
+    const coreSegment = await this.buildPrdCoreSegment(context)
+    const transitions = await this.buildTransitionSegments({
+      intent,
+      dependsOn: coreSegment.terminalNodeId
+    })
+
+    const planNodes: Record<string, PlanNode<IntelligentPlannerTask>> = {
+      ...coreSegment.nodes,
+      ...transitions.nodes
+    }
+
+    const plan: PlanGraph<IntelligentPlannerTask> = {
+      id: `plan-${context.runId}`,
+      artifactKind: intent.targetArtifact ?? context.request.artifactKind ?? this.defaultArtifactKind,
+      entryId: coreSegment.entryId,
+      createdAt,
+      version: PLAN_VERSION,
+      nodes: planNodes,
+      metadata: {
+        planner: 'intelligent',
+        requestedArtifactKind: intent.targetArtifact,
+        requestedSections: coreSegment.requestedSections,
+        skillPacks: this.skillPackIds,
+        skills: {
+          sequence: this.buildSkillSequence(coreSegment.requestedSections)
+        },
+        subagents: transitions.summaries,
+        intermediateArtifacts: Array.from(
+          new Set([...coreSegment.intermediateArtifacts, ...transitions.transitionPath])
+        ),
+        requestedArtifacts: intent.requestedArtifacts,
+        intentConfidence: intent.confidence,
+        transitionPath: transitions.transitionPath,
+        intent: {
+          source: intent.source,
+          requestedArtifacts: intent.requestedArtifacts,
+          targetArtifact: intent.targetArtifact,
+          confidence: intent.confidence,
+          transitionPath: transitions.transitionPath
+        }
+      }
+    }
+
+    return {
+      plan,
+      context
     }
   }
 
@@ -91,92 +145,6 @@ export class IntelligentPlanner implements Planner<IntelligentPlannerTask> {
     return {
       plan: input.currentPlan,
       context: input.context
-    }
-  }
-
-  private async createPrdPlan(
-    context: PlannerRunContext
-  ): Promise<PlanDraft<IntelligentPlannerTask>> {
-    const createdAt = this.clock()
-    const coreSegment = await this.buildPrdCoreSegment(context)
-    const subagents = await this.buildSubagentNodes({
-      sourceKind: 'prd',
-      dependsOn: coreSegment.terminalNodeId,
-      targetArtifactKind: context.request.artifactKind,
-      includeAllDerivatives: true
-    })
-
-    const plan: PlanGraph<IntelligentPlannerTask> = {
-      id: `plan-${context.runId}`,
-      artifactKind: context.request.artifactKind,
-      entryId: coreSegment.entryId,
-      createdAt,
-      version: PLAN_VERSION,
-      nodes: {
-        ...coreSegment.nodes,
-        ...subagents.nodes
-      },
-      metadata: {
-        planner: 'intelligent',
-        requestedArtifactKind: context.request.artifactKind,
-        requestedSections: coreSegment.requestedSections,
-        skillPacks: this.skillPackIds,
-        skills: {
-          sequence: this.buildSkillSequence(coreSegment.requestedSections)
-        },
-        subagents: subagents.summaries,
-        intermediateArtifacts: coreSegment.intermediateArtifacts
-      }
-    }
-
-    return {
-      plan,
-      context
-    }
-  }
-
-  private async createPersonaPlan(
-    context: PlannerRunContext
-  ): Promise<PlanDraft<IntelligentPlannerTask>> {
-    const createdAt = this.clock()
-    const coreSegment = await this.buildPrdCoreSegment(context)
-    const subagents = await this.buildSubagentNodes({
-      sourceKind: 'prd',
-      dependsOn: coreSegment.terminalNodeId,
-      targetArtifactKind: context.request.artifactKind,
-      includeAllDerivatives: false
-    })
-
-    if (subagents.summaries.length === 0) {
-      throw new Error('No subagents are registered to create persona artifacts from PRDs')
-    }
-
-    const plan: PlanGraph<IntelligentPlannerTask> = {
-      id: `plan-${context.runId}`,
-      artifactKind: context.request.artifactKind,
-      entryId: coreSegment.entryId,
-      createdAt,
-      version: PLAN_VERSION,
-      nodes: {
-        ...coreSegment.nodes,
-        ...subagents.nodes
-      },
-      metadata: {
-        planner: 'intelligent',
-        requestedArtifactKind: context.request.artifactKind,
-        requestedSections: coreSegment.requestedSections,
-        skillPacks: this.skillPackIds,
-        skills: {
-          sequence: this.buildSkillSequence(coreSegment.requestedSections)
-        },
-        subagents: subagents.summaries,
-        intermediateArtifacts: coreSegment.intermediateArtifacts
-      }
-    }
-
-    return {
-      plan,
-      context
     }
   }
 
@@ -335,35 +303,40 @@ export class IntelligentPlanner implements Planner<IntelligentPlannerTask> {
     return fallback.filter(section => requested.has(section))
   }
 
-  private async buildSubagentNodes(params: {
-    sourceKind: ArtifactKind
+  private async buildTransitionSegments(params: {
+    intent: ArtifactIntent
     dependsOn: string
-    targetArtifactKind: ArtifactKind
-    includeAllDerivatives: boolean
   }): Promise<SubagentPlanResult> {
     const entries = await this.collectSubagentEntries()
     if (entries.length === 0) {
-      return { nodes: {}, summaries: [] }
+      return {
+        nodes: {},
+        summaries: [],
+        terminalNodeId: params.dependsOn,
+        transitionPath: [this.defaultArtifactKind]
+      }
     }
-
-    const candidates = entries.filter(
-      entry => entry.consumes.length === 0 || entry.consumes.includes(params.sourceKind)
-    )
-
-    const filtered = candidates.filter(entry => {
-      if (entry.creates === params.sourceKind) {
-        return false
-      }
-      if (params.includeAllDerivatives) {
-        return true
-      }
-      return entry.creates === params.targetArtifactKind
-    })
 
     const nodes: Record<string, PlanNode<IntelligentPlannerTask>> = {}
     const summaries: SubagentPlanResult['summaries'] = []
+    const transitionPath: ArtifactKind[] = [this.defaultArtifactKind]
 
-    filtered.forEach(entry => {
+    let currentNodeId = params.dependsOn
+    let currentArtifact: ArtifactKind = this.defaultArtifactKind
+    const transitions = this.normalizeTransitions(params.intent)
+
+    transitions.forEach(transition => {
+      const fromArtifact = transition.fromArtifact ?? currentArtifact
+      const targetArtifact = transition.toArtifact
+      if (!targetArtifact || targetArtifact === fromArtifact) {
+        return
+      }
+
+      const entry = this.findSubagentForTransition(entries, fromArtifact, targetArtifact)
+      if (!entry) {
+        return
+      }
+
       const nodeId = this.toSubagentNodeId(entry.id)
       nodes[nodeId] = {
         id: nodeId,
@@ -373,16 +346,16 @@ export class IntelligentPlanner implements Planner<IntelligentPlannerTask> {
           subagentId: entry.id
         },
         status: 'pending',
-        dependsOn: [params.dependsOn],
+        dependsOn: [currentNodeId],
         metadata: {
           kind: 'subagent',
           subagentId: entry.id,
           artifactKind: entry.creates,
           source: {
-            artifactKind: params.sourceKind,
-            fromNode: params.dependsOn
+            artifactKind: fromArtifact,
+            fromNode: currentNodeId
           },
-          promoteResult: entry.creates === params.targetArtifactKind,
+          promoteResult: entry.creates === params.intent.targetArtifact,
           tags: entry.tags
         }
       }
@@ -393,9 +366,55 @@ export class IntelligentPlanner implements Planner<IntelligentPlannerTask> {
         consumes: entry.consumes,
         label: entry.label
       })
+
+      transitionPath.push(entry.creates)
+      currentArtifact = entry.creates
+      currentNodeId = nodeId
     })
 
-    return { nodes, summaries }
+    return {
+      nodes,
+      summaries,
+      terminalNodeId: currentNodeId,
+      transitionPath
+    }
+  }
+
+  private normalizeTransitions(intent: ArtifactIntent): ArtifactTransition[] {
+    if (intent.transitions && intent.transitions.length > 0) {
+      return intent.transitions
+    }
+
+    const chain = intent.requestedArtifacts.length > 0
+      ? intent.requestedArtifacts
+      : [intent.targetArtifact ?? this.defaultArtifactKind]
+
+    const transitions: ArtifactTransition[] = []
+    let previous: ArtifactKind = this.defaultArtifactKind
+    chain.forEach(artifact => {
+      if (artifact === previous) {
+        return
+      }
+      transitions.push({ fromArtifact: previous, toArtifact: artifact })
+      previous = artifact
+    })
+    return transitions
+  }
+
+  private findSubagentForTransition(
+    entries: SubagentPlanEntry[],
+    fromArtifact: ArtifactKind,
+    targetArtifact: ArtifactKind
+  ): SubagentPlanEntry | undefined {
+    return entries.find(entry => {
+      if (entry.creates !== targetArtifact) {
+        return false
+      }
+      if (!entry.consumes || entry.consumes.length === 0) {
+        return true
+      }
+      return entry.consumes.includes(fromArtifact)
+    })
   }
 
   private async collectSubagentEntries(): Promise<SubagentPlanEntry[]> {

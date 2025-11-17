@@ -6,6 +6,7 @@ import { getDefaultProductAgentConfig } from '../src/config/product-agent.config
 import type { RunContext } from '../src/contracts/core'
 import type { SectionRoutingRequest } from '@product-agents/prd-shared'
 import type { SubagentLifecycle } from '../src/contracts/subagent'
+import type { ArtifactIntent } from '../src/contracts/intent'
 
 const fixedClock = () => new Date('2024-07-01T00:00:00.000Z')
 
@@ -46,12 +47,28 @@ const personaSubagent: SubagentLifecycle = {
   }
 }
 
+class StubIntentResolver {
+  constructor(private readonly plan: ArtifactIntent) {}
+
+  async resolve(): Promise<ArtifactIntent> {
+    return this.plan
+  }
+}
+
 test('intelligent planner composes PRD plan from skill catalog with subagent nodes', async () => {
   const config = getDefaultProductAgentConfig()
+  const intent: ArtifactIntent = {
+    source: 'user',
+    requestedArtifacts: ['prd'],
+    targetArtifact: 'prd',
+    transitions: [{ toArtifact: 'prd' }],
+    confidence: 0.95
+  }
   const planner = new IntelligentPlanner({
     config,
     clock: fixedClock,
-    registeredSubagents: [personaSubagent]
+    registeredSubagents: [personaSubagent],
+    intentResolver: new StubIntentResolver(intent) as any
   })
   const context = createRunContext('prd', ['solution', 'constraints'])
 
@@ -65,10 +82,7 @@ test('intelligent planner composes PRD plan from skill catalog with subagent nod
   assert.ok(plan.nodes['assemble-prd'])
 
   const personaNode = plan.nodes['subagent-persona.builder']
-  assert.ok(personaNode, 'expected persona subagent node in plan')
-  assert.equal(personaNode.metadata?.kind, 'subagent')
-  assert.equal(personaNode.metadata?.subagentId, 'persona.builder')
-  assert.deepEqual(personaNode.dependsOn, ['assemble-prd'])
+  assert.equal(personaNode, undefined)
   assert.deepEqual(plan.metadata?.skills?.sequence, [
     'prd.check-clarification',
     'prd.analyze-context',
@@ -76,14 +90,25 @@ test('intelligent planner composes PRD plan from skill catalog with subagent nod
     'prd.write-constraints',
     'prd.assemble-prd'
   ])
+  assert.equal(plan.metadata?.transitionPath?.[0], 'prd')
 })
 
 test('intelligent planner promotes persona artifact when requested', async () => {
   const config = getDefaultProductAgentConfig()
+  const intent: ArtifactIntent = {
+    source: 'resolver',
+    requestedArtifacts: ['prd', 'persona'],
+    targetArtifact: 'persona',
+    transitions: [
+      { fromArtifact: 'prd', toArtifact: 'persona' }
+    ],
+    confidence: 0.93
+  }
   const planner = new IntelligentPlanner({
     config,
     clock: fixedClock,
-    registeredSubagents: [personaSubagent]
+    registeredSubagents: [personaSubagent],
+    intentResolver: new StubIntentResolver(intent) as any
   })
   const context = createRunContext('persona')
 
@@ -101,4 +126,7 @@ test('intelligent planner promotes persona artifact when requested', async () =>
     'successMetrics',
     'constraints'
   ])
+  assert.deepEqual(plan.metadata?.requestedArtifacts, ['prd', 'persona'])
+  assert.equal(plan.metadata?.intentConfidence, 0.93)
+  assert.deepEqual(plan.metadata?.transitionPath, ['prd', 'persona'])
 })
