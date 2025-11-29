@@ -223,7 +223,12 @@ await fetch('/api/chat', {
 })
 ```
 
-The SSE stream will emit `plan.created` with the classified intent plus `artifact.delivered` events showing each handoff. Consumers can watch `transitionPath` to render breadcrumbs like “PRD → Persona → Story map” and block persona/story-map viewers until their respective nodes complete.
+The SSE stream will emit `plan.created` with the classified intent plus `artifact.delivered` events showing each handoff. Consumers can watch `transitionPath` to render breadcrumbs like “PRD → Persona → Story map” and block persona/story-map viewers until their respective nodes complete. Completion payloads now also include a `subagents` array; each entry exposes the persona bundle (or other artifacts) plus the telemetry snapshot emitted by the runner (duration, sanitized prompt/response previews, which model produced it, and whether the heuristics kicked in). Frontends can reuse this payload instead of making a secondary persona request.
+
+**Persona agent controls**
+
+- `PERSONA_AGENT_FORCE_HEURISTIC=true` – Short-circuits the LLM runner and forces the deterministic personas. Handy for low-trust environments or live rollback.
+- Persona artifacts attach `metadata.extras.telemetry` so downstream consumers can plot latency, strategy (`llm` vs `heuristic`), and sanitized previews without logging the full prompt.
 
 ### 3. Settings and Configuration Management
 

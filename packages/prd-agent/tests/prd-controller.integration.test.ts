@@ -5,11 +5,42 @@ import os from 'node:os'
 import path from 'node:path'
 
 import { GraphController, FilesystemWorkspaceDAO, getDefaultProductAgentConfig } from '@product-agents/product-agent'
-import { createPersonaBuilderSubagent } from '@product-agents/persona-agent'
+import {
+  createPersonaAgentSubagent,
+  PersonaAgentRunner,
+  type PersonaAgentRunnerResult,
+  type PersonaProfile,
+  type PersonaAgentTelemetry
+} from '@product-agents/persona-agent'
 import { createPrdPlanner, createPrdSkillRunner, createPrdVerifier } from '../src/adapters'
 import type { SectionName } from '@product-agents/prd-shared'
 
 const fixedClock = () => new Date('2024-04-04T00:00:00.000Z')
+
+class StubPersonaRunner extends PersonaAgentRunner {
+  constructor(private readonly personas: PersonaProfile[]) {
+    super()
+  }
+
+  async run(): Promise<PersonaAgentRunnerResult> {
+    return {
+      personas: this.personas,
+      strategy: 'llm',
+      notes: ['integration-stub'],
+      telemetry: createStubTelemetry('llm')
+    }
+  }
+}
+
+const createStubTelemetry = (strategy: 'llm' | 'heuristic'): PersonaAgentTelemetry => ({
+  model: 'stub-model',
+  durationMs: 5,
+  promptLength: 128,
+  promptPreview: 'stub-preview',
+  responsePreview: 'stub-response',
+  strategy,
+  timestamp: fixedClock().toISOString()
+})
 
 class IntegrationSectionWriter {
   constructor(private readonly section: SectionName) {}
@@ -224,7 +255,22 @@ test('graph controller persona run promotes persona artifact via intelligent pla
   config.workspace.storageRoot = workspaceRoot
   config.workspace.persistArtifacts = true
 
-  const personaSubagent = createPersonaBuilderSubagent({ clock: fixedClock })
+  const personaSubagent = createPersonaAgentSubagent({
+    clock: fixedClock,
+    runner: new StubPersonaRunner([
+      {
+        id: 'persona-1',
+        name: 'Alex Ops',
+        summary: 'Ops leader needs realtime views',
+        goals: ['Realtime monitoring'],
+        frustrations: ['Manual spreadsheets'],
+        opportunities: ['Automation'],
+        successIndicators: ['Faster decisions'],
+        quote: 'Give me the signal before customers feel it.',
+        tags: ['ops']
+      }
+    ])
+  })
   const planner = createPrdPlanner({ clock: fixedClock, subagents: [personaSubagent] })
 
   const skillRunner = createPrdSkillRunner({

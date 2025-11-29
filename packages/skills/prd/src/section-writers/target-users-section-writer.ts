@@ -40,6 +40,42 @@ const TargetUserPlanOperationSchema = z.object({
   rationale: z.string().optional()
 })
 
+const extractJsonArray = (value: string): unknown[] | null => {
+  const start = value.indexOf('[')
+  if (start === -1) return null
+
+  let depth = 0
+  let inString = false
+  let prevChar = ''
+
+  for (let index = start; index < value.length; index++) {
+    const char = value[index]
+    if (char === '"' && prevChar !== '\\') {
+      inString = !inString
+    }
+
+    if (!inString) {
+      if (char === '[') {
+        depth++
+      } else if (char === ']') {
+        depth--
+        if (depth === 0) {
+          const candidate = value.slice(start, index + 1)
+          try {
+            return JSON.parse(candidate)
+          } catch {
+            break
+          }
+        }
+      }
+    }
+
+    prevChar = char
+  }
+
+  return null
+}
+
 const parseJsonField = (value: unknown) => {
   if (typeof value === 'string') {
     const trimmed = value.trim()
@@ -48,6 +84,10 @@ const parseJsonField = (value: unknown) => {
     try {
       return JSON.parse(normalized)
     } catch {
+      const extracted = extractJsonArray(normalized)
+      if (extracted) {
+        return extracted
+      }
       return value
     }
   }

@@ -8,6 +8,13 @@ interface StartRunParams {
   artifactType?: string
   runId?: string
   sourceArtifact?: unknown
+  personaInputs?: {
+    description?: string
+    targetUsers?: string[]
+    keyFeatures?: string[]
+    constraints?: string[]
+    successMetrics?: string[]
+  }
 }
 
 interface StartRunResult {
@@ -51,11 +58,27 @@ export const startRun = async (params: StartRunParams): Promise<StartRunResult> 
       }
     }
 
+    if (params.personaInputs) {
+      const normalized = Object.fromEntries(
+        Object.entries(params.personaInputs).filter(([, value]) => {
+          if (Array.isArray(value)) {
+            return value.length > 0
+          }
+          return Boolean(value)
+        })
+      )
+      if (Object.keys(normalized).length > 0) {
+        requestPayload.input = {
+          ...(requestPayload.input as Record<string, unknown>),
+          ...normalized
+        }
+      }
+    }
+
     if (params.sourceArtifact) {
       requestPayload.artifact = {
         data: params.sourceArtifact
       }
-      delete requestPayload.input
     }
 
     const response = await fetch('/api/subagents/persona', {
@@ -168,3 +191,5 @@ export const streamRun = async (
 
   return response
 }
+
+export type { StartRunParams }

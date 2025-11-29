@@ -3,8 +3,12 @@ import { randomUUID } from 'node:crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 
-import { loadProductAgentConfig, resolveRunSettings, type Artifact, type RunContext, type WorkspaceHandle } from '@product-agents/product-agent'
-import { createPersonaBuilderSubagent } from '@product-agents/persona-agent'
+import {
+  loadProductAgentConfig,
+  resolveRunSettings
+} from '@product-agents/product-agent/config/product-agent.config'
+import type { Artifact, RunContext, WorkspaceHandle } from '@product-agents/product-agent/contracts'
+import { createPersonaAgentSubagent } from '@product-agents/persona-agent'
 import type { SectionRoutingRequest, SectionRoutingResponse } from '@product-agents/prd-shared'
 import { attachSubagentArtifact, getRunRecord } from '../../runs/run-store'
 
@@ -27,6 +31,7 @@ const PersonaRequestSchema = z
     input: z
       .object({
         message: z.string().min(1).optional(),
+        description: z.string().min(1).optional(),
         targetUsers: z.array(z.string().min(1)).optional(),
         keyFeatures: z.array(z.string().min(1)).optional(),
         constraints: z.array(z.string().min(1)).optional(),
@@ -222,12 +227,13 @@ export async function POST(request: NextRequest) {
         : undefined
     )
 
-    const subagent = createPersonaBuilderSubagent({
+    const subagent = createPersonaAgentSubagent({
       idFactory: () => randomUUID()
     })
     const personaRunId = runId ? `${runId}-persona` : `persona-${randomUUID()}`
 
     const personaInputMessage =
+      personaInput?.description ??
       personaInput?.message ??
       (sourceArtifact
         ? `Persona builder invoked from artifact ${sourceArtifact.id}`
@@ -235,11 +241,16 @@ export async function POST(request: NextRequest) {
 
     const sectionRequest: SectionRoutingRequest = {
       message: personaInputMessage,
-      context: personaInput?.contextPayload
-        ? { contextPayload: personaInput.contextPayload }
-        : sourceArtifact
-          ? { existingPRD: sourceArtifact.data }
-          : undefined
+      context: (() => {
+        const context: Record<string, unknown> = {}
+        if (personaInput?.contextPayload) {
+          context.contextPayload = personaInput.contextPayload
+        }
+        if (sourceArtifact) {
+          context.existingPRD = sourceArtifact.data
+        }
+        return Object.keys(context).length > 0 ? (context as SectionRoutingRequest['context']) : undefined
+      })()
     }
 
     const workspaceArtifactKind = sourceArtifact?.kind ?? (personaInput ? 'persona' : 'prd')
@@ -273,7 +284,7 @@ export async function POST(request: NextRequest) {
             constraints: personaInput.constraints,
             successMetrics: personaInput.successMetrics,
             contextPayload: personaInput.contextPayload,
-            description: personaInput.message
+            description: personaInput.description ?? personaInput.message
           }
         : undefined,
       run: runContext,

@@ -11,9 +11,40 @@ import type { PlanGraph, RunContext } from '../src/contracts/core'
 import type { VerificationResult } from '../src/contracts/verifier'
 import { FilesystemWorkspaceDAO } from '../src/workspace/filesystem-workspace-dao'
 import { getDefaultProductAgentConfig } from '../src/config/product-agent.config'
-import { createPersonaBuilderSubagent } from '@product-agents/persona-agent'
+import {
+  createPersonaAgentSubagent,
+  PersonaAgentRunner,
+  type PersonaAgentRunnerResult,
+  type PersonaProfile,
+  type PersonaAgentTelemetry
+} from '@product-agents/persona-agent'
 
 const fixedClock = () => new Date('2024-09-18T00:00:00.000Z')
+
+class StubPersonaRunner extends PersonaAgentRunner {
+  constructor(private readonly personas: PersonaProfile[]) {
+    super()
+  }
+
+  async run(): Promise<PersonaAgentRunnerResult> {
+    return {
+      personas: this.personas,
+      strategy: 'llm',
+      notes: ['stub-runner'],
+      telemetry: createStubTelemetry('llm')
+    }
+  }
+}
+
+const createStubTelemetry = (strategy: 'llm' | 'heuristic'): PersonaAgentTelemetry => ({
+  model: 'stub-model',
+  durationMs: 5,
+  promptLength: 128,
+  promptPreview: 'stub-preview',
+  responsePreview: 'stub-response',
+  strategy,
+  timestamp: fixedClock().toISOString()
+})
 
 class StubPlanner implements Planner {
   constructor(private readonly plan: PlanGraph) {}
@@ -136,7 +167,24 @@ test('graph controller runs persona subagent after PRD completion', async () => 
         }
       },
       workspace: new FilesystemWorkspaceDAO({ root: workspaceRoot, clock: fixedClock }),
-      subagents: [createPersonaBuilderSubagent({ clock: fixedClock })]
+      subagents: [
+        createPersonaAgentSubagent({
+          clock: fixedClock,
+          runner: new StubPersonaRunner([
+            {
+              id: 'persona-1',
+              name: 'Ops Lead',
+              summary: 'Ops lead summary',
+              goals: ['stability'],
+              frustrations: ['fire drills'],
+              opportunities: ['automation'],
+              successIndicators: ['less downtime'],
+              quote: 'Keep it running',
+              tags: ['ops']
+            }
+          ])
+        })
+      ]
     },
     config,
     { clock: fixedClock }
@@ -165,6 +213,10 @@ test('graph controller runs persona subagent after PRD completion', async () => 
     assert.ok(Array.isArray(personaData?.personas))
     assert.ok(personaData.personas.length > 0)
     assert.ok(Array.isArray(personaData.personas[0]?.goals))
+
+    const extras = personaSummary?.artifact.metadata?.extras as Record<string, unknown>
+    assert.ok(extras?.telemetry)
+    assert.equal((personaSummary?.metadata as any)?.telemetry?.strategy, 'llm')
 
     const workspace = summary.workspace
     const artifacts = await controller.workspace.listArtifacts(workspace.descriptor.runId)

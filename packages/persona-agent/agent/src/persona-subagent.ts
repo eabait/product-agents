@@ -3,12 +3,12 @@ import { randomUUID } from 'node:crypto'
 import type { Artifact, SubagentLifecycle } from '@product-agents/product-agent'
 import type { SectionRoutingRequest, SectionRoutingResponse } from '@product-agents/prd-shared'
 
-interface PersonaBuilderOptions {
+export interface PersonaBuilderOptions {
   clock?: () => Date
   idFactory?: () => string
 }
 
-interface PersonaBuilderParams {
+export interface PersonaBuilderParams {
   targetUsers?: string[]
   keyFeatures?: string[]
   constraints?: string[]
@@ -41,7 +41,7 @@ export interface PersonaArtifact {
   notes?: string
 }
 
-type SectionsMap = Record<string, unknown>
+export type SectionsMap = Record<string, unknown>
 
 const isRecord = (candidate: unknown): candidate is Record<string, unknown> =>
   !!candidate && typeof candidate === 'object' && !Array.isArray(candidate)
@@ -299,7 +299,7 @@ const extractNestedStrings = (input: unknown, key: string): string[] => {
   return sanitizeStringArray(candidate)
 }
 
-const extractTargetUsers = (sections: SectionsMap, sectionsUsed: Set<string>): string[] => {
+export const extractTargetUsers = (sections: SectionsMap, sectionsUsed: Set<string>): string[] => {
   const candidate = findSection(sections, ['targetusers', 'personas', 'audience'])
   let values = sanitizeStringArray(candidate)
 
@@ -314,7 +314,7 @@ const extractTargetUsers = (sections: SectionsMap, sectionsUsed: Set<string>): s
   return values.slice(0, 4)
 }
 
-const extractKeyFeatures = (sections: SectionsMap, sectionsUsed: Set<string>): string[] => {
+export const extractKeyFeatures = (sections: SectionsMap, sectionsUsed: Set<string>): string[] => {
   const candidate = findSection(sections, ['keyfeatures', 'features', 'capabilities'])
   let values = sanitizeStringArray(candidate)
 
@@ -329,7 +329,7 @@ const extractKeyFeatures = (sections: SectionsMap, sectionsUsed: Set<string>): s
   return values.slice(0, 6)
 }
 
-const extractConstraints = (sections: SectionsMap, sectionsUsed: Set<string>): string[] => {
+export const extractConstraints = (sections: SectionsMap, sectionsUsed: Set<string>): string[] => {
   const candidate = findSection(sections, ['constraints', 'limitations', 'assumptions'])
   const constraints = new Set<string>()
 
@@ -347,7 +347,7 @@ const extractConstraints = (sections: SectionsMap, sectionsUsed: Set<string>): s
   return result.slice(0, 6)
 }
 
-const extractSuccessMetrics = (sections: SectionsMap, sectionsUsed: Set<string>): string[] => {
+export const extractSuccessMetrics = (sections: SectionsMap, sectionsUsed: Set<string>): string[] => {
   const candidate = findSection(sections, ['successmetrics', 'metrics', 'outcomes'])
   const metrics: string[] = []
 
@@ -397,7 +397,7 @@ const extractSuccessMetrics = (sections: SectionsMap, sectionsUsed: Set<string>)
   return metrics.slice(0, 6)
 }
 
-const extractSolutionSummary = (sections: SectionsMap, sectionsUsed: Set<string>): string | undefined => {
+export const extractSolutionSummary = (sections: SectionsMap, sectionsUsed: Set<string>): string | undefined => {
   const candidate = findSection(sections, ['solution', 'overview'])
   if (!candidate || typeof candidate !== 'object') {
     return undefined
@@ -539,7 +539,7 @@ const buildQuote = (summary: string): string => {
 
 const buildOpportunities = (features: string[]): string[] => features.slice(0, 3)
 
-const buildPersonaProfiles = (
+export const buildPersonaProfiles = (
   targetUsers: string[],
   keyFeatures: string[],
   constraints: string[],
@@ -575,7 +575,7 @@ const buildPersonaProfiles = (
   return personas
 }
 
-const resolveSectionsContext = (
+export const resolveSectionsContext = (
   sourceArtifact: Artifact<SectionRoutingResponse> | undefined,
   params: PersonaBuilderParams | undefined,
   input: unknown

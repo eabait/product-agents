@@ -9,10 +9,14 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "lint": "eslint 'src/**/*.{ts,tsx}'",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "test": "node --test --loader ../../product-agent/tests/ts-loader.mjs tests/**/*.test.ts"
   },
   "dependencies": {
-    "@product-agents/prd-shared": "*"
+    "@product-agents/prd-shared": "*",
+    "@product-agents/openrouter-client": "*",
+    "@product-agents/agent-core": "*",
+    "zod": "^3.23.8"
   },
   "peerDependencies": {
     "@product-agents/product-agent": "*"

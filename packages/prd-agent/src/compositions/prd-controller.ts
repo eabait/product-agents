@@ -7,7 +7,7 @@ import {
   type ProductAgentConfig,
   type SubagentRegistry
 } from '@product-agents/product-agent'
-import { createPersonaBuilderSubagent } from '@product-agents/persona-agent'
+import { createPersonaAgentSubagent } from '@product-agents/persona-agent'
 import { createPrdPlanner, createPrdSkillRunner, createPrdVerifier } from '../adapters'
 
 interface CreatePrdControllerOptions {
@@ -32,7 +32,7 @@ export const createPrdController = (options?: CreatePrdControllerOptions): Agent
         : undefined
     )
 
-  const subagents = [createPersonaBuilderSubagent({ clock: options?.clock })]
+  const subagents = [createPersonaAgentSubagent({ clock: options?.clock })]
 
   const planner = createPrdPlanner({
     config,

@@ -16,6 +16,7 @@
   "dependencies": {
     "@product-agents/product-agent": "*",
     "@product-agents/prd-shared": "*",
+    "@product-agents/persona-agent": "*",
     "@product-agents/agent-core": "*",
     "zod": "^3.25.76"
   },

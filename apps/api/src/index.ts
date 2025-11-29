@@ -17,6 +17,7 @@ import {
   type RunRequest,
   SubagentRegistry
 } from '@product-agents/product-agent'
+import { personaAgentManifest } from '@product-agents/persona-agent'
 import type { SectionRoutingRequest } from '@product-agents/prd-shared'
 
 const loadEnvFiles = () => {
@@ -122,8 +123,14 @@ interface RunRecord {
 const MAX_RUN_HISTORY = 50
 const config = loadProductAgentConfig()
 const subagentRegistry = new SubagentRegistry()
+const registeredSubagents = new Set<string>()
 for (const manifest of config.subagents.manifests) {
   subagentRegistry.register(manifest)
+  registeredSubagents.add(manifest.id)
+}
+
+if (!registeredSubagents.has(personaAgentManifest.id)) {
+  subagentRegistry.register(personaAgentManifest)
 }
 
 const controller = createPrdController({ config, subagentRegistry })
@@ -529,7 +536,8 @@ const startRunExecution = async (record: RunRecord) => {
       usage: summary.metadata?.usage ?? null,
       status: summary.status,
       intent: mergedMetadata.intent ?? null,
-      previews: mergedMetadata.previewArtifacts ?? []
+      previews: mergedMetadata.previewArtifacts ?? [],
+      subagents: summary.subagents ?? []
     })
     closeSubscribers(record.id)
   } catch (error) {
@@ -754,7 +762,8 @@ const server = http.createServer(async (req, res) => {
       sendSse(res, 'complete', {
         artifact: record.summary.artifact ?? null,
         metadata: record.summary.metadata ?? null,
-        status: record.summary.status
+        status: record.summary.status,
+        subagents: record.summary.subagents ?? []
       })
       endSse(res)
       return
