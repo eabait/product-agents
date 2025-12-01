@@ -59,9 +59,10 @@ export const ProgressIndicator = memo(function ProgressIndicator({
     setIsCollapsed(defaultCollapsed);
   }, [defaultCollapsed]);
 
-  const steps = useMemo(() => convertEventsToSteps(events, plan), [events, plan]);
+  const filteredPlan = useMemo(() => filterPlanByArtifact(plan), [plan]);
+  const steps = useMemo(() => convertEventsToSteps(events, filteredPlan), [events, filteredPlan]);
   const latestStep = useMemo(() => getLatestProgressStep(steps, isActive), [steps, isActive]);
-  const orderedPlanNodes = useMemo(() => orderPlanNodes(plan), [plan]);
+  const orderedPlanNodes = useMemo(() => orderPlanNodes(filteredPlan), [filteredPlan]);
 
   if (!isActive && steps.length === 0 && !plan) {
     return null;
@@ -352,6 +353,9 @@ function convertEventsToSteps(events: AgentProgressEvent[], plan?: PlanGraphSumm
 
       case 'step.started':
         if (event.stepId) {
+          if (plan && !plan.nodes?.[event.stepId]) {
+            break;
+          }
           const node = plan?.nodes?.[event.stepId];
           const step = ensureNodeStep(event.stepId, {
             id: `node-${event.stepId}`,
@@ -370,6 +374,9 @@ function convertEventsToSteps(events: AgentProgressEvent[], plan?: PlanGraphSumm
       case 'step.completed':
       case 'step.failed':
         if (event.stepId) {
+          if (plan && !plan.nodes?.[event.stepId]) {
+            break;
+          }
           const node = plan?.nodes?.[event.stepId];
           const step = ensureNodeStep(event.stepId, {
             id: `node-${event.stepId}`,
@@ -605,4 +612,32 @@ function orderPlanNodes(plan?: PlanGraphSummary): PlanNodeSummary[] {
   }
 
   return ordered;
+}
+
+function filterPlanByArtifact(plan?: PlanGraphSummary): PlanGraphSummary | undefined {
+  if (!plan) return undefined;
+  const targetKind = plan.artifactKind ?? 'prd';
+  if (targetKind === 'prd') return plan;
+
+  const filteredEntries = Object.entries(plan.nodes).filter(([, node]) => {
+    const nodeKind = node.metadata?.kind as string | undefined;
+    const nodeArtifact = node.metadata?.artifactKind as string | undefined;
+
+    if (nodeKind === 'subagent') {
+      if (!nodeArtifact) return true;
+      return nodeArtifact === targetKind;
+    }
+
+    if (nodeArtifact) {
+      return nodeArtifact === targetKind;
+    }
+
+    // Default skills are PRD-specific; hide them for non-PRD artifacts.
+    return targetKind === 'prd';
+  });
+
+  return {
+    ...plan,
+    nodes: Object.fromEntries(filteredEntries)
+  };
 }

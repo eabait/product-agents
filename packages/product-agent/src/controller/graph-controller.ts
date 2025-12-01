@@ -646,7 +646,7 @@ export class GraphController implements AgentController {
     }
 
     const lifecycle = await this.getSubagentLifecycle(subagentId)
-    const sourceArtifact = this.resolveSubagentSourceArtifact(node, context)
+    const sourceArtifact = this.resolveSubagentSourceArtifact(lifecycle, node, context)
     if (!sourceArtifact) {
       throw new Error(`Subagent "${subagentId}" requires a source artifact but none was available`)
     }
@@ -801,6 +801,7 @@ export class GraphController implements AgentController {
   }
 
   private resolveSubagentSourceArtifact(
+    lifecycle: SubagentLifecycle,
     node: PlanNode,
     context: ExecutionContext
   ): Artifact | undefined {
@@ -825,7 +826,41 @@ export class GraphController implements AgentController {
       }
     }
 
-    return context.artifact
+    if (context.artifact) {
+      return context.artifact
+    }
+
+    if (lifecycle.metadata.sourceKinds.includes('prompt')) {
+      return this.buildPromptArtifact(context)
+    }
+
+    return undefined
+  }
+
+  private buildPromptArtifact(context: ExecutionContext): Artifact | undefined {
+    const requestInput = context.runContext.request.input as { message?: string; context?: unknown } | undefined
+    const message = requestInput?.message ?? ''
+    const contextPayload = requestInput?.context ?? undefined
+
+    if (!message && !contextPayload) {
+      return undefined
+    }
+
+    return {
+      id: `artifact-prompt-${context.runContext.runId}`,
+      kind: 'prompt',
+      version: '1.0.0',
+      label: 'Prompt Context',
+      data: {
+        message,
+        context: contextPayload
+      },
+      metadata: {
+        createdAt: this.clock().toISOString(),
+        createdBy: context.runContext.request.createdBy,
+        tags: ['prompt', 'synthetic']
+      }
+    }
   }
 
   private async getSubagentLifecycle(subagentId: string): Promise<SubagentLifecycle> {

@@ -60,6 +60,7 @@ interface SubagentPlanResult {
     label?: string
   }>
   terminalNodeId: string
+  entryNodeId?: string
   transitionPath: ArtifactKind[]
 }
 
@@ -90,35 +91,43 @@ export class IntelligentPlanner implements Planner<IntelligentPlannerTask> {
   async createPlan(context: PlannerRunContext): Promise<PlanDraft<IntelligentPlannerTask>> {
     const intent = await this.intentResolver.resolve(context)
     const createdAt = this.clock()
-    const coreSegment = await this.buildPrdCoreSegment(context)
+    const requiresPrdCore = this.intentRequiresPrd(intent)
+    const coreSegment = requiresPrdCore ? await this.buildPrdCoreSegment(context) : null
+    const initialArtifactKind = this.resolveInitialArtifactKind(intent, context, requiresPrdCore)
     const transitions = await this.buildTransitionSegments({
       intent,
-      dependsOn: coreSegment.terminalNodeId
+      dependsOn: coreSegment?.terminalNodeId,
+      initialArtifactKind
     })
 
     const planNodes: Record<string, PlanNode<IntelligentPlannerTask>> = {
-      ...coreSegment.nodes,
+      ...(coreSegment?.nodes ?? {}),
       ...transitions.nodes
     }
+
+    const entryId = coreSegment?.entryId ?? transitions.entryNodeId ?? transitions.terminalNodeId
+    if (!entryId) {
+      throw new Error('Planner could not build a runnable plan for the requested intent')
+    }
+
+    const terminalNodeId = transitions.terminalNodeId ?? coreSegment?.terminalNodeId ?? entryId
 
     const plan: PlanGraph<IntelligentPlannerTask> = {
       id: `plan-${context.runId}`,
       artifactKind: intent.targetArtifact ?? context.request.artifactKind ?? this.defaultArtifactKind,
-      entryId: coreSegment.entryId,
+      entryId,
       createdAt,
       version: PLAN_VERSION,
       nodes: planNodes,
       metadata: {
         planner: 'intelligent',
         requestedArtifactKind: intent.targetArtifact,
-        requestedSections: coreSegment.requestedSections,
+        requestedSections: coreSegment?.requestedSections ?? [],
         skillPacks: this.skillPackIds,
-        skills: {
-          sequence: this.buildSkillSequence(coreSegment.requestedSections)
-        },
+        skills: coreSegment ? { sequence: this.buildSkillSequence(coreSegment.requestedSections) } : undefined,
         subagents: transitions.summaries,
         intermediateArtifacts: Array.from(
-          new Set([...coreSegment.intermediateArtifacts, ...transitions.transitionPath])
+          new Set([...(coreSegment?.intermediateArtifacts ?? []), ...transitions.transitionPath])
         ),
         requestedArtifacts: intent.requestedArtifacts,
         intentConfidence: intent.confidence,
@@ -305,24 +314,29 @@ export class IntelligentPlanner implements Planner<IntelligentPlannerTask> {
 
   private async buildTransitionSegments(params: {
     intent: ArtifactIntent
-    dependsOn: string
+    dependsOn: string | undefined
+    initialArtifactKind?: ArtifactKind
   }): Promise<SubagentPlanResult> {
     const entries = await this.collectSubagentEntries()
     if (entries.length === 0) {
       return {
         nodes: {},
         summaries: [],
-        terminalNodeId: params.dependsOn,
-        transitionPath: [this.defaultArtifactKind]
+        terminalNodeId: params.dependsOn ?? '',
+        entryNodeId: params.dependsOn,
+        transitionPath: [params.initialArtifactKind ?? this.defaultArtifactKind]
       }
     }
 
     const nodes: Record<string, PlanNode<IntelligentPlannerTask>> = {}
     const summaries: SubagentPlanResult['summaries'] = []
-    const transitionPath: ArtifactKind[] = [this.defaultArtifactKind]
+    const transitionPath: ArtifactKind[] = [
+      params.initialArtifactKind ?? this.defaultArtifactKind
+    ]
 
     let currentNodeId = params.dependsOn
-    let currentArtifact: ArtifactKind = this.defaultArtifactKind
+    let currentArtifact: ArtifactKind = transitionPath[transitionPath.length - 1]
+    let entryNodeId: string | undefined
     const transitions = this.normalizeTransitions(params.intent)
 
     transitions.forEach(transition => {
@@ -338,6 +352,7 @@ export class IntelligentPlanner implements Planner<IntelligentPlannerTask> {
       }
 
       const nodeId = this.toSubagentNodeId(entry.id)
+      const dependsOn = currentNodeId ? [currentNodeId] : []
       nodes[nodeId] = {
         id: nodeId,
         label: entry.label ?? `Run ${entry.id}`,
@@ -346,7 +361,7 @@ export class IntelligentPlanner implements Planner<IntelligentPlannerTask> {
           agentId: entry.id
         },
         status: 'pending',
-        dependsOn: [currentNodeId],
+        dependsOn,
         inputs: {
           fromArtifact: fromArtifact
         },
@@ -361,6 +376,10 @@ export class IntelligentPlanner implements Planner<IntelligentPlannerTask> {
           promoteResult: entry.creates === params.intent.targetArtifact,
           tags: entry.tags
         }
+      }
+
+      if (!entryNodeId) {
+        entryNodeId = nodeId
       }
 
       summaries.push({
@@ -378,7 +397,8 @@ export class IntelligentPlanner implements Planner<IntelligentPlannerTask> {
     return {
       nodes,
       summaries,
-      terminalNodeId: currentNodeId,
+      terminalNodeId: currentNodeId ?? params.dependsOn ?? entryNodeId ?? '',
+      entryNodeId,
       transitionPath
     }
   }
@@ -388,13 +408,19 @@ export class IntelligentPlanner implements Planner<IntelligentPlannerTask> {
       return intent.transitions
     }
 
-    const chain = intent.requestedArtifacts.length > 0
-      ? intent.requestedArtifacts
-      : [intent.targetArtifact ?? this.defaultArtifactKind]
+    const chain =
+      intent.requestedArtifacts.length > 0
+        ? intent.requestedArtifacts
+        : [intent.targetArtifact ?? this.defaultArtifactKind]
 
     const transitions: ArtifactTransition[] = []
-    let previous: ArtifactKind = this.defaultArtifactKind
+    let previous: ArtifactKind | undefined
     chain.forEach(artifact => {
+      if (previous === undefined) {
+        transitions.push({ toArtifact: artifact })
+        previous = artifact
+        return
+      }
       if (artifact === previous) {
         return
       }
@@ -454,5 +480,44 @@ export class IntelligentPlanner implements Planner<IntelligentPlannerTask> {
 
   private toSubagentNodeId(subagentId: string): string {
     return `subagent-${subagentId.replace(/[^a-zA-Z0-9._-]+/g, '-')}`
+  }
+
+  private intentRequiresPrd(intent: ArtifactIntent): boolean {
+    const transitions = this.normalizeTransitions(intent)
+    if (intent.targetArtifact === this.defaultArtifactKind) {
+      return true
+    }
+
+    return transitions.some(
+      transition =>
+        transition.toArtifact === this.defaultArtifactKind ||
+        transition.fromArtifact === this.defaultArtifactKind
+    )
+  }
+
+  private resolveInitialArtifactKind(
+    intent: ArtifactIntent,
+    context: PlannerRunContext,
+    hasPrdSegment: boolean
+  ): ArtifactKind {
+    if (hasPrdSegment) {
+      return this.defaultArtifactKind
+    }
+
+    const transitions = this.normalizeTransitions(intent)
+    const firstTransition = transitions[0]
+    if (firstTransition?.fromArtifact) {
+      return firstTransition.fromArtifact
+    }
+
+    if (context.request.artifactKind && context.request.artifactKind !== this.defaultArtifactKind) {
+      return context.request.artifactKind
+    }
+
+    if (intent.targetArtifact && intent.targetArtifact !== this.defaultArtifactKind) {
+      return 'prompt'
+    }
+
+    return this.defaultArtifactKind
   }
 }
