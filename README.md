@@ -1,4 +1,4 @@
-# Product Agents Monorepo
+# Product Agents Monorepo [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/eabait/product-agents)
 
 A turborepo containing multiple AI agents for product development tasks. The most complete agent today is the PRD (Product Requirements Document) agent, which includes:
 - Backend HTTP API (TypeScript/Node)
