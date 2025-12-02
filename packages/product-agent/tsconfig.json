@@ -1,0 +1,21 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "noEmit": false,
+    "composite": true,
+    "declaration": true,
+    "declarationMap": true,
+    "emitDeclarationOnly": true,
+    "moduleResolution": "bundler",
+    "module": "esnext",
+    "baseUrl": ".",
+    "paths": {
+      "@product-agents/agent-core": ["./src/types/external.d.ts"],
+      "@product-agents/prd-shared": ["./src/types/external.d.ts"],
+      "@product-agents/skills-prd": ["./src/types/external.d.ts"]
+    }
+  },
+  "include": ["src"]
+}

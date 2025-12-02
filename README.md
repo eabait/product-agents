@@ -17,21 +17,42 @@ Included tooling (already managed via workspaces):
 - Turbo (turborepo)
 - TypeScript
 - ESLint
+- npm workspaces (pnpm/yarn not required)
 
 
 ## Repository Structure
 ```
+apps/
+├─ api/                    # Thin HTTP/SSE server backed by @product-agents/product-agent
+
+frontend/
+├─ product-agent/          # Next.js UI and proxy API routes
+
 packages/
-├─ prd-agent/              # PRD agent (most complete)
-│  ├─ agent/               # Backend HTTP server
-│  └─ frontend/            # Next.js UI and API routes (proxy to backend)
-├─ shared/
-│  ├─ agent-core/          # Base agent classes/utilities
-│  ├─ model-compatibility/ # Model capability system
-│  ├─ openrouter-client/   # OpenRouter + Vercel AI SDK client
-│  └─ ui-components/       # Reusable React components
-└─ (other agents scaffolds)
+├─ product-agent/          # Deep agent orchestrator core
+├─ skills/prd/             # PRD skill pack (analyzers, section writers)
+├─ shared/*                # Agent core, model compatibility, PRD schemas, UI kit, etc.
+└─ (other agent scaffolds)
 ```
+
+### Deep Agent Architecture (high level flow)
+```
+┌────────────────┐      HTTPS/SSE       ┌─────────────────────────┐       Skill packs / shared libs
+│  Frontend UI   │ ───────────────────▶ │        apps/api         │ ─────────────────────────────────▶ @product-agents/skills-prd
+│ (Next.js 14)   │ ◀─────────────────── │  (thin controller host) │ ◀─────────────────────────────────▶ @product-agents/shared/*
+└────────────────┘    streaming events  └─────────────────────────┘
+                                │
+                                │ invokes
+                                ▼
+                      ┌───────────────────────────┐
+                      │ packages/product-agent    │
+                      │ (planner → execute graph) │
+                      └───────────────────────────┘
+```
+- `frontend/product-agent` only speaks to the thin API (start/run/stream).  
+- `apps/api` loads `product-agent.config.ts`, registers skill packs, and proxies progress events.  
+- `packages/product-agent` composes planners, skill runners, verifiers, workspace DAO, and subagents.  
+- `packages/skills/prd` + `packages/shared/*` provide the analyzers, section writers, and schemas consumed by the controller.
 
 
 ## Environment Variables and API Keys
@@ -40,21 +61,19 @@ The project integrates with OpenRouter for AI models. You need an OpenRouter API
 Where to obtain: Create an account and key at openrouter.ai (do not commit your key).
 
 Recommended local setup files:
-- Backend: `packages/prd-agent/agent/.env`
-- Frontend: `packages/prd-agent/frontend/.env.local`
+- Backend: `apps/api/.env`
+- Frontend: `frontend/product-agent/.env.local`
 
 Required/optional variables by component:
 
-Backend HTTP API (`packages/prd-agent/agent/.env`)
+Backend HTTP API (`apps/api/.env`)
 - `OPENROUTER_API_KEY`: REQUIRED unless passed per-request in settings
-- `PRD_AGENT_HTTP_HOST`: Optional, default `0.0.0.0`
-- `PRD_AGENT_HTTP_PORT`: Optional, default `3001`
-- `PRD_AGENT_MODEL`: Optional, default `anthropic/claude-3-7-sonnet`
-- `PRD_AGENT_TEMPERATURE`: Optional, default from server constants
-- `PRD_AGENT_MAX_TOKENS`: Optional, default from server constants
+- `PRODUCT_AGENT_API_HOST`: Optional, default `0.0.0.0`
+- `PRODUCT_AGENT_API_PORT`: Optional, default `3001`
 - `PRD_AGENT_CHANGE_WORKER_TEMPERATURE`: Optional, tuning edit worker
+- Any overrides supported by `product-agent.config.ts` (model, temperature, skill packs, workspace paths, etc.)
 
-Frontend (`packages/prd-agent/frontend/.env.local`)
+Frontend (`frontend/product-agent/.env.local`)
 - `PRD_AGENT_URL`: REQUIRED, e.g. `http://localhost:3001`
 - `OPENROUTER_API_KEY`: Optional (server-side fetch for models)
 - `YOUR_SITE_URL`: Optional, used as `HTTP-Referer` for OpenRouter models API
@@ -65,6 +84,21 @@ Security notes:
 - Do not commit real API keys. `.env*` files are gitignored.
 - Keys can also be supplied per-request in payloads if preferred.
 
+## Configuration & Overrides
+- **Source of truth:** `packages/product-agent/src/config/product-agent.config.ts`
+- **Defaults:** `loadProductAgentConfig()` loads runtime/workspace/skills/telemetry defaults (model, retries, storage root, enabled skill packs, log level).
+- **Env overrides (server-wide):**
+
+| Scope | Environment variable | Description |
+| --- | --- | --- |
+| Runtime | `PRODUCT_AGENT_MODEL`, `PRODUCT_AGENT_TEMPERATURE`, `PRODUCT_AGENT_MAX_OUTPUT_TOKENS`, `PRODUCT_AGENT_ALLOW_STREAMING`, `PRODUCT_AGENT_FALLBACK_MODEL`, `PRODUCT_AGENT_RETRY_ATTEMPTS`, `PRODUCT_AGENT_RETRY_BACKOFF_MS` | Define default model + sampling + retry behaviour. |
+| Workspace | `PRODUCT_AGENT_WORKSPACE_ROOT`, `PRODUCT_AGENT_WORKSPACE_PERSIST`, `PRODUCT_AGENT_WORKSPACE_RETENTION_DAYS`, `PRODUCT_AGENT_WORKSPACE_TEMP_SUBDIR` | Control filesystem storage path/retention. |
+| Skills | `PRODUCT_AGENT_SKILL_PACKS`, `PRODUCT_AGENT_ALLOW_DYNAMIC_SKILLS` | Choose skill packs and whether per-run overrides are allowed. |
+| Telemetry | `PRODUCT_AGENT_TELEMETRY_STREAM`, `PRODUCT_AGENT_TELEMETRY_METRICS`, `PRODUCT_AGENT_TELEMETRY_LOG_LEVEL`, `PRODUCT_AGENT_TELEMETRY_THROTTLE_MS` | Toggle streaming + metrics + logging detail. |
+
+- **API overrides (per run):** `model`, `temperature`, `maxOutputTokens`, `skillPackId`, `additionalSkillPacks`, `workspaceRoot`, `logLevel` — validated against `ProductAgentApiOverrideSchema`.
+- **Backend host overrides:** `PRODUCT_AGENT_API_HOST`, `PRODUCT_AGENT_API_PORT` live in `apps/api/.env` alongside `OPENROUTER_API_KEY`.
+- See `docs/deep-agent-refactor/phase5-changelog.md` for a concise summary of the API/env deltas introduced during Phase 5.
 
 ## Install
 From repository root:
@@ -72,22 +106,24 @@ From repository root:
 npm install
 ```
 
+> ℹ️ This repo is configured for npm workspaces only. pnpm/yarn workspace commands are unsupported in this environment.
+
 
 ## Running Locally (recommended dev flow)
 Use two terminals: one for the backend HTTP API and one for the frontend.
 
 1) Start the Backend HTTP API
 ```
-cd packages/prd-agent/agent
+cd apps/api
 # Create and populate .env with your keys/settings (see above)
-# Then start the HTTP server
-npm run start-http
+npm run dev        # watch mode
+# or npm run start # runs the built server
 # => listens on http://0.0.0.0:3001 by default
 ```
 
 2) Start the Frontend (Next.js)
 ```
-cd packages/prd-agent/frontend
+cd frontend/product-agent
 # Create .env.local with at least:
 # PRD_AGENT_URL=http://localhost:3001
 # (Optionally OPENROUTER_API_KEY, YOUR_SITE_URL, YOUR_SITE_NAME)
@@ -96,7 +132,7 @@ npm run dev
 ```
 
 Alternative: run dev scripts via turborepo
-- From root: `npm run dev` starts all available `dev` scripts (e.g., the frontend). The backend HTTP server uses `start-http`, so run it in a separate terminal as shown above.
+- From root: `npm run dev` starts all available `dev` scripts (e.g., the frontend). Start `apps/api` separately so it can stream logs clearly.
 
 
 ## Backend HTTP API
@@ -144,27 +180,34 @@ Ensure `PRD_AGENT_URL` points to your running backend, and set `OPENROUTER_API_K
 Root (turborepo):
 - `npm run dev` — turbo run dev (frontend only by default)
 - `npm run build` — turbo run build for all packages
-- `npm run test` — turbo run test
-- `npm run lint` — turbo run lint
+- `npm run test` — turbo run test (runs every workspace’s test suite)
+- `npm run lint` — turbo run lint (runs every workspace’s lint task)
+- `npm run lint:fix` — turbo run lint:fix (applies auto-fixes where available)
 - `npm run clean` — clean build outputs
 
-PRD Agent workspaces:
-- `packages/prd-agent/agent`: `npm run start-http`, `npm run build`, `npm run dev` (build watch), `npm run test`
-- `packages/prd-agent/frontend`: `npm run dev`, `npm run build`, `npm run start`, `npm run lint`
-- `packages/prd-agent/mcp-server`: `npm run build`, `npm run dev`
+Validating changes locally:
+- Run `npm run lint` from the repo root to execute all lint jobs; use `npm run lint:fix` to apply safe fixes.
+- Run `npm run test` from the repo root to execute the full workspace test matrix.
+- To validate a single package, scope the turbo run: e.g. `npx turbo run lint --filter=frontend/product-agent` or `npx turbo run test --filter=packages/product-agent`.
+
+Core workspaces:
+- `apps/api`: `npm run dev`, `npm run build`, `npm run start`
+- `packages/product-agent`: `npm run build`, `npm run test`
+- `frontend/product-agent`: `npm run dev`, `npm run build`, `npm run start`, `npm run lint`
 
 
-## MCP Server (optional)
+## Thin API Server
 ```
-cd packages/prd-agent/mcp-server
+cd apps/api
 npm run build
-# Binary available as `prd-agent-mcp` (see package bin). Integrate per your MCP host tooling.
+npm run start
+# or npm run dev for watch mode
 ```
 
 
 ## Troubleshooting
-- 404s from frontend API: Confirm `PRD_AGENT_URL` is set in `packages/prd-agent/frontend/.env.local`.
-- Backend errors about missing API key: Set `OPENROUTER_API_KEY` in `packages/prd-agent/agent/.env` or pass `settings.apiKey` in requests.
+- 404s from frontend API: Confirm `PRD_AGENT_URL` is set in `frontend/product-agent/.env.local`.
+- Backend errors about missing API key: Set `OPENROUTER_API_KEY` in `apps/api/.env` or pass `settings.apiKey` in requests.
 - Port conflicts: Change `PRD_AGENT_HTTP_PORT` or Next.js port (`PORT`) as needed.
 - Model list empty: Ensure `OPENROUTER_API_KEY` is set for frontend server-side or provide `x-api-key` header to `/api/models`.
 
@@ -172,4 +215,3 @@ npm run build
 ## Notes
 - This repo uses capability filtering to show models compatible with the agent’s requirements (e.g., structured output, streaming).
 - Do not expose secrets to the browser. Prefer server-side env vars or per-request headers.
-

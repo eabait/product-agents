@@ -14,7 +14,7 @@ A monorepo containing multiple AI agent applications for various product develop
 ### Key Packages Structure
 ```
 packages/
-├── prd-agent/           # Product Requirements Document agent (most complete)
+├── prd-agent/           # Product Requirements Document subagent + controller wrappers
 ├── persona-agent/       # User persona generation agent
 ├── research-agent/      # Research and analysis agent
 ├── story-generator-agent/   # Story generation
@@ -35,9 +35,9 @@ agent-name/
 │   ├── app/api/       # API routes (proxy to backend)
 │   ├── components/    # Agent-specific components
 │   └── lib/          # Utilities and schemas
-├── agent/             # Backend HTTP server
-│   └── src/          # Agent logic and HTTP endpoints
-└── mcp-server/        # Model Context Protocol integration
+├── agent/             # Domain-specific orchestration adapters
+│   └── src/          # Planner/skill wiring, legacy utilities
+└── (shared) apps/api/ # Thin HTTP/SSE API backed by @product-agents/product-agent
 ```
 
 ## Design Decisions
@@ -48,7 +48,7 @@ agent-name/
 
 **Communication Flow**:
 ```
-Frontend UI → Next.js API Routes → Backend HTTP Server → Agent Logic → LLM APIs
+Frontend UI → Next.js API Routes → apps/api (thin server) → Product Agent controller → LLM APIs
 ```
 
 **Key Design Patterns**:
@@ -65,10 +65,11 @@ POST /api/chat           // Main agent interaction
 GET  /api/agent-defaults // Agent configuration and capabilities
 GET  /api/models        // Compatible models filtered by agent requirements
 
-// Backend HTTP Server (Express)
+// Thin API server (apps/api)
 GET  /health           // Agent info, defaults, and health check
-POST /prd              // Create new PRD
-POST /prd/edit         // Edit existing PRD
+POST /runs             // Start a new agent run (streaming)
+GET  /runs/:runId      // Fetch run summary
+GET  /runs/:runId/stream // Stream progress/events/results
 ```
 
 #### Request/Response Format
@@ -149,6 +150,85 @@ The PRD agent uses an Orchestrator-Workers pattern with 6 specialized workers:
 4. **SolutionFrameworkWorker** - Designs solution approach
 5. **PRDSynthesisWorker** - Synthesizes final PRD document
 6. **ChangeWorker** - Handles PRD edits via JSON patches
+
+**PRD Subagent Package** – `@product-agents/prd-agent` now hosts the PRD-specific controller, planner, skill runner, verifier, and a registry-friendly subagent manifest. Orchestrators can call `createPrdAgentSubagent()` to run the full PRD pipeline as a single `SubagentLifecycle`, while other packages continue to import shared runtime/config utilities from `@product-agents/product-agent`.
+
+### Subagent Registry & Discovery
+
+To orchestrate multiple artifact generators without hardcoded imports, the product agent exposes a manifest-driven `SubagentRegistry`:
+
+- **Manifest contract:** `SubagentManifest` (id, package, version, label, description, `creates`, `consumes`, `capabilities`, `tags`, `entry`, optional `exportName`). Every subagent package exports both the manifest and a factory—for example `@product-agents/prd-agent` exports `prdAgentManifest` plus `createPrdAgentSubagent`.
+- **Configuration hooks:** `product-agent.config.ts` now includes a `subagents.manifests` array. Deployments can extend it with code or via the `PRODUCT_AGENT_SUBAGENTS` env var (JSON array of manifests). On boot, `apps/api` hydrates a registry from this config and hands it to `createPrdController`.
+- **Runtime usage:** The `GraphController` requests subagents from the registry based on the produced artifact kind (`filterByArtifact`) and lazily loads factories through dynamic `import()` (`createLifecycle`). Loading failures are surfaced as workspace + progress events so operators see misconfigured manifests.
+- **Discovery surface:** The `/health` endpoint emits the resolved manifest list (id, label, package, version, capabilities). The frontend `agent-defaults` route consumes that payload to decide which artifact toggles to render.
+
+**Adding a new subagent package**
+```ts
+// packages/story-mapper-agent/src/subagent.ts
+export const storyMapperManifest: SubagentManifest = {
+  id: 'story.mapper.agent',
+  package: '@product-agents/story-mapper-agent',
+  version: '0.1.0',
+  label: 'Story Mapper',
+  creates: 'story-map',
+  consumes: ['prd', 'persona'],
+  capabilities: ['plan', 'iterate'],
+  entry: '@product-agents/story-mapper-agent',
+  exportName: 'createStoryMapperSubagent'
+}
+export const createStoryMapperSubagent = (): SubagentLifecycle => ({ /* ... */ })
+```
+
+Register the manifest by extending `subagents.manifests` in config or setting:
+
+```bash
+export PRODUCT_AGENT_SUBAGENTS='[
+  {
+    "id":"story.mapper.agent",
+    "package":"@product-agents/story-mapper-agent",
+    "version":"0.1.0",
+    "label":"Story Mapper",
+    "creates":"story-map",
+    "consumes":["prd","persona"],
+    "capabilities":["plan","iterate"],
+    "entry":"@product-agents/story-mapper-agent",
+    "exportName":"createStoryMapperSubagent"
+  }
+]'
+```
+
+Once registered, the orchestrator can call `subagentRegistry.list()` (or rely on `/health`) to discover the capability and the graph controller will automatically load and execute it whenever a compatible upstream artifact is produced.
+
+### Intent-Aware Multi-Artifact Flow
+
+The Phase 6 planner upgrades introduce a consistent path from user prompt → intent classification → plan graph → artifact handoffs. Key integration points:
+
+1. **Request contract** – `apps/api` now accepts an optional `requestedArtifacts: string[]` field (mirrored in the frontend payload). The thin API normalizes those selections, stores an `intentPlan` on the `RunRequest`, and passes it to the controller.
+2. **Intent resolver** – `IntentClassifierSkill` (LLM-backed) inspects the concatenated conversation text plus explicit selections and returns `{ targetArtifact, chain, confidence, probabilities }`. The resolver caches this plan on `RunContext.metadata.intent`, so planners/subagents never re-classify.
+3. **Planner metadata** – `IntelligentPlanner` consumes the resolver output, builds the PRD core segment, and appends subagent nodes that match the requested transitions. It annotates `plan.metadata` with `requestedArtifacts`, `intentConfidence`, and a `transitionPath` array that the UI can render as an upcoming-artifacts ribbon.
+4. **Progress events + SSE** – The `GraphController` tracks artifacts per step/kind and emits `artifact.delivered` + `subagent.completed` events that include the transition payload (source artifact kind, destination kind, whether the result promotes to the run artifact). `apps/api` enriches SSE payloads with the full `plan.metadata.intent` and a lightweight preview of downstream artifacts so the frontend can gate persona/story map viewers without re-fetching storage.
+5. **Frontend guidance** – Until backend persistence for derived artifacts ships, the Next.js run store remains the source of truth. Each API request should resend the serialized upstream artifact context (PRD JSON, persona payload, etc.) so downstream subagents can consume it deterministically, even if the browser reloads.
+
+To request specific artifact combinations from the SDK or frontend, send:
+
+```ts
+await fetch('/api/chat', {
+  method: 'POST',
+  body: JSON.stringify({
+    artifactType: 'story-map',
+    requestedArtifacts: ['prd', 'persona', 'story-map'],
+    messages,
+    settings
+  })
+})
+```
+
+The SSE stream will emit `plan.created` with the classified intent plus `artifact.delivered` events showing each handoff. Consumers can watch `transitionPath` to render breadcrumbs like “PRD → Persona → Story map” and block persona/story-map viewers until their respective nodes complete. Completion payloads now also include a `subagents` array; each entry exposes the persona bundle (or other artifacts) plus the telemetry snapshot emitted by the runner (duration, sanitized prompt/response previews, which model produced it, and whether the heuristics kicked in). Frontends can reuse this payload instead of making a secondary persona request.
+
+**Persona agent controls**
+
+- `PERSONA_AGENT_FORCE_HEURISTIC=true` – Short-circuits the LLM runner and forces the deterministic personas. Handy for low-trust environments or live rollback.
+- Persona artifacts attach `metadata.extras.telemetry` so downstream consumers can plot latency, strategy (`llm` vs `heuristic`), and sanitized previews without logging the full prompt.
 
 ### 3. Settings and Configuration Management
 
@@ -267,23 +347,23 @@ npm run build
 npm install <package-name>
 
 # Install dependency in specific package
-npm install <package-name> -w packages/prd-agent/frontend
+npm install <package-name> -w frontend/product-agent
 npm install <package-name> -w packages/shared/ui-components
 
 # Install dev dependency in specific package  
-npm install <package-name> -D -w packages/prd-agent/agent
+npm install <package-name> -D -w apps/api
 
 # Install dependency in all frontend packages
-npm install <package-name> -w packages/prd-agent/frontend -w packages/persona-agent/frontend
+npm install <package-name> -w frontend/product-agent -w packages/persona-agent/frontend
 ```
 
 **Common Examples**:
 ```bash
 # Add a new React component library to all frontends
-npm install lucide-react -w packages/prd-agent/frontend -w packages/persona-agent/frontend
+npm install lucide-react -w frontend/product-agent -w packages/persona-agent/frontend
 
 # Add a backend utility to a specific agent
-npm install express-rate-limit -w packages/prd-agent/agent
+npm install express-rate-limit -w apps/api
 
 # Add a shared utility that all packages can use
 npm install lodash -w packages/shared/agent-core
@@ -298,6 +378,22 @@ npm install prettier -D
 - `npm run build` - Build all packages  
 - `npm run lint` - Run ESLint across all packages
 - `npm run clean` - Clean build artifacts
+
+### Deep Agent Architecture Cheat Sheet
+- **apps/api** – Thin HTTP/SSE layer. Loads `product-agent.config.ts`, exposes `/runs` + `/prd` endpoints, and enforces env overrides (`PRODUCT_AGENT_API_HOST/PORT`, OpenRouter keys).
+- **packages/product-agent** – Graph controller (`Plan → Execute → Verify → Deliver`), filesystem workspace DAO, planner/skill-runner/verifier adapters, subagent registry.
+- **packages/skills/prd** – Stateless analyzers + section writers used by the orchestrator via skill packs.
+- **frontend/product-agent** – Next.js UI that calls `/api/chat`, `/api/runs`, `/api/models`, etc. No direct orchestrator imports.
+
+### Config & Override Workflow
+1. **Default config** lives in `packages/product-agent/src/config/product-agent.config.ts`. Call `loadProductAgentConfig()` (apps/api already does this) to hydrate runtime/workspace/skills/telemetry defaults.
+2. **Environment overrides** (set in `apps/api/.env` or host env) include:
+   - Runtime: `PRODUCT_AGENT_MODEL`, `PRODUCT_AGENT_TEMPERATURE`, `PRODUCT_AGENT_MAX_OUTPUT_TOKENS`, `PRODUCT_AGENT_ALLOW_STREAMING`, `PRODUCT_AGENT_FALLBACK_MODEL`, `PRODUCT_AGENT_RETRY_ATTEMPTS`, `PRODUCT_AGENT_RETRY_BACKOFF_MS`
+   - Workspace: `PRODUCT_AGENT_WORKSPACE_ROOT`, `PRODUCT_AGENT_WORKSPACE_PERSIST`, `PRODUCT_AGENT_WORKSPACE_RETENTION_DAYS`, `PRODUCT_AGENT_WORKSPACE_TEMP_SUBDIR`
+   - Skills: `PRODUCT_AGENT_SKILL_PACKS`, `PRODUCT_AGENT_ALLOW_DYNAMIC_SKILLS`
+   - Telemetry: `PRODUCT_AGENT_TELEMETRY_STREAM`, `PRODUCT_AGENT_TELEMETRY_METRICS`, `PRODUCT_AGENT_TELEMETRY_LOG_LEVEL`, `PRODUCT_AGENT_TELEMETRY_THROTTLE_MS`
+3. **Per-run overrides** (API payloads) map to `ProductAgentApiOverrideSchema`: `model`, `temperature`, `maxOutputTokens`, `skillPackId`, `additionalSkillPacks`, `workspaceRoot`, `logLevel`.
+4. **Backend host overrides** use `PRODUCT_AGENT_API_HOST` / `PRODUCT_AGENT_API_PORT` in `apps/api/.env`.
 
 ## Key Technologies
 - **Frontend**: Next.js 14 (App Router), React 18, TypeScript, Tailwind CSS, shadcn/ui

@@ -1,0 +1,27 @@
+{
+  "name": "@product-agents/persona-agent",
+  "version": "0.1.0",
+  "description": "Persona builder subagent that derives personas from PRD context or prompts",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "eslint 'src/**/*.{ts,tsx}'",
+    "clean": "rm -rf dist",
+    "test": "node --test --loader ../../product-agent/tests/ts-loader.mjs tests/**/*.test.ts"
+  },
+  "dependencies": {
+    "@product-agents/prd-shared": "*",
+    "@product-agents/openrouter-client": "*",
+    "@product-agents/agent-core": "*",
+    "zod": "^3.23.8"
+  },
+  "peerDependencies": {
+    "@product-agents/product-agent": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

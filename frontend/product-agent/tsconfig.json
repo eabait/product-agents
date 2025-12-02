@@ -1,0 +1,61 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": false,
+    "noEmit": true,
+    "incremental": true,
+    "module": "esnext",
+    "esModuleInterop": true,
+    "moduleResolution": "node",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "allowImportingTsExtensions": true,
+    "jsx": "preserve",
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./*"],
+      "@product-agents/ui-components": ["../../packages/shared/ui-components/src"],
+      "@product-agents/agent-core": ["../../packages/shared/agent-core/src"],
+      "@product-agents/openrouter-client": ["../../packages/shared/openrouter-client/src"],
+      "@product-agents/product-agent": ["../../packages/product-agent/src"],
+      "@product-agents/product-agent/*": ["../../packages/product-agent/src/*"],
+      "@product-agents/prd-shared": ["../../packages/shared/prd-shared/src/index.ts"],
+      "@product-agents/prd-shared/*": ["../../packages/shared/prd-shared/src/*"],
+      "@product-agents/skills-prd": ["../../packages/skills/prd/src/index.ts"],
+      "@product-agents/skills-prd/*": ["../../packages/skills/prd/src/*"],
+      "@product-agents/skills-intent": ["../../packages/skills/intent/src/index.ts"],
+      "@product-agents/skills-intent/*": ["../../packages/skills/intent/src/*"],
+      "@product-agents/research-agent": ["../../packages/research-agent/agent/src"],
+      "@product-agents/research-agent/*": ["../../packages/research-agent/agent/src/*"],
+      "@product-agents/persona-agent": ["../../packages/persona-agent/agent/src"],
+      "@product-agents/persona-agent/*": ["../../packages/persona-agent/agent/src/*"],
+      "@product-agents/story-mapper-agent": ["../../packages/story-mapper-agent/agent/src"],
+      "@product-agents/story-mapper-agent/*": ["../../packages/story-mapper-agent/agent/src/*"],
+      "@product-agents/story-generator-agent": ["../../packages/story-generator-agent/agent/src"],
+      "@product-agents/story-generator-agent/*": ["../../packages/story-generator-agent/agent/src/*"],
+      "@product-agents/story-refiner-agent": ["../../packages/story-refiner-agent/agent/src"],
+      "@product-agents/story-refiner-agent/*": ["../../packages/story-refiner-agent/agent/src/*"]
+    }
+  },
+  "include": [
+    "next-env.d.ts",
+    ".next/types/**/*.ts",
+    "**/*.ts",
+    "**/*.tsx"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}

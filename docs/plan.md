@@ -61,38 +61,34 @@ product-agents/                    # Monorepo root
 │   ├── prd-agent/
 │   │   ├── agent/                  # Core agent logic
 │   │   ├── frontend/               # Next.js test frontend
-│   │   ├── mcp-server/             # MCP server wrapper
 │   │   └── package.json
 │   │
 │   ├── research-agent/
 │   │   ├── agent/
 │   │   ├── frontend/
-│   │   ├── mcp-server/
 │   │   └── package.json
 │   │
 │   ├── persona-agent/
 │   │   ├── agent/
 │   │   ├── frontend/
-│   │   ├── mcp-server/
 │   │   └── package.json
 │   │
 │   ├── story-mapper-agent/
 │   │   ├── agent/
 │   │   ├── frontend/
-│   │   ├── mcp-server/
 │   │   └── package.json
 │   │
 │   ├── story-generator-agent/
 │   │   ├── agent/
 │   │   ├── frontend/
-│   │   ├── mcp-server/
 │   │   └── package.json
 │   │
 │   └── story-refiner-agent/
 │       ├── agent/
 │       ├── frontend/
-│       ├── mcp-server/
 │       └── package.json
+├── apps/
+│   └── api/                       # Shared thin HTTP/SSE API backed by @product-agents/product-agent
 ├── turbo.json                      # Turborepo config
 └── package.json
 ```
@@ -544,7 +540,7 @@ export class OpenRouterClient {
 
 ### Agent Core
 ```typescript
-// packages/prd-agent/agent/src/index.ts
+// packages/product-agent/src/compositions/prd-controller.ts (simplified illustration)
 import { z } from 'zod'
 import { OpenRouterClient } from '@product-agents/openrouter-client'
 
@@ -680,29 +676,27 @@ export class PRDGeneratorAgent {
 
 ### Frontend Implementation
 ```typescript
-// packages/prd-agent/frontend/app/page.tsx
+// frontend/product-agent/app/page.tsx
 'use client'
 
 import { useState } from 'react'
-import { ChatUI, SettingsPanel } from '@product-agents/ui-components'
-import { PRDGeneratorAgent } from '@product-agents/prd-agent'
 import { v4 as uuidv4 } from 'uuid'
+
+import { ChatUI, SettingsPanel } from '@product-agents/ui-components'
+import { startRun } from '@/lib/run-client' // wraps the thin API in apps/api
 
 export default function PRDAgentPage() {
   const [messages, setMessages] = useState<Message[]>([])
   const [isProcessing, setIsProcessing] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [settings, setSettings] = useState({
-    model: 'openai/gpt-4-turbo',
+    model: 'anthropic/claude-3-7-sonnet',
     temperature: 0.3,
-    maxTokens: 4000,
+    maxTokens: 8000,
     apiKey: ''
   })
   
-  const [agent] = useState(() => new PRDGeneratorAgent(settings))
-  
   const handleSendMessage = async (message: string) => {
-    // Add user message
     const userMessage = {
       id: uuidv4(),
       role: 'user' as const,
@@ -714,14 +708,25 @@ export default function PRDAgentPage() {
     setIsProcessing(true)
     
     try {
-      // Process with agent
-      const response = await agent.chat(message)
+      const runResult = await startRun({
+        messages: [
+          ...messages,
+          {
+            id: userMessage.id,
+            role: 'user' as const,
+            content: message,
+            timestamp: userMessage.timestamp
+          }
+        ],
+        settings
+      })
+      const artifact = (runResult.result as any)?.artifact ?? runResult.result
       
       // Add assistant response
       const assistantMessage = {
         id: uuidv4(),
         role: 'assistant' as const,
-        content: formatPRDResponse(response),
+        content: formatPRDResponse(artifact),
         timestamp: new Date(),
         metadata: {
           model: settings.model,
@@ -895,49 +900,44 @@ ${prd.assumptions.map(a => `- ${a}`).join('\n')}`
 
 ```bash
 # Development mode for PRD Agent
-cd packages/prd-agent/frontend
+cd frontend/product-agent
 npm run dev
 # Opens at http://localhost:3000
 
-# Build and run as standalone
-cd packages/prd-agent
+# Build and run backend API
+cd apps/api
 npm run build
 npm start
-# Serves complete agent with frontend
-
-# Run as MCP server
-npx @product-agents/prd-agent mcp
+# Serves the thin API at http://localhost:3001
 
 # Use in code
-import { PRDGeneratorAgent } from '@product-agents/prd-agent'
-const agent = new PRDGeneratorAgent({ apiKey: 'sk-or-...' })
+import { loadProductAgentConfig } from '@product-agents/product-agent'
+import { createPrdController } from '@product-agents/prd-agent'
+const controller = createPrdController({ config: loadProductAgentConfig() })
 ```
 
 ### Package.json Structure
 
 ```json
 {
-  "name": "@product-agents/prd-agent",
-  "version": "1.0.0",
+  "name": "@product-agents/product-agent",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "exports": {
-    ".": "./dist/agent/index.js",
-    "./mcp": "./dist/mcp-server/index.js"
-  },
-  "bin": {
-    "prd-agent": "./bin/cli.js",
-    "prd-agent-mcp": "./bin/mcp-server.js"
+    ".": "./dist/index.js"
   },
   "scripts": {
-    "dev": "npm run dev --workspace=frontend",
-    "build": "turbo run build",
-    "test": "vitest",
-    "start": "npm run start --workspace=frontend"
+    "build": "tsc -p tsconfig.build.json",
+    "test": "node --test --loader ./tests/ts-loader.mjs \"tests/**/*.test.ts\"",
+    "lint": "eslint \"src/**/*.{ts,tsx}\""
   },
-  "workspaces": [
-    "agent",
-    "frontend",
-    "mcp-server"
-  ]
+  "dependencies": {
+    "@product-agents/agent-core": "*",
+    "@product-agents/skills-prd": "*",
+    "zod": "^3.25.76"
+  }
 }
 ```
 

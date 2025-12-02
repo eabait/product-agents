@@ -1,0 +1,24 @@
+{
+  "name": "@product-agents/product-agent",
+  "version": "0.1.0",
+  "description": "Core orchestrator package for the deep product agent",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "lint": "eslint 'src/**/*.{ts,tsx}'",
+    "clean": "rm -rf dist",
+    "test": "node --test --loader ./tests/ts-loader.mjs tests/**/*.test.ts"
+  },
+  "dependencies": {
+    "@product-agents/agent-core": "*",
+    "@product-agents/skills-intent": "*",
+    "@product-agents/skills-prd": "*",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

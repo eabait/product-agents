@@ -50,3 +50,6 @@ repomix-output.xml
 
 # Playwright
 **/test-results/
+
+# Generated agent runtime data
+apps/api/data/
