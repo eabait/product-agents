@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { generateText, type ToolCallOptions } from 'ai'
 
 import type {
   AgentController,
@@ -18,6 +19,8 @@ import type { Planner } from '../contracts/planner'
 import type { ClarificationResult } from '@product-agents/prd-shared'
 import type { SubagentLifecycle, SubagentRunSummary } from '../contracts/subagent'
 import type { SubagentRegistry } from '../subagents/subagent-registry'
+import { createOpenRouterProvider, resolveOpenRouterModel } from '../providers/openrouter-provider'
+import { createSkillTool, createSubagentTool, type ToolExecutionResult } from '../ai/tool-adapters'
 
 type Clock = () => Date
 
@@ -29,6 +32,8 @@ interface GraphControllerOptions {
     tempSubdir?: string
   }
   subagentRegistry?: SubagentRegistry
+  providerFactory?: (apiKey?: string) => ReturnType<typeof createOpenRouterProvider>
+  toolInvoker?: typeof generateText
 }
 
 interface ExecutionContext {
@@ -164,6 +169,8 @@ export class GraphController implements AgentController {
   private readonly workspaceOverrides?: GraphControllerOptions['workspaceOverrides']
   private readonly verifierGroup: ControllerComposition['verifier']
   private readonly runSummaries = new Map<string, ControllerRunSummary>()
+  private readonly providerFactory: NonNullable<GraphControllerOptions['providerFactory']>
+  private readonly toolInvoker: NonNullable<GraphControllerOptions['toolInvoker']>
 
   constructor(
     composition: ControllerComposition,
@@ -181,6 +188,9 @@ export class GraphController implements AgentController {
     this.clock = options?.clock ?? (() => new Date())
     this.idFactory = options?.idFactory ?? (() => randomUUID())
     this.workspaceOverrides = options?.workspaceOverrides
+    this.providerFactory =
+      options?.providerFactory ?? ((apiKey?: string) => createOpenRouterProvider(config, { apiKey }))
+    this.toolInvoker = options?.toolInvoker ?? generateText
   }
 
   async start<TInput, TArtifact>(
@@ -271,7 +281,7 @@ export class GraphController implements AgentController {
     }
 
     try {
-      await this.executePlan(executionContext, options)
+      await this.executePlanWithAiTools(executionContext, options)
 
       if (executionContext.status === STATUS_AWAITING_INPUT) {
         // Skip verification; run awaits user clarification input
@@ -354,14 +364,48 @@ export class GraphController implements AgentController {
     return summary as ControllerRunSummary<TArtifact>
   }
 
-  private async executePlan(
+  private resolveApiKey(runContext: RunContext): string | undefined {
+    const attributeKey =
+      typeof runContext.request.attributes?.apiKey === 'string'
+        ? (runContext.request.attributes.apiKey as string)
+        : undefined
+
+    const input = runContext.request.input as Record<string, unknown> | undefined
+    const settingsKey =
+      typeof input?.settings === 'object' && input?.settings
+        ? (input.settings as Record<string, unknown>).apiKey
+        : undefined
+
+    const sanitizedSettingsKey =
+      typeof settingsKey === 'string' && settingsKey.trim().length > 0
+        ? settingsKey
+        : undefined
+
+    const envKey =
+      typeof process.env.OPENROUTER_API_KEY === 'string' &&
+      process.env.OPENROUTER_API_KEY.trim().length > 0
+        ? process.env.OPENROUTER_API_KEY
+        : undefined
+
+    return attributeKey ?? sanitizedSettingsKey ?? envKey
+  }
+
+  private async executePlanWithAiTools(
     context: ExecutionContext,
     options?: ControllerStartOptions
   ): Promise<void> {
+    const apiKey = this.resolveApiKey(context.runContext)
+    const hasApiKey = typeof apiKey === 'string' && apiKey.trim().length > 0
+    const provider = this.providerFactory(apiKey)
+    const model = hasApiKey
+      ? resolveOpenRouterModel(provider, this.config, context.runContext.settings.model)
+      : undefined
     const orderedSteps = topologicallySortPlan(context.plan)
 
     for (const stepId of orderedSteps) {
       const node = context.plan.nodes[stepId]
+      const nodeKind = this.getPlanNodeKind(node)
+      const toolName = `node_${node.id}`
 
       emitEvent(
         options,
@@ -373,102 +417,109 @@ export class GraphController implements AgentController {
         })
       )
 
-      const nodeKind = this.getPlanNodeKind(node)
-      if (nodeKind === 'subagent') {
-        await this.executeSubagentStep(node, context, options)
-        continue
-      }
-
-      await this.workspace.appendEvent(
-        context.runContext.runId,
-        createWorkspaceEvent(context.runContext.runId, 'skill', {
-          action: 'start',
-          stepId,
-          label: node.label
-        })
-      )
-
-      try {
-        const result = await this.skillRunner.invoke({
-          skillId: (node.metadata?.skillId as string) ?? stepId,
-          planNode: node,
-          input: node.task,
-          context: {
-            run: context.runContext,
-            step: node,
-            abortSignal: options?.signal,
-            metadata: context.runContext.metadata
-          }
-        })
-
-        context.skillResults.push(result)
-        const artifactCandidate = (result.metadata as { artifact?: Artifact })?.artifact
-        if (artifactCandidate) {
-          context.artifact = artifactCandidate
-          this.trackArtifactForContext(stepId, artifactCandidate, context)
-          await this.workspace.writeArtifact(context.runContext.runId, artifactCandidate)
-          await this.workspace.appendEvent(
-            context.runContext.runId,
-            createWorkspaceEvent(context.runContext.runId, 'artifact', {
-              artifactId: artifactCandidate.id,
-              kind: artifactCandidate.kind,
-              version: artifactCandidate.version
-            })
-          )
-        emitEvent(
-          options,
-          toProgressEvent({
-            type: 'artifact.delivered',
-            runId: context.runContext.runId,
+      if (nodeKind === 'skill') {
+        await this.workspace.appendEvent(
+          context.runContext.runId,
+          createWorkspaceEvent(context.runContext.runId, 'skill', {
+            action: 'start',
             stepId,
-            payload: {
-              artifactId: artifactCandidate.id,
-              artifactKind: artifactCandidate.kind,
-              artifact: artifactCandidate
-            }
+            label: node.label
           })
         )
+      }
+
+      let lifecycle: SubagentLifecycle | undefined
+      if (nodeKind === 'subagent') {
+        const task = node.task as { agentId?: string; subagentId?: string } | undefined
+        const subagentId =
+          task?.agentId ?? task?.subagentId ?? (node.metadata?.subagentId as string | undefined)
+        if (!subagentId) {
+          throw new Error(`Subagent node "${node.id}" is missing a subagentId`)
         }
+        lifecycle = await this.getSubagentLifecycle(subagentId)
 
         emitEvent(
           options,
           toProgressEvent({
-            type: 'step.completed',
+            type: 'subagent.started',
             runId: context.runContext.runId,
-            stepId,
+            stepId: node.id,
             payload: {
-              skillId: (node.metadata?.skillId as string) ?? stepId,
-              metadata: result.metadata
-            }
+              subagentId,
+              artifactKind: lifecycle.metadata.artifactKind,
+              label: lifecycle.metadata.label
+            },
+            message: `${lifecycle.metadata.label ?? subagentId} started`
           })
         )
 
         await this.workspace.appendEvent(
           context.runContext.runId,
-          createWorkspaceEvent(context.runContext.runId, 'skill', {
-            action: 'complete',
-            stepId,
-            result: {
-              metadata: result.metadata,
-              confidence: result.confidence
-            }
+          createWorkspaceEvent(context.runContext.runId, 'subagent', {
+            action: 'start',
+            stepId: node.id,
+            subagentId,
+            artifactKind: lifecycle.metadata.artifactKind
           })
         )
+      }
 
-        const metadata = result.metadata as Record<string, unknown> | undefined
-        const runStatusOverride =
-          typeof metadata?.runStatus === 'string' ? (metadata.runStatus as RunStatus) : undefined
-        if (runStatusOverride === STATUS_AWAITING_INPUT) {
-          context.status = STATUS_AWAITING_INPUT
-          const clarification = metadata?.clarification as ClarificationResult | undefined
-          if (clarification) {
-            context.clarification = clarification
-            if (!context.runContext.metadata) {
-              context.runContext.metadata = {}
-            }
-            context.runContext.metadata.clarification = clarification
+      const tool =
+        nodeKind === 'subagent' && lifecycle
+          ? createSubagentTool({
+              node,
+              runContext: context.runContext,
+              resolveLifecycle: async () => lifecycle as SubagentLifecycle,
+              resolveSourceArtifact: lc => this.resolveSubagentSourceArtifact(lc, node, context),
+              emitProgress: event =>
+                emitEvent(
+                  options,
+                  toProgressEvent({
+                    type: 'subagent.progress',
+                    runId: context.runContext.runId,
+                    payload: {
+                      subagentId: lifecycle?.metadata.id,
+                      event
+                    }
+                  })
+                )
+            })
+          : createSkillTool({
+              node,
+              runContext: context.runContext,
+              skillRunner: this.skillRunner
+            })
+
+      try {
+        const toolResult = await this.invokeToolWithModel({
+          toolName,
+          tool,
+          model,
+          node,
+          context,
+          options,
+          hasApiKey
+        })
+
+        if (nodeKind === 'subagent') {
+          await this.handleSubagentToolResult({
+            result: toolResult,
+            node,
+            lifecycle: lifecycle as SubagentLifecycle,
+            context,
+            options
+          })
+        } else {
+          await this.handleSkillToolResult({
+            result: toolResult,
+            node,
+            stepId,
+            context,
+            options
+          })
+          if (context.status === STATUS_AWAITING_INPUT) {
+            break
           }
-          break
         }
       } catch (error) {
         emitEvent(
@@ -480,17 +531,285 @@ export class GraphController implements AgentController {
             message: error instanceof Error ? error.message : 'Step failed'
           })
         )
-        await this.workspace.appendEvent(
-          context.runContext.runId,
-          createWorkspaceEvent(context.runContext.runId, 'skill', {
-            action: 'failed',
-            stepId,
-            error: error instanceof Error ? error.message : String(error)
-          })
-        )
+
+        if (nodeKind === 'subagent' && lifecycle) {
+          const message = error instanceof Error ? error.message : String(error)
+          await this.workspace.appendEvent(
+            context.runContext.runId,
+            createWorkspaceEvent(context.runContext.runId, 'subagent', {
+              action: 'failed',
+              stepId,
+              subagentId: lifecycle.metadata.id,
+              error: message
+            })
+          )
+
+          const subagentId = lifecycle.metadata.id
+          this.recordSubagentFailureMetadata(
+            context,
+            subagentId,
+            message,
+            'plan'
+          )
+
+          emitEvent(
+            options,
+            toProgressEvent({
+              type: 'subagent.failed',
+              runId: context.runContext.runId,
+              stepId,
+              payload: {
+                subagentId,
+                error: message
+              },
+              message
+            })
+          )
+        } else {
+          await this.workspace.appendEvent(
+            context.runContext.runId,
+            createWorkspaceEvent(context.runContext.runId, 'skill', {
+              action: 'failed',
+              stepId,
+              error: error instanceof Error ? error.message : String(error)
+            })
+          )
+        }
+
         throw error
       }
     }
+  }
+
+  private async invokeToolWithModel(params: {
+    toolName: string
+    tool: unknown
+    model: unknown
+    node: PlanNode
+    context: ExecutionContext
+    options?: ControllerStartOptions
+    hasApiKey?: boolean
+  }): Promise<ToolExecutionResult> {
+    if (!params.hasApiKey || !params.model) {
+      return this.invokeToolDirectly(params.tool, params.node, params.context, params.options)
+    }
+
+    const response = await this.toolInvoker({
+      model: params.model as any,
+      system: this.buildToolSystemPrompt(params.context),
+      prompt: this.buildToolPrompt(params.context, params.node),
+      tools: {
+        [params.toolName]: params.tool as any
+      },
+      toolChoice: { type: 'tool', toolName: params.toolName },
+      maxOutputTokens: Math.min(params.context.runContext.settings.maxOutputTokens ?? 8000, 512),
+      temperature: params.context.runContext.settings.temperature,
+      maxRetries: this.config.runtime.retry.attempts,
+      abortSignal: params.options?.signal
+    })
+
+    const toolResult = response.toolResults[0]?.output as ToolExecutionResult | undefined
+    if (!toolResult) {
+      throw new Error(`Tool "${params.toolName}" did not return a result`)
+    }
+
+    return toolResult
+  }
+
+  private async invokeToolDirectly(
+    tool: unknown,
+    node: PlanNode,
+    context: ExecutionContext,
+    options?: ControllerStartOptions
+  ): Promise<ToolExecutionResult> {
+    const executable = tool as { execute?: (input: unknown, options: ToolCallOptions) => any }
+    if (typeof executable.execute !== 'function') {
+      throw new Error(`Tool for node "${node.id}" is missing an execute handler`)
+    }
+
+    const result = await executable.execute({}, {
+      abortSignal: options?.signal,
+      toolCallId: `direct-${node.id}`,
+      runId: context.runContext.runId
+    } as ToolCallOptions)
+
+    return result as ToolExecutionResult
+  }
+
+  private async handleSkillToolResult(params: {
+    result: ToolExecutionResult
+    node: PlanNode
+    stepId: StepId
+    context: ExecutionContext
+    options?: ControllerStartOptions
+  }): Promise<void> {
+    const { result, node, context, options, stepId } = params
+    const skillId = (node.metadata?.skillId as string) ?? node.id
+
+    if (result.skillResult) {
+      context.skillResults.push(result.skillResult)
+    }
+
+    const artifact = result.artifact
+    if (artifact) {
+      context.artifact = artifact
+      this.trackArtifactForContext(stepId, artifact, context)
+      await this.workspace.writeArtifact(context.runContext.runId, artifact)
+      await this.workspace.appendEvent(
+        context.runContext.runId,
+        createWorkspaceEvent(context.runContext.runId, 'artifact', {
+          artifactId: artifact.id,
+          kind: artifact.kind,
+          version: artifact.version
+        })
+      )
+
+      emitEvent(
+        options,
+        toProgressEvent({
+          type: 'artifact.delivered',
+          runId: context.runContext.runId,
+          stepId,
+          payload: {
+            artifactId: artifact.id,
+            artifactKind: artifact.kind,
+            artifact
+          }
+        })
+      )
+    }
+
+    emitEvent(
+      options,
+      toProgressEvent({
+        type: 'step.completed',
+        runId: context.runContext.runId,
+        stepId,
+        payload: {
+          skillId,
+          metadata: result.metadata
+        }
+      })
+    )
+
+    await this.workspace.appendEvent(
+      context.runContext.runId,
+      createWorkspaceEvent(context.runContext.runId, 'skill', {
+        action: 'complete',
+        stepId,
+        result: {
+          metadata: result.metadata,
+          confidence: result.confidence
+        }
+      })
+    )
+
+    const runStatusOverride =
+      result.status === STATUS_AWAITING_INPUT
+        ? STATUS_AWAITING_INPUT
+        : typeof result.metadata?.runStatus === 'string'
+          ? (result.metadata.runStatus as RunStatus)
+          : undefined
+
+    if (runStatusOverride === STATUS_AWAITING_INPUT) {
+      context.status = STATUS_AWAITING_INPUT
+      const clarification = result.metadata?.clarification as ClarificationResult | undefined
+      if (clarification) {
+        context.clarification = clarification
+        if (!context.runContext.metadata) {
+          context.runContext.metadata = {}
+        }
+        context.runContext.metadata.clarification = clarification
+      }
+    }
+  }
+
+  private async handleSubagentToolResult(params: {
+    result: ToolExecutionResult
+    node: PlanNode
+    lifecycle: SubagentLifecycle
+    context: ExecutionContext
+    options?: ControllerStartOptions
+  }): Promise<void> {
+    const { result, node, lifecycle, context, options } = params
+    const artifact = result.artifact
+    if (!artifact) {
+      throw new Error(`Subagent "${lifecycle.metadata.id}" did not return an artifact`)
+    }
+
+    const transitionPayload = this.buildTransitionPayload(node, artifact, context)
+
+    await this.workspace.writeArtifact(context.runContext.runId, artifact)
+    this.trackArtifactForContext(node.id, artifact, context)
+
+    const shouldPromote =
+      (node.metadata?.promoteResult as boolean | undefined) === true ||
+      artifact.kind === context.plan.artifactKind
+
+    if (shouldPromote || !context.artifact) {
+      context.artifact = artifact
+    }
+
+    context.subagentResults.push({
+      subagentId: lifecycle.metadata.id,
+      artifact,
+      metadata: result.metadata
+    })
+    this.recordSubagentArtifactMetadata(context, lifecycle.metadata.id, artifact, result.metadata)
+
+    await this.workspace.appendEvent(
+      context.runContext.runId,
+      createWorkspaceEvent(context.runContext.runId, 'subagent', {
+        action: 'complete',
+        stepId: node.id,
+        subagentId: lifecycle.metadata.id,
+        artifactId: artifact.id,
+        artifactKind: artifact.kind
+      })
+    )
+
+    emitEvent(
+      options,
+      toProgressEvent({
+        type: 'artifact.delivered',
+        runId: context.runContext.runId,
+        stepId: node.id,
+        payload: {
+          artifactId: artifact.id,
+          artifactKind: artifact.kind,
+          artifact,
+          transition: transitionPayload
+        }
+      })
+    )
+
+    emitEvent(
+      options,
+      toProgressEvent({
+        type: 'subagent.completed',
+        runId: context.runContext.runId,
+        stepId: node.id,
+        payload: {
+          subagentId: lifecycle.metadata.id,
+          artifactId: artifact.id,
+          artifactKind: artifact.kind,
+          transition: transitionPayload
+        },
+        message: `${lifecycle.metadata.label ?? lifecycle.metadata.id} completed`
+      })
+    )
+
+    emitEvent(
+      options,
+      toProgressEvent({
+        type: 'step.completed',
+        runId: context.runContext.runId,
+        stepId: node.id,
+        payload: {
+          subagentId: lifecycle.metadata.id
+        }
+      })
+    )
   }
 
   private async runVerification(
@@ -630,174 +949,58 @@ export class GraphController implements AgentController {
     }
   }
 
-  private getPlanNodeKind(node: PlanNode): 'skill' | 'subagent' {
-    return node.metadata?.kind === 'subagent' ? 'subagent' : 'skill'
+  private buildToolSystemPrompt(context: ExecutionContext): string {
+    const target = context.plan.artifactKind
+    return [
+      'You are the Product Agent orchestrator.',
+      'Use the provided tools to execute each plan step and return concise results.',
+      `Target artifact: ${target}.`,
+      'Always call the required tool and rely on the tool output instead of inventing content.'
+    ].join(' ')
   }
 
-  private async executeSubagentStep(
-    node: PlanNode,
-    context: ExecutionContext,
-    options?: ControllerStartOptions
-  ): Promise<void> {
-    const task = node.task as { kind?: string; agentId?: string; subagentId?: string } | undefined
-    const subagentId = task?.agentId ?? task?.subagentId ?? (node.metadata?.subagentId as string | undefined)
-    if (!subagentId) {
-      throw new Error(`Subagent node "${node.id}" is missing a subagentId`)
+  private buildToolPrompt(context: ExecutionContext, node: PlanNode): string {
+    const planMetadata = context.plan.metadata as
+      | {
+          transitionPath?: ArtifactKind[]
+          intent?: { requestedArtifacts?: ArtifactKind[]; targetArtifact?: ArtifactKind }
+        }
+      | undefined
+    const requested = planMetadata?.intent?.requestedArtifacts ?? planMetadata?.transitionPath ?? []
+    const requestedSummary = requested.length > 0 ? `Requested artifacts: ${requested.join(', ')}.` : ''
+    const dependencies =
+      node.dependsOn && node.dependsOn.length > 0
+        ? `Depends on: ${node.dependsOn.join(', ')}.`
+        : 'No dependencies.'
+    const userSummary = this.extractRunInputSummary(context.runContext.request.input)
+
+    return [
+      `Execute plan step "${node.label}" (id: ${node.id}).`,
+      dependencies,
+      requestedSummary,
+      userSummary ? `User input: ${userSummary}` : ''
+    ]
+      .filter(Boolean)
+      .join(' ')
+  }
+
+  private extractRunInputSummary(input: unknown): string {
+    if (!input) {
+      return ''
     }
-
-    const lifecycle = await this.getSubagentLifecycle(subagentId)
-    const sourceArtifact = this.resolveSubagentSourceArtifact(lifecycle, node, context)
-    if (!sourceArtifact) {
-      throw new Error(`Subagent "${subagentId}" requires a source artifact but none was available`)
+    const candidate = input as { message?: unknown }
+    if (typeof candidate?.message === 'string') {
+      return candidate.message
     }
-
-    emitEvent(
-      options,
-      toProgressEvent({
-        type: 'subagent.started',
-        runId: context.runContext.runId,
-        stepId: node.id,
-        payload: {
-          subagentId,
-          artifactKind: lifecycle.metadata.artifactKind,
-          label: lifecycle.metadata.label
-        },
-        message: `${lifecycle.metadata.label ?? subagentId} started`
-      })
-    )
-
-    await this.workspace.appendEvent(
-      context.runContext.runId,
-      createWorkspaceEvent(context.runContext.runId, 'subagent', {
-        action: 'start',
-        stepId: node.id,
-        subagentId,
-        artifactKind: lifecycle.metadata.artifactKind
-      })
-    )
-
     try {
-      const result = await lifecycle.execute({
-        params: (node.metadata?.params as Record<string, unknown>) ?? {},
-        run: context.runContext,
-        sourceArtifact,
-        emit: event =>
-          emitEvent(
-            options,
-            toProgressEvent({
-              type: 'subagent.progress',
-              runId: context.runContext.runId,
-              payload: {
-                subagentId,
-                event
-              }
-            })
-          )
-      })
-
-      const transitionPayload = this.buildTransitionPayload(node, result.artifact, context)
-
-      await this.workspace.writeArtifact(context.runContext.runId, result.artifact)
-      this.trackArtifactForContext(node.id, result.artifact, context)
-
-      const shouldPromote =
-        (node.metadata?.promoteResult as boolean | undefined) === true ||
-        result.artifact.kind === context.plan.artifactKind
-
-      if (shouldPromote || !context.artifact) {
-        context.artifact = result.artifact
-      }
-
-      context.subagentResults.push({
-        subagentId,
-        artifact: result.artifact,
-        metadata: result.metadata
-      })
-      this.recordSubagentArtifactMetadata(context, subagentId, result.artifact, result.metadata)
-
-      await this.workspace.appendEvent(
-        context.runContext.runId,
-        createWorkspaceEvent(context.runContext.runId, 'subagent', {
-          action: 'complete',
-          stepId: node.id,
-          subagentId,
-          artifactId: result.artifact.id,
-          artifactKind: result.artifact.kind
-        })
-      )
-
-      emitEvent(
-        options,
-        toProgressEvent({
-          type: 'artifact.delivered',
-          runId: context.runContext.runId,
-          stepId: node.id,
-          payload: {
-            artifactId: result.artifact.id,
-            artifactKind: result.artifact.kind,
-            artifact: result.artifact,
-            transition: transitionPayload
-          }
-        })
-      )
-
-      emitEvent(
-        options,
-        toProgressEvent({
-          type: 'subagent.completed',
-          runId: context.runContext.runId,
-          stepId: node.id,
-          payload: {
-            subagentId,
-            artifactId: result.artifact.id,
-            artifactKind: result.artifact.kind,
-            transition: transitionPayload
-          },
-          message: `${lifecycle.metadata.label ?? subagentId} completed`
-        })
-      )
-
-      emitEvent(
-        options,
-        toProgressEvent({
-          type: 'step.completed',
-          runId: context.runContext.runId,
-          stepId: node.id,
-          payload: {
-            subagentId
-          }
-        })
-      )
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Subagent failed'
-      this.recordSubagentFailureMetadata(context, subagentId, message, 'plan')
-
-      await this.workspace.appendEvent(
-        context.runContext.runId,
-        createWorkspaceEvent(context.runContext.runId, 'subagent', {
-          action: 'failed',
-          stepId: node.id,
-          subagentId,
-          error: message
-        })
-      )
-
-      emitEvent(
-        options,
-        toProgressEvent({
-          type: 'subagent.failed',
-          runId: context.runContext.runId,
-          stepId: node.id,
-          payload: {
-            subagentId,
-            error: message
-          },
-          message
-        })
-      )
-
-      throw error
+      return JSON.stringify(input)
+    } catch {
+      return ''
     }
+  }
+
+  private getPlanNodeKind(node: PlanNode): 'skill' | 'subagent' {
+    return node.metadata?.kind === 'subagent' ? 'subagent' : 'skill'
   }
 
   private resolveSubagentSourceArtifact(

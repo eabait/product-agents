@@ -9,7 +9,9 @@
     "start": "next start",
     "lint": "next lint",
     "lint:fix": "next lint --fix",
-    "clean": "rm -rf .next out dist"
+    "clean": "rm -rf .next out dist",
+    "test:e2e": "playwright test",
+    "test:e2e:live": "E2E_LIVE=1 playwright test tests/run-progress.e2e.spec.ts"
   },
   "dependencies": {
     "@product-agents/agent-core": "*",

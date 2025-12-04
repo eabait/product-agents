@@ -12,7 +12,7 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   reporter: reporters,
   use: {
-    baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:3000',
+    baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:3010',
     trace: 'on-first-retry',
   },
   projects: [
@@ -23,8 +23,8 @@ export default defineConfig({
   webServer: process.env.PLAYWRIGHT_NO_SERVER
     ? undefined
     : {
-        command: 'npm run start',
-        url: 'http://localhost:3000',
+        command: 'PORT=3010 HOSTNAME=127.0.0.1 npm run start',
+        url: 'http://127.0.0.1:3010',
         reuseExistingServer: !process.env.CI,
       },
 });

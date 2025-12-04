@@ -63,6 +63,8 @@ export const ProgressIndicator = memo(function ProgressIndicator({
   const steps = useMemo(() => convertEventsToSteps(events, filteredPlan), [events, filteredPlan]);
   const latestStep = useMemo(() => getLatestProgressStep(steps, isActive), [steps, isActive]);
   const orderedPlanNodes = useMemo(() => orderPlanNodes(filteredPlan), [filteredPlan]);
+  const hasPlanNodes = filteredPlan && Object.keys(filteredPlan.nodes).length > 0;
+  const isPrdArtifact = (filteredPlan?.artifactKind ?? 'prd') === 'prd';
 
   if (!isActive && steps.length === 0 && !plan) {
     return null;
@@ -139,7 +141,7 @@ export const ProgressIndicator = memo(function ProgressIndicator({
             transition={{ duration: 0.2 }}
           >
             <div className="border-t border-gray-200">
-              {plan && (
+              {plan && hasPlanNodes && (
                 <div className="border-b border-gray-200">
                   <button
                     className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-gray-50"
@@ -327,6 +329,7 @@ function convertEventsToSteps(events: AgentProgressEvent[], plan?: PlanGraphSumm
   const workerSteps = new Map<string, ProgressStep>();
   const sectionSteps = new Map<string, ProgressStep>();
   const nodeSteps = new Map<string, ProgressStep>();
+  const isPrdArtifact = (plan?.artifactKind ?? 'prd') === 'prd';
 
   const ensureNodeStep = (stepId: string, defaults: ProgressStep): ProgressStep => {
     const id = `node-${stepId}`;
@@ -449,6 +452,7 @@ function convertEventsToSteps(events: AgentProgressEvent[], plan?: PlanGraphSumm
         break;
 
       case 'worker_start':
+        if (!isPrdArtifact) break;
         if (event.payload?.worker || (event as any).worker) {
           const workerName = (event.payload?.worker as string) ?? ((event as any).worker as string);
           const step: ProgressStep = {
@@ -465,6 +469,7 @@ function convertEventsToSteps(events: AgentProgressEvent[], plan?: PlanGraphSumm
         break;
 
       case 'worker_complete':
+        if (!isPrdArtifact) break;
         if (event.payload?.worker || (event as any).worker) {
           const workerName = (event.payload?.worker as string) ?? ((event as any).worker as string);
           const existingStep = workerSteps.get(workerName);
@@ -477,6 +482,7 @@ function convertEventsToSteps(events: AgentProgressEvent[], plan?: PlanGraphSumm
         break;
 
       case 'section_start':
+        if (!isPrdArtifact) break;
         if ((event as any).section) {
           const sectionName = (event as any).section as string;
           const step: ProgressStep = {
@@ -493,6 +499,7 @@ function convertEventsToSteps(events: AgentProgressEvent[], plan?: PlanGraphSumm
         break;
 
       case 'section_complete':
+        if (!isPrdArtifact) break;
         if ((event as any).section) {
           const sectionName = (event as any).section as string;
           const existingStep = sectionSteps.get(sectionName);

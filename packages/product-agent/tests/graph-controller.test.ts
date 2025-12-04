@@ -256,3 +256,104 @@ test('GraphController executes inline subagent plan nodes without duplicate runs
     await fs.rm(workspaceRoot, { recursive: true, force: true })
   }
 })
+
+test('GraphController runs verifier after AI tool loop for PRD artifacts', async () => {
+  const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'product-agent-verify-'))
+  const workspaceDao = new FilesystemWorkspaceDAO({ root: workspaceRoot, clock: fixedClock })
+  const config = getDefaultProductAgentConfig()
+  config.workspace.storageRoot = workspaceRoot
+
+  const planNode = {
+    id: 'prd-step',
+    label: 'Generate PRD',
+    task: { kind: 'legacy-prd-run' },
+    status: 'pending' as const,
+    dependsOn: [] as string[],
+    metadata: { skillId: 'prd.legacy-orchestrator', kind: 'skill' }
+  }
+
+  const plan = {
+    id: 'plan-verify',
+    artifactKind: 'prd',
+    entryId: planNode.id,
+    createdAt: fixedClock(),
+    version: 'test-plan',
+    nodes: {
+      [planNode.id]: planNode
+    }
+  }
+
+  const planner = {
+    async createPlan(context: any) {
+      return { plan, context }
+    },
+    async refinePlan(input: any) {
+      return { plan: input.currentPlan, context: input.context }
+    }
+  }
+
+  let verifierCalls = 0
+  const verifier = {
+    async verify({ artifact: inputArtifact }: any) {
+      verifierCalls += 1
+      return {
+        status: 'pass' as const,
+        artifact: inputArtifact,
+        issues: [] as any[]
+      }
+    }
+  }
+
+  const artifact = {
+    id: 'artifact-prd',
+    kind: 'prd',
+    version: '1.0.0',
+    data: { sections: {}, metadata: {}, validation: { is_valid: true, issues: [], warnings: [] } },
+    metadata: { createdAt: fixedClock().toISOString() }
+  }
+
+  const skillRunner = {
+    async invoke() {
+      return {
+        output: artifact.data,
+        metadata: { artifact },
+        confidence: 0.95
+      }
+    }
+  }
+
+  const controller = new GraphController(
+    {
+      planner,
+      skillRunner,
+      verifier: { primary: verifier },
+      workspace: workspaceDao
+    },
+    config,
+    {
+      clock: fixedClock,
+      idFactory: () => 'verify-run'
+    }
+  )
+
+  try {
+    const summary = await controller.start({
+      request: {
+        artifactKind: 'prd',
+        input: { message: 'generate prd' },
+        createdBy: 'unit-test'
+      }
+    })
+
+    assert.equal(summary.status, 'completed')
+    assert.equal(verifierCalls, 1)
+    assert.equal(summary.verification?.status, 'pass')
+
+    const artifacts = await workspaceDao.listArtifacts('verify-run')
+    assert.equal(artifacts.length, 1)
+    assert.equal(artifacts[0].id, artifact.id)
+  } finally {
+    await workspaceDao.teardown('verify-run').catch(() => {})
+    await fs.rm(workspaceRoot, { recursive: true, force: true })
+  }
+})
