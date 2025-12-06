@@ -1,4 +1,4 @@
-import type { Artifact, PlanGraph, ProgressEvent, RunId, RunRequest } from './core'
+import type { Artifact, ArtifactKind, PlanGraph, ProgressEvent, RunId, RunRequest } from './core'
 import type { Planner } from './planner'
 import type { SkillRunner, SkillResult } from './skill-runner'
 import type { VerificationResult, Verifier } from './verifier'
@@ -10,6 +10,7 @@ export interface ControllerComposition {
   skillRunner: SkillRunner
   verifier: {
     primary: Verifier
+    registry?: Record<ArtifactKind, Verifier>
     secondary?: Verifier[]
   }
   workspace: WorkspaceDAO

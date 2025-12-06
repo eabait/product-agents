@@ -13,5 +13,6 @@ export interface ArtifactIntent {
   targetArtifact: ArtifactKind
   transitions: ArtifactTransition[]
   confidence?: number
+  status?: 'ready' | 'needs-clarification' | string
   metadata?: Record<string, unknown>
 }

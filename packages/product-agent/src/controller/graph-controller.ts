@@ -168,6 +168,7 @@ export class GraphController implements AgentController {
   private readonly idFactory: () => string
   private readonly workspaceOverrides?: GraphControllerOptions['workspaceOverrides']
   private readonly verifierGroup: ControllerComposition['verifier']
+  private readonly verifierRegistry?: Record<ArtifactKind, Verifier>
   private readonly runSummaries = new Map<string, ControllerRunSummary>()
   private readonly providerFactory: NonNullable<GraphControllerOptions['providerFactory']>
   private readonly toolInvoker: NonNullable<GraphControllerOptions['toolInvoker']>
@@ -184,6 +185,7 @@ export class GraphController implements AgentController {
     this.subagents = composition.subagents ?? []
     this.subagentRegistry = options?.subagentRegistry
     this.verifierGroup = composition.verifier
+    this.verifierRegistry = composition.verifier.registry
     this.config = config
     this.clock = options?.clock ?? (() => new Date())
     this.idFactory = options?.idFactory ?? (() => randomUUID())
@@ -290,8 +292,9 @@ export class GraphController implements AgentController {
           throw new Error('Run completed without producing an artifact')
         }
 
-        if (executionContext.artifact.kind === 'prd') {
-          const verification = await this.runVerification(executionContext, options)
+        const verifier = this.resolveVerifier(executionContext.artifact.kind)
+        if (verifier) {
+          const verification = await this.runVerification(executionContext, verifier, options)
           executionContext.verification = verification
           executionContext.status = mapVerificationStatusToRunStatus(verification)
 
@@ -812,8 +815,16 @@ export class GraphController implements AgentController {
     )
   }
 
+  private resolveVerifier(kind: ArtifactKind): Verifier | undefined {
+    if (this.verifierRegistry) {
+      return this.verifierRegistry[kind]
+    }
+    return this.verifier
+  }
+
   private async runVerification(
     context: ExecutionContext,
+    primaryVerifier: Verifier,
     options?: ControllerStartOptions
   ): Promise<VerificationResult | undefined> {
     if (!context.artifact) {
@@ -829,7 +840,7 @@ export class GraphController implements AgentController {
     )
 
     const verifiers = this.verifierGroup
-    const primaryResult = await verifiers.primary.verify({
+    const primaryResult = await primaryVerifier.verify({
       artifact: context.artifact,
       context: context.runContext
     })

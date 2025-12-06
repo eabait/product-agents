@@ -2,7 +2,8 @@ import type {
   ProductAgentConfig,
   SubagentLifecycle,
   SubagentRegistry,
-  Planner
+  Planner,
+  CorePlanBuilder
 } from '@product-agents/product-agent'
 import {
   getDefaultProductAgentConfig,
@@ -16,6 +17,7 @@ interface CreatePrdPlannerOptions {
   clock?: () => Date
   subagentRegistry?: SubagentRegistry
   subagents?: SubagentLifecycle[]
+  coreBuilders?: CorePlanBuilder[]
 }
 
 export { PrdPlanner }
@@ -26,5 +28,6 @@ export const createPrdPlanner = (options?: CreatePrdPlannerOptions): Planner =>
     config: options?.config ?? getDefaultProductAgentConfig(),
     clock: options?.clock,
     subagentRegistry: options?.subagentRegistry,
-    subagents: options?.subagents ?? []
+    subagents: options?.subagents ?? [],
+    coreBuilders: options?.coreBuilders
   })

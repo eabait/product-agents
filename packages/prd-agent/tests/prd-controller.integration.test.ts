@@ -149,7 +149,7 @@ test('graph controller run produces PRD artifact using extracted skills', async 
     {
       planner,
       skillRunner,
-      verifier: { primary: verifier },
+      verifier: { primary: verifier, registry: { prd: verifier } },
       workspace
     },
     config,
@@ -214,7 +214,7 @@ test('graph controller stops early when clarification is required', async () => 
     {
       planner,
       skillRunner,
-      verifier: { primary: verifier },
+      verifier: { primary: verifier, registry: { prd: verifier } },
       workspace
     },
     config,
@@ -309,7 +309,7 @@ test('graph controller persona run promotes persona artifact via intelligent pla
     {
       planner,
       skillRunner,
-      verifier: { primary: verifier },
+      verifier: { primary: verifier, registry: { prd: verifier } },
       workspace,
       subagents: [personaSubagent]
     },

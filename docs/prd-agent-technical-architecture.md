@@ -4,6 +4,8 @@
 
 The PRD (Product Requirements Document) Agent is a sophisticated AI-powered system that automatically generates comprehensive product requirements documents from natural language input. It employs a hierarchical orchestrator-workers pattern with specialized components for analysis and document generation.
 
+The orchestrator is now intent-driven and artifact-agnostic: a core-plan builder registry installs PRD as the default core, subagent registries advertise downstream artifacts (e.g., personas), and the controller selects verifiers by artifact kind with PRD as the default entry. This keeps PRD flows intact while enabling prompt-first personas and other artifacts without hardcoded PRD assumptions.
+
 ## System Architecture
 
 ### High-Level Architecture

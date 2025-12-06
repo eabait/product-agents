@@ -30,6 +30,7 @@ interface IntelligentPlannerOptions {
   skillCatalog?: SkillCatalog
   subagentRegistry?: SubagentRegistry
   registeredSubagents?: SubagentLifecycle[]
+  coreBuilders?: CorePlanBuilder[]
   intentResolver: IntentResolverLike
 }
 
@@ -49,6 +50,15 @@ interface PlanSegment {
   terminalNodeId: string
   requestedSections: SectionName[]
   intermediateArtifacts: ArtifactKind[]
+  skillSequence?: string[]
+}
+
+export interface CorePlanBuilder {
+  artifactKind: ArtifactKind
+  build: (input: {
+    intent: ArtifactIntent
+    context: PlannerRunContext
+  }) => Promise<PlanSegment | null>
 }
 
 interface SubagentPlanResult {
@@ -76,7 +86,7 @@ export class IntelligentPlanner implements Planner<IntelligentPlannerTask> {
   private readonly registeredSubagents: SubagentLifecycle[]
   private readonly skillPackIds: string[]
   private readonly intentResolver: IntentResolverLike
-  private readonly defaultArtifactKind: ArtifactKind = 'prd'
+  private readonly coreBuilders: Map<ArtifactKind, CorePlanBuilder>
 
   constructor(options: IntelligentPlannerOptions) {
     this.config = options.config
@@ -86,35 +96,114 @@ export class IntelligentPlanner implements Planner<IntelligentPlannerTask> {
     this.registeredSubagents = options.registeredSubagents ?? []
     this.skillPackIds = options.config.skills.enabledPacks.map(pack => pack.id)
     this.intentResolver = options.intentResolver
+    this.coreBuilders = new Map()
+    this.registerCoreBuilders(options.coreBuilders ?? this.createDefaultCoreBuilders())
+  }
+
+  private registerCoreBuilders(builders: CorePlanBuilder[]): void {
+    builders.forEach(builder => {
+      this.coreBuilders.set(builder.artifactKind, builder)
+    })
+  }
+
+  private createDefaultCoreBuilders(): CorePlanBuilder[] {
+    return [this.createPrdCoreBuilder()]
+  }
+
+  private createPrdCoreBuilder(): CorePlanBuilder {
+    return {
+      artifactKind: 'prd',
+      build: async ({ context }) => this.buildPrdCoreSegment(context)
+    }
+  }
+
+  private selectCoreBuilder(intent: ArtifactIntent): CorePlanBuilder | undefined {
+    if (intent.status === 'needs-clarification') {
+      return undefined
+    }
+
+    const transitions = this.normalizeTransitions(intent)
+    const orderedArtifacts: ArtifactKind[] = []
+
+    transitions.forEach(transition => {
+      if (transition.fromArtifact && !orderedArtifacts.includes(transition.fromArtifact)) {
+        orderedArtifacts.push(transition.fromArtifact)
+      }
+      if (transition.toArtifact && !orderedArtifacts.includes(transition.toArtifact)) {
+        orderedArtifacts.push(transition.toArtifact)
+      }
+    })
+
+    if (orderedArtifacts.length === 0 && intent.targetArtifact) {
+      orderedArtifacts.push(intent.targetArtifact)
+    }
+
+    for (const artifact of orderedArtifacts) {
+      const builder = this.coreBuilders.get(artifact)
+      if (builder) {
+        return builder
+      }
+    }
+
+    return undefined
   }
 
   async createPlan(context: PlannerRunContext): Promise<PlanDraft<IntelligentPlannerTask>> {
     const intent = await this.intentResolver.resolve(context)
     const createdAt = this.clock()
-    const requiresPrdCore = this.intentRequiresPrd(intent)
-    const coreSegment = requiresPrdCore ? await this.buildPrdCoreSegment(context) : null
-    const initialArtifactKind = this.resolveInitialArtifactKind(intent, context, requiresPrdCore)
-    const transitions = await this.buildTransitionSegments({
+    const needsClarification = intent.status === 'needs-clarification'
+    const subagentEntries = await this.collectSubagentEntries()
+    const allowPromptStart = this.subagentsAllowPrompt(subagentEntries)
+    const coreBuilder = this.selectCoreBuilder(intent)
+    const coreSegment = coreBuilder ? await coreBuilder.build({ intent, context }) : null
+    const initialArtifactKind = this.resolveInitialArtifactKind(
       intent,
-      dependsOn: coreSegment?.terminalNodeId,
-      initialArtifactKind
-    })
+      context,
+      coreSegment,
+      allowPromptStart
+    )
+    const transitions = needsClarification
+      ? {
+          nodes: {},
+          summaries: [],
+          terminalNodeId: coreSegment?.terminalNodeId ?? '',
+          entryNodeId: undefined,
+          transitionPath: initialArtifactKind ? [initialArtifactKind] : []
+        }
+      : await this.buildTransitionSegments({
+          intent,
+          dependsOn: coreSegment?.terminalNodeId,
+          initialArtifactKind,
+          fallbackArtifactKind: intent.targetArtifact ?? context.request.artifactKind,
+          entries: subagentEntries,
+          allowPromptStart
+        })
 
     const planNodes: Record<string, PlanNode<IntelligentPlannerTask>> = {
       ...(coreSegment?.nodes ?? {}),
       ...transitions.nodes
     }
 
-    const entryId = coreSegment?.entryId ?? transitions.entryNodeId ?? transitions.terminalNodeId
+    const defaultEntryId = intent.status === 'needs-clarification' ? 'intent-clarification' : ''
+    const entryId =
+      coreSegment?.entryId ?? transitions.entryNodeId ?? transitions.terminalNodeId ?? defaultEntryId
     if (!entryId) {
       throw new Error('Planner could not build a runnable plan for the requested intent')
     }
 
     const terminalNodeId = transitions.terminalNodeId ?? coreSegment?.terminalNodeId ?? entryId
 
+    const transitionPath = transitions.transitionPath
+    const artifactKind =
+      intent.targetArtifact ??
+      (transitionPath.length > 0 ? transitionPath[transitionPath.length - 1] : undefined) ??
+      context.request.artifactKind ??
+      (coreSegment?.intermediateArtifacts?.[coreSegment.intermediateArtifacts.length - 1] ??
+        'unknown')
+
     const plan: PlanGraph<IntelligentPlannerTask> = {
       id: `plan-${context.runId}`,
-      artifactKind: intent.targetArtifact ?? context.request.artifactKind ?? this.defaultArtifactKind,
+      artifactKind,
       entryId,
       createdAt,
       version: PLAN_VERSION,
@@ -124,20 +213,21 @@ export class IntelligentPlanner implements Planner<IntelligentPlannerTask> {
         requestedArtifactKind: intent.targetArtifact,
         requestedSections: coreSegment?.requestedSections ?? [],
         skillPacks: this.skillPackIds,
-        skills: coreSegment ? { sequence: this.buildSkillSequence(coreSegment.requestedSections) } : undefined,
+        skills: coreSegment?.skillSequence ? { sequence: coreSegment.skillSequence } : undefined,
         subagents: transitions.summaries,
         intermediateArtifacts: Array.from(
-          new Set([...(coreSegment?.intermediateArtifacts ?? []), ...transitions.transitionPath])
+          new Set([...(coreSegment?.intermediateArtifacts ?? []), ...transitionPath])
         ),
         requestedArtifacts: intent.requestedArtifacts,
         intentConfidence: intent.confidence,
-        transitionPath: transitions.transitionPath,
+        transitionPath,
         intent: {
           source: intent.source,
           requestedArtifacts: intent.requestedArtifacts,
           targetArtifact: intent.targetArtifact,
           confidence: intent.confidence,
-          transitionPath: transitions.transitionPath
+          status: intent.status,
+          transitionPath
         }
       }
     }
@@ -222,7 +312,8 @@ export class IntelligentPlanner implements Planner<IntelligentPlannerTask> {
       entryId: clarificationNode.id,
       terminalNodeId: assembleNode.id,
       requestedSections,
-      intermediateArtifacts: ['prd']
+      intermediateArtifacts: ['prd'],
+      skillSequence: this.buildSkillSequence(requestedSections)
     }
   }
 
@@ -316,31 +407,41 @@ export class IntelligentPlanner implements Planner<IntelligentPlannerTask> {
     intent: ArtifactIntent
     dependsOn: string | undefined
     initialArtifactKind?: ArtifactKind
+    fallbackArtifactKind?: ArtifactKind
+    entries: SubagentPlanEntry[]
+    allowPromptStart: boolean
   }): Promise<SubagentPlanResult> {
-    const entries = await this.collectSubagentEntries()
+    const entries = params.entries
+    const transitions = this.normalizeTransitions(params.intent)
+    const seedArtifact =
+      params.initialArtifactKind ??
+      params.fallbackArtifactKind ??
+      transitions[0]?.fromArtifact ??
+      transitions[0]?.toArtifact
+    const startingArtifact: ArtifactKind | undefined =
+      seedArtifact ?? (params.allowPromptStart ? 'prompt' : undefined)
+
     if (entries.length === 0) {
       return {
         nodes: {},
         summaries: [],
         terminalNodeId: params.dependsOn ?? '',
         entryNodeId: params.dependsOn,
-        transitionPath: [params.initialArtifactKind ?? this.defaultArtifactKind]
+        transitionPath: startingArtifact ? [startingArtifact] : (seedArtifact ? [seedArtifact] : [])
       }
     }
 
     const nodes: Record<string, PlanNode<IntelligentPlannerTask>> = {}
     const summaries: SubagentPlanResult['summaries'] = []
-    const transitionPath: ArtifactKind[] = [
-      params.initialArtifactKind ?? this.defaultArtifactKind
-    ]
+    const transitionPath: ArtifactKind[] = startingArtifact ? [startingArtifact] : []
 
     let currentNodeId = params.dependsOn
-    let currentArtifact: ArtifactKind = transitionPath[transitionPath.length - 1]
+    let currentArtifact: ArtifactKind | undefined = transitionPath[transitionPath.length - 1]
     let entryNodeId: string | undefined
-    const transitions = this.normalizeTransitions(params.intent)
 
     transitions.forEach(transition => {
-      const fromArtifact = transition.fromArtifact ?? currentArtifact
+      const fromArtifact =
+        transition.fromArtifact ?? currentArtifact ?? (params.allowPromptStart ? 'prompt' : undefined)
       const targetArtifact = transition.toArtifact
       if (!targetArtifact || targetArtifact === fromArtifact) {
         return
@@ -411,7 +512,9 @@ export class IntelligentPlanner implements Planner<IntelligentPlannerTask> {
     const chain =
       intent.requestedArtifacts.length > 0
         ? intent.requestedArtifacts
-        : [intent.targetArtifact ?? this.defaultArtifactKind]
+        : intent.targetArtifact
+          ? [intent.targetArtifact]
+          : []
 
     const transitions: ArtifactTransition[] = []
     let previous: ArtifactKind | undefined
@@ -432,7 +535,7 @@ export class IntelligentPlanner implements Planner<IntelligentPlannerTask> {
 
   private findSubagentForTransition(
     entries: SubagentPlanEntry[],
-    fromArtifact: ArtifactKind,
+    fromArtifact: ArtifactKind | undefined,
     targetArtifact: ArtifactKind
   ): SubagentPlanEntry | undefined {
     return entries.find(entry => {
@@ -442,7 +545,7 @@ export class IntelligentPlanner implements Planner<IntelligentPlannerTask> {
       if (!entry.consumes || entry.consumes.length === 0) {
         return true
       }
-      return entry.consumes.includes(fromArtifact)
+      return fromArtifact ? entry.consumes.includes(fromArtifact) : false
     })
   }
 
@@ -478,30 +581,26 @@ export class IntelligentPlanner implements Planner<IntelligentPlannerTask> {
     return Array.from(entries.values())
   }
 
-  private toSubagentNodeId(subagentId: string): string {
-    return `subagent-${subagentId.replace(/[^a-zA-Z0-9._-]+/g, '-')}`
+  private subagentsAllowPrompt(entries: SubagentPlanEntry[]): boolean {
+    return entries.some(entry => entry.consumes.length === 0 || entry.consumes.includes('prompt'))
   }
 
-  private intentRequiresPrd(intent: ArtifactIntent): boolean {
-    const transitions = this.normalizeTransitions(intent)
-    if (intent.targetArtifact === this.defaultArtifactKind) {
-      return true
-    }
-
-    return transitions.some(
-      transition =>
-        transition.toArtifact === this.defaultArtifactKind ||
-        transition.fromArtifact === this.defaultArtifactKind
-    )
+  private toSubagentNodeId(subagentId: string): string {
+    return `subagent-${subagentId.replace(/[^a-zA-Z0-9._-]+/g, '-')}`
   }
 
   private resolveInitialArtifactKind(
     intent: ArtifactIntent,
     context: PlannerRunContext,
-    hasPrdSegment: boolean
-  ): ArtifactKind {
-    if (hasPrdSegment) {
-      return this.defaultArtifactKind
+    coreSegment: PlanSegment | null,
+    allowPromptStart: boolean
+  ): ArtifactKind | undefined {
+    if (intent.status === 'needs-clarification') {
+      return undefined
+    }
+
+    if (coreSegment?.intermediateArtifacts?.length) {
+      return coreSegment.intermediateArtifacts[coreSegment.intermediateArtifacts.length - 1]
     }
 
     const transitions = this.normalizeTransitions(intent)
@@ -510,14 +609,26 @@ export class IntelligentPlanner implements Planner<IntelligentPlannerTask> {
       return firstTransition.fromArtifact
     }
 
-    if (context.request.artifactKind && context.request.artifactKind !== this.defaultArtifactKind) {
-      return context.request.artifactKind
-    }
-
-    if (intent.targetArtifact && intent.targetArtifact !== this.defaultArtifactKind) {
+    if (firstTransition && allowPromptStart) {
       return 'prompt'
     }
 
-    return this.defaultArtifactKind
+    if (firstTransition?.toArtifact && (firstTransition.toArtifact !== 'prompt' || allowPromptStart)) {
+      return firstTransition.toArtifact
+    }
+
+    if (context.request.artifactKind && (context.request.artifactKind !== 'prompt' || allowPromptStart)) {
+      return context.request.artifactKind
+    }
+
+    if (intent.targetArtifact && (intent.targetArtifact !== 'prompt' || allowPromptStart)) {
+      return intent.targetArtifact
+    }
+
+    if (allowPromptStart) {
+      return 'prompt'
+    }
+
+    return undefined
   }
 }

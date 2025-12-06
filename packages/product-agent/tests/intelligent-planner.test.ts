@@ -61,6 +61,20 @@ const storyMapSubagent: SubagentLifecycle = {
   }
 }
 
+const promptPersonaSubagent: SubagentLifecycle = {
+  metadata: {
+    id: 'persona.builder',
+    label: 'Persona Builder',
+    version: '0.1.0',
+    artifactKind: 'persona',
+    sourceKinds: ['prompt'],
+    description: 'turns prompts into personas'
+  },
+  async execute() {
+    throw new Error('execute should not be invoked during planning tests')
+  }
+}
+
 class StubIntentResolver {
   constructor(private readonly plan: ArtifactIntent) {}
 
@@ -178,4 +192,33 @@ test('intelligent planner chains persona before story map when requested', async
   assert.deepEqual(plan.metadata?.requestedArtifacts, ['prd', 'persona', 'story-map'])
   assert.deepEqual(plan.metadata?.transitionPath, ['prd', 'persona', 'story-map'])
   assert.equal(plan.metadata?.intentConfidence, 0.91)
+})
+
+test('intelligent planner starts from prompt when persona agent consumes prompt', async () => {
+  const config = getDefaultProductAgentConfig()
+  const intent: ArtifactIntent = {
+    source: 'resolver',
+    requestedArtifacts: ['persona'],
+    targetArtifact: 'persona',
+    transitions: [{ toArtifact: 'persona' }],
+    confidence: 0.87
+  }
+
+  const planner = new IntelligentPlanner({
+    config,
+    clock: fixedClock,
+    registeredSubagents: [promptPersonaSubagent],
+    intentResolver: new StubIntentResolver(intent) as any
+  })
+
+  const context = createRunContext('persona')
+  const { plan } = await planner.createPlan(context)
+
+  assert.equal(plan.artifactKind, 'persona')
+  assert.ok(plan.nodes['subagent-persona.builder'])
+  const personaNode = plan.nodes['subagent-persona.builder']
+  assert.deepEqual(personaNode.dependsOn, [])
+  assert.equal(personaNode.metadata?.source?.artifactKind, 'prompt')
+  assert.equal(plan.nodes['clarification-check'], undefined)
+  assert.deepEqual(plan.metadata?.transitionPath, ['prompt', 'persona'])
 })

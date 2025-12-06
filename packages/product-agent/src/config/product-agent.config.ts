@@ -93,6 +93,20 @@ export type PlannerStrategy = typeof PLANNER_STRATEGIES[number]
 
 const DEFAULT_STORAGE_ROOT = path.resolve(process.cwd(), 'data', 'runs')
 
+const DEFAULT_PERSONA_SUBAGENT_MANIFEST: SubagentConfigEntry = {
+  id: 'persona.builder',
+  package: '@product-agents/persona-agent',
+  version: '0.2.0',
+  label: 'Persona Agent',
+  creates: 'persona',
+  consumes: ['prd', 'prompt'],
+  capabilities: ['analyze', 'synthesize'],
+  description: 'LLM-backed persona analyst that can start from PRD sections or raw prompts.',
+  entry: '@product-agents/persona-agent',
+  exportName: 'createPersonaAgentSubagent',
+  tags: ['persona', 'agent']
+}
+
 const DEFAULT_CONFIG: ProductAgentConfig = {
   runtime: {
     defaultModel: 'qwen/qwen3-235b-a22b-2507', //'anthropic/claude-3.5-haiku',
@@ -128,7 +142,7 @@ const DEFAULT_CONFIG: ProductAgentConfig = {
     eventThrottleMs: 250
   },
   subagents: {
-    manifests: []
+    manifests: [DEFAULT_PERSONA_SUBAGENT_MANIFEST]
   },
   planner: {
     strategy: 'intelligent'

@@ -58,7 +58,10 @@ export const createPrdController = (options?: CreatePrdControllerOptions): Agent
       planner,
       skillRunner,
       verifier: {
-        primary: verifier
+        primary: verifier,
+        registry: {
+          prd: verifier
+        }
       },
       workspace,
       subagents

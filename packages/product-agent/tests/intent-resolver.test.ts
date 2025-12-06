@@ -125,3 +125,48 @@ test('intent resolver includes registry artifacts when calling classifier', asyn
 
   assert.ok(classifier.lastInput.availableArtifacts.includes('persona'))
 })
+
+test('intent resolver returns clarification intent when classification fails', async () => {
+  const context = createRunContext()
+  const resolver = new IntentResolver({
+    classifier: {
+      async classify() {
+        throw new Error('classifier unavailable')
+      }
+    } as any
+  })
+
+  const plan = await resolver.resolve(context)
+
+  assert.equal(plan.status, 'needs-clarification')
+  assert.equal(plan.targetArtifact, context.request.artifactKind)
+  assert.equal(plan.transitions.length, 0)
+  assert.deepEqual(context.intentPlan, plan)
+})
+
+test('intent resolver ignores cached intent when request artifact differs', async () => {
+  const context = createRunContext()
+  context.intentPlan = {
+    source: 'user',
+    requestedArtifacts: ['persona'],
+    targetArtifact: 'persona',
+    transitions: [{ toArtifact: 'persona' }],
+    confidence: 0.9
+  }
+
+  const classifier = new StubClassifier({
+    targetArtifact: 'prd',
+    chain: ['prd'],
+    confidence: 0.8,
+    probabilities: { prd: 0.8 }
+  })
+
+  const resolver = new IntentResolver({
+    classifier
+  })
+
+  const plan = await resolver.resolve(context)
+
+  assert.equal(plan.targetArtifact, 'prd')
+  assert.deepEqual(plan.requestedArtifacts, ['prd'])
+})

@@ -77,7 +77,7 @@ test('GraphController executes plan and delivers artifact', async () => {
     {
       planner,
       skillRunner,
-      verifier: { primary: verifier },
+      verifier: { primary: verifier, registry: { prd: verifier } },
       workspace: workspaceDao
     },
     config,
@@ -220,7 +220,7 @@ test('GraphController executes inline subagent plan nodes without duplicate runs
     {
       planner,
       skillRunner,
-      verifier: { primary: verifier },
+      verifier: { primary: verifier, registry: { prd: verifier } },
       workspace: workspaceDao,
       subagents: [subagent]
     },
@@ -326,7 +326,7 @@ test('GraphController runs verifier after AI tool loop for PRD artifacts', async
     {
       planner,
       skillRunner,
-      verifier: { primary: verifier },
+      verifier: { primary: verifier, registry: { prd: verifier } },
       workspace: workspaceDao
     },
     config,
@@ -354,6 +354,116 @@ test('GraphController runs verifier after AI tool loop for PRD artifacts', async
     assert.equal(artifacts[0].id, artifact.id)
   } finally {
     await workspaceDao.teardown('verify-run').catch(() => {})
+    await fs.rm(workspaceRoot, { recursive: true, force: true })
+  }
+})
+
+test('GraphController selects verifier by artifact kind', async () => {
+  const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'product-agent-verify-kind-'))
+  const workspaceDao = new FilesystemWorkspaceDAO({ root: workspaceRoot, clock: fixedClock })
+  const config = getDefaultProductAgentConfig()
+  config.workspace.storageRoot = workspaceRoot
+
+  const planNode = {
+    id: 'persona-step',
+    label: 'Generate Persona',
+    task: { kind: 'legacy-prd-run' },
+    status: 'pending' as const,
+    dependsOn: [] as string[],
+    metadata: { skillId: 'persona.generator', kind: 'skill' }
+  }
+
+  const plan = {
+    id: 'plan-persona-verify',
+    artifactKind: 'persona',
+    entryId: planNode.id,
+    createdAt: fixedClock(),
+    version: 'test-plan',
+    nodes: {
+      [planNode.id]: planNode
+    }
+  }
+
+  const artifact = {
+    id: 'artifact-persona-verify',
+    kind: 'persona',
+    version: '0.1.0',
+    data: { personas: [] },
+    metadata: { createdAt: fixedClock().toISOString() }
+  }
+
+  const planner = {
+    async createPlan(context: any) {
+      return { plan, context }
+    },
+    async refinePlan(input: any) {
+      return { plan: input.currentPlan, context: input.context }
+    }
+  }
+
+  let personaVerifierCalls = 0
+  const personaVerifier = {
+    async verify({ artifact: inputArtifact }: any) {
+      personaVerifierCalls += 1
+      return {
+        status: 'pass' as const,
+        artifact: inputArtifact,
+        issues: []
+      }
+    }
+  }
+
+  let prdVerifierCalls = 0
+  const prdVerifier = {
+    async verify() {
+      prdVerifierCalls += 1
+      return {
+        status: 'pass' as const,
+        artifact,
+        issues: []
+      }
+    }
+  }
+
+  const skillRunner = {
+    async invoke() {
+      return {
+        output: artifact.data,
+        metadata: { artifact },
+        confidence: 0.9
+      }
+    }
+  }
+
+  const controller = new GraphController(
+    {
+      planner,
+      skillRunner,
+      verifier: { primary: prdVerifier, registry: { persona: personaVerifier } },
+      workspace: workspaceDao
+    },
+    config,
+    {
+      clock: fixedClock,
+      idFactory: () => 'run-persona-verify'
+    }
+  )
+
+  try {
+    const summary = await controller.start({
+      request: {
+        artifactKind: 'persona',
+        input: { message: 'generate persona' },
+        createdBy: 'unit-test'
+      }
+    })
+
+    assert.equal(summary.status, 'completed')
+    assert.equal(summary.artifact?.kind, 'persona')
+    assert.equal(personaVerifierCalls, 1)
+    assert.equal(prdVerifierCalls, 0)
+  } finally {
+    await workspaceDao.teardown('run-persona-verify').catch(() => {})
     await fs.rm(workspaceRoot, { recursive: true, force: true })
   }
 })

@@ -10,7 +10,6 @@ import {
 export interface IntentResolverOptions {
   classifier: Pick<IntentClassifierSkill, 'classify'>
   subagentRegistry?: SubagentRegistry
-  defaultArtifactKind?: ArtifactKind
   logger?: {
     debug?: (...args: unknown[]) => void
     warn?: (...args: unknown[]) => void
@@ -21,13 +20,11 @@ export interface IntentResolverOptions {
 export class IntentResolver {
   private readonly classifier: Pick<IntentClassifierSkill, 'classify'>
   private readonly subagentRegistry?: SubagentRegistry
-  private readonly defaultArtifactKind: ArtifactKind
   private readonly logger?: IntentResolverOptions['logger']
 
   constructor(options: IntentResolverOptions) {
     this.classifier = options.classifier
     this.subagentRegistry = options.subagentRegistry
-    this.defaultArtifactKind = options.defaultArtifactKind ?? 'prd'
     this.logger = options.logger
   }
 
@@ -39,7 +36,7 @@ export class IntentResolver {
       return existing
     }
 
-    const availableArtifacts = this.collectAvailableArtifacts()
+    const availableArtifacts = this.collectAvailableArtifacts(context)
     const classifierInput = this.buildClassifierInput(
       context,
       availableArtifacts
@@ -48,14 +45,20 @@ export class IntentResolver {
     try {
       const classification = await this.classifier.classify(classifierInput)
       const plan = this.buildIntentFromClassification(classification)
-      this.cacheIntent(context, plan)
-      return plan
+      if (plan) {
+        this.cacheIntent(context, plan)
+        return plan
+      }
+
+      const fallback = this.buildClarificationIntent(context, 'empty-classification')
+      this.cacheIntent(context, fallback)
+      return fallback
     } catch (error) {
       this.logger?.error?.(
         '[intent-resolver] failed to classify intent, using fallback',
         error
       )
-      const fallback = this.buildFallbackIntent()
+      const fallback = this.buildClarificationIntent(context, 'classification-error')
       this.cacheIntent(context, fallback)
       return fallback
     }
@@ -64,21 +67,32 @@ export class IntentResolver {
   private extractIntent(
     context: RunContext<SectionRoutingRequest>
   ): ArtifactIntent | undefined {
-    if (context.intentPlan) {
-      return context.intentPlan
+    const artifactKind = context.request.artifactKind
+
+    const cached = context.intentPlan
+    if (cached && this.intentMatchesRequest(cached, artifactKind)) {
+      return cached
     }
-    if (context.metadata?.intent) {
-      return context.metadata.intent as ArtifactIntent
+
+    const metaIntent = context.metadata?.intent as ArtifactIntent | undefined
+    if (metaIntent && this.intentMatchesRequest(metaIntent, artifactKind)) {
+      return metaIntent
     }
-    if (context.request.intentPlan) {
-      return context.request.intentPlan
+
+    const requestIntent = context.request.intentPlan
+    if (requestIntent && this.intentMatchesRequest(requestIntent, artifactKind)) {
+      return requestIntent
     }
+
     const attributesIntent = context.request.attributes?.intent
     if (attributesIntent && typeof attributesIntent === 'object') {
       const plan = attributesIntent as ArtifactIntent
-      this.cacheIntent(context, plan)
-      return plan
+      if (this.intentMatchesRequest(plan, artifactKind)) {
+        this.cacheIntent(context, plan)
+        return plan
+      }
     }
+
     return undefined
   }
 
@@ -94,11 +108,34 @@ export class IntentResolver {
     }
   }
 
-  private collectAvailableArtifacts(): ArtifactKind[] {
-    const artifacts = new Set<ArtifactKind>([this.defaultArtifactKind])
+  private intentMatchesRequest(intent: ArtifactIntent, artifactKind?: ArtifactKind): boolean {
+    if (!artifactKind) {
+      return true
+    }
+    return intent.targetArtifact === artifactKind || intent.requestedArtifacts.includes(artifactKind)
+  }
+
+  private collectAvailableArtifacts(
+    context: RunContext<SectionRoutingRequest>
+  ): ArtifactKind[] {
+    const artifacts = new Set<ArtifactKind>()
+    const requestedArtifacts =
+      context.request.intentPlan?.requestedArtifacts ?? context.intentPlan?.requestedArtifacts ?? []
+
+    requestedArtifacts.forEach(artifact => artifacts.add(artifact))
+
+    if (context.request.artifactKind) {
+      artifacts.add(context.request.artifactKind)
+    }
+
     this.subagentRegistry
       ?.list()
       .forEach(manifest => artifacts.add(manifest.creates))
+
+    if (artifacts.size === 0) {
+      artifacts.add('prompt')
+    }
+
     return Array.from(artifacts)
   }
 
@@ -130,16 +167,19 @@ export class IntentResolver {
 
   private buildIntentFromClassification(
     classification: IntentClassifierOutput
-  ): ArtifactIntent {
+  ): ArtifactIntent | null {
     const uniqueRequested = Array.from(
       new Set(classification.chain ?? [])
-    )
+    ).filter(Boolean)
+
+    if (!classification.targetArtifact || uniqueRequested.length === 0) {
+      return null
+    }
 
     return {
       source: 'resolver',
       requestedArtifacts: uniqueRequested,
-      targetArtifact:
-        classification.targetArtifact ?? this.defaultArtifactKind,
+      targetArtifact: classification.targetArtifact,
       transitions: uniqueRequested.map((artifact, index) => ({
         fromArtifact: index === 0 ? undefined : uniqueRequested[index - 1],
         toArtifact: artifact,
@@ -148,6 +188,7 @@ export class IntentResolver {
         }
       })),
       confidence: classification.confidence,
+      status: 'ready',
       metadata: {
         probabilities: classification.probabilities,
         rationale: classification.rationale,
@@ -156,18 +197,20 @@ export class IntentResolver {
     }
   }
 
-  private buildFallbackIntent(): ArtifactIntent {
-    const fallbackChain: ArtifactKind[] = [this.defaultArtifactKind]
+  private buildClarificationIntent(
+    context: RunContext<SectionRoutingRequest>,
+    reason: string
+  ): ArtifactIntent {
     return {
       source: 'resolver',
-      requestedArtifacts: fallbackChain,
-      targetArtifact: this.defaultArtifactKind,
-      transitions: [
-        {
-          toArtifact: this.defaultArtifactKind
-        }
-      ],
-      confidence: 0.5
+      requestedArtifacts: [],
+      targetArtifact: context.request.artifactKind ?? 'clarification',
+      transitions: [],
+      confidence: 0,
+      status: 'needs-clarification',
+      metadata: {
+        reason
+      }
     }
   }
 }
