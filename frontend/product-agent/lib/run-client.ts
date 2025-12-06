@@ -5,16 +5,7 @@ interface StartRunParams {
   settings: AgentSettingsState
   contextPayload?: unknown
   targetSections?: string[]
-  artifactType?: string
   runId?: string
-  sourceArtifact?: unknown
-  personaInputs?: {
-    description?: string
-    targetUsers?: string[]
-    keyFeatures?: string[]
-    constraints?: string[]
-    successMetrics?: string[]
-  }
 }
 
 interface StartRunResult {
@@ -24,84 +15,10 @@ interface StartRunResult {
   metadata?: Record<string, unknown> | null
   usage?: Record<string, unknown> | null
   streamUrl?: string
-  artifactType?: string
   artifact?: unknown
 }
 
 export const startRun = async (params: StartRunParams): Promise<StartRunResult> => {
-  const artifactType = params.artifactType ?? params.settings.artifactTypes?.[0] ?? 'prd'
-  const requestedArtifacts = (() => {
-    if (artifactType === 'persona') {
-      return ['persona']
-    }
-    const configured = params.settings.artifactTypes && params.settings.artifactTypes.length > 0
-      ? params.settings.artifactTypes
-      : [artifactType]
-    return Array.from(new Set(configured))
-  })()
-  if (artifactType === 'persona') {
-    const latestUserMessage = [...params.messages]
-      .reverse()
-      .find(message => message.role === 'user')?.content
-    const personaInputMessage = latestUserMessage ?? 'Persona creation request'
-
-    const requestPayload: Record<string, unknown> = {
-      runId: params.runId,
-      overrides: {
-        model: params.settings.model,
-        temperature: params.settings.temperature,
-        maxOutputTokens: params.settings.maxTokens
-      },
-      input: {
-        message: personaInputMessage,
-        contextPayload: params.contextPayload
-      }
-    }
-
-    if (params.personaInputs) {
-      const normalized = Object.fromEntries(
-        Object.entries(params.personaInputs).filter(([, value]) => {
-          if (Array.isArray(value)) {
-            return value.length > 0
-          }
-          return Boolean(value)
-        })
-      )
-      if (Object.keys(normalized).length > 0) {
-        requestPayload.input = {
-          ...(requestPayload.input as Record<string, unknown>),
-          ...normalized
-        }
-      }
-    }
-
-    if (params.sourceArtifact) {
-      requestPayload.artifact = {
-        data: params.sourceArtifact
-      }
-    }
-
-    const response = await fetch('/api/subagents/persona', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestPayload)
-    })
-
-    if (!response.ok) {
-      const errorPayload = await response.json().catch(() => ({}))
-      throw new Error(errorPayload?.error ?? `Persona run failed (${response.status})`)
-    }
-
-    const payload = await response.json()
-    return {
-      status: 'completed',
-      result: payload,
-      artifact: payload?.artifact ?? null,
-      metadata: payload?.metadata ?? null,
-      usage: null,
-      artifactType
-    }
-  }
   const streamingEnabled = params.settings.streaming !== false
 
   if (!streamingEnabled) {
@@ -113,7 +30,6 @@ export const startRun = async (params: StartRunParams): Promise<StartRunResult> 
         settings: params.settings,
         contextPayload: params.contextPayload,
         targetSections: params.targetSections,
-        requestedArtifacts,
         stream: false
       })
     })
@@ -129,7 +45,7 @@ export const startRun = async (params: StartRunParams): Promise<StartRunResult> 
       result: payload,
       metadata: payload?.metadata ?? null,
       usage: payload?.usage ?? null,
-      artifactType
+      artifact: payload?.artifact ?? null
     }
   }
 
@@ -137,12 +53,10 @@ export const startRun = async (params: StartRunParams): Promise<StartRunResult> 
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      artifactType,
       messages: params.messages,
       settings: params.settings,
       contextPayload: params.contextPayload,
-      targetSections: params.targetSections,
-      requestedArtifacts
+      targetSections: params.targetSections
     })
   })
 
@@ -156,7 +70,7 @@ export const startRun = async (params: StartRunParams): Promise<StartRunResult> 
     runId: payload.runId,
     status: payload.status,
     streamUrl: payload.streamUrl,
-    artifactType: payload.artifactType ?? artifactType
+    artifact: payload.artifact ?? null
   }
 }
 

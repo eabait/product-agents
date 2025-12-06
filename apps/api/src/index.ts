@@ -120,7 +120,6 @@ const StartRunSchema = z.object({
   messages: z.array(MessageSchema).min(1),
   settings: SettingsSchema.optional(),
   contextPayload: z.any().optional(),
-  requestedArtifacts: z.array(z.string().min(1)).optional(),
   targetSections: z.array(z.string()).optional()
 })
 
@@ -240,40 +239,6 @@ const toApiOverrides = (payload: StartRunPayload): ProductAgentApiOverrides | un
     overrides.maxOutputTokens = payload.settings.maxTokens
   }
   return Object.keys(overrides).length > 0 ? overrides : undefined
-}
-
-const normalizeArtifactKind = (value: string | undefined): ArtifactKind | undefined => {
-  if (!value) {
-    return undefined
-  }
-  const normalized = value.trim().toLowerCase()
-  return normalized ? (normalized as ArtifactKind) : undefined
-}
-
-const buildInitialIntentPlan = (payload: StartRunPayload): ArtifactIntent | undefined => {
-  const requested =
-    payload.requestedArtifacts
-      ?.map(artifact => normalizeArtifactKind(artifact))
-      .filter((artifact): artifact is ArtifactKind => !!artifact) ?? []
-
-  const uniqueArtifacts = Array.from(new Set(requested))
-  if (uniqueArtifacts.length === 0) {
-    return undefined
-  }
-
-  const transitions = uniqueArtifacts.map((artifact, index) => ({
-    fromArtifact: index === 0 ? undefined : uniqueArtifacts[index - 1],
-    toArtifact: artifact,
-    metadata: { source: 'user-request' }
-  }))
-
-  return {
-    source: 'user',
-    requestedArtifacts: [...uniqueArtifacts],
-    targetArtifact: uniqueArtifacts[uniqueArtifacts.length - 1],
-    transitions,
-    confidence: 1
-  }
 }
 
 const writeJson = (res: ServerResponse, status: number, payload: Record<string, unknown>) => {
@@ -412,7 +377,6 @@ const registerRun = (payload: StartRunPayload): RunRecord => {
 const startRunExecution = async (record: RunRecord) => {
   const sectionRequest = toSectionRoutingRequest(record.request)
   const overrides = toApiOverrides(record.request)
-  const intentPlan = buildInitialIntentPlan(record.request)
 
   const attributes: Record<string, unknown> = {
     source: 'apps/api',
@@ -422,16 +386,12 @@ const startRunExecution = async (record: RunRecord) => {
   if (overrides) {
     attributes.apiOverrides = overrides
   }
-  if (intentPlan) {
-    attributes.intent = intentPlan
-  }
 
   const runRequest: RunRequest<SectionRoutingRequest> = {
     artifactKind: record.artifactType,
     input: sectionRequest,
     createdBy: 'apps/api',
-    attributes,
-    intentPlan
+    attributes
   }
 
   const ensureRecordMetadata = (): RunMetadata => {

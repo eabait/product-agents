@@ -123,10 +123,6 @@ export class IntentResolver {
     context: RunContext<SectionRoutingRequest>
   ): ArtifactKind[] {
     const artifacts = new Set<ArtifactKind>()
-    const requestedArtifacts =
-      context.request.intentPlan?.requestedArtifacts ?? context.intentPlan?.requestedArtifacts ?? []
-
-    requestedArtifacts.forEach(artifact => artifacts.add(artifact))
 
     if (context.request.artifactKind) {
       artifacts.add(context.request.artifactKind)
@@ -151,10 +147,6 @@ export class IntentResolver {
     availableArtifacts: ArtifactKind[],
     existingArtifacts: ArtifactKind[]
   ): IntentClassifierInput {
-    const requested =
-      context.request.intentPlan?.requestedArtifacts ??
-      context.intentPlan?.requestedArtifacts ??
-      []
     const history = (context.request.input as any)?.context?.conversationHistory as
       | Array<{ content?: string }>
       | undefined
@@ -166,7 +158,7 @@ export class IntentResolver {
 
     return {
       message,
-      requestedArtifacts: requested,
+      requestedArtifacts: [],
       availableArtifacts,
       runId: context.runId,
       metadata: {

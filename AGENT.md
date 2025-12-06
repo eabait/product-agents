@@ -203,27 +203,13 @@ Once registered, the orchestrator can call `subagentRegistry.list()` (or rely on
 
 The Phase 6 planner upgrades introduce a consistent path from user prompt → intent classification → plan graph → artifact handoffs. Key integration points:
 
-1. **Request contract** – `apps/api` now accepts an optional `requestedArtifacts: string[]` field (mirrored in the frontend payload). The thin API normalizes those selections, stores an `intentPlan` on the `RunRequest`, and passes it to the controller.
-2. **Intent resolver** – `IntentClassifierSkill` (LLM-backed) inspects the concatenated conversation text plus explicit selections and returns `{ targetArtifact, chain, confidence, probabilities }`. The resolver caches this plan on `RunContext.metadata.intent`, so planners/subagents never re-classify.
-3. **Planner metadata** – `IntelligentPlanner` consumes the resolver output, builds the PRD core segment, and appends subagent nodes that match the requested transitions. It annotates `plan.metadata` with `requestedArtifacts`, `intentConfidence`, and a `transitionPath` array that the UI can render as an upcoming-artifacts ribbon.
+1. **Request contract** – `apps/api` now only needs the messages + runtime settings (and optional context). The thin API normalizes the payload and lets the orchestrator decide which artifacts to produce based on the conversation and available subagents.
+2. **Intent resolver** – `IntentClassifierSkill` (LLM-backed) inspects the concatenated conversation text plus registry metadata and returns `{ targetArtifact, chain, confidence, probabilities }`. The resolver caches this plan on `RunContext.metadata.intent`, so planners/subagents never re-classify.
+3. **Planner metadata** – `IntelligentPlanner` consumes the resolver output, builds the PRD core segment, and appends subagent nodes that match the classified transitions. It annotates `plan.metadata` with `requestedArtifacts`, `intentConfidence`, and a `transitionPath` array that the UI can render as an upcoming-artifacts ribbon.
 4. **Progress events + SSE** – The `GraphController` tracks artifacts per step/kind and emits `artifact.delivered` + `subagent.completed` events that include the transition payload (source artifact kind, destination kind, whether the result promotes to the run artifact). `apps/api` enriches SSE payloads with the full `plan.metadata.intent` and a lightweight preview of downstream artifacts so the frontend can gate persona/story map viewers without re-fetching storage.
 5. **Frontend guidance** – Until backend persistence for derived artifacts ships, the Next.js run store remains the source of truth. Each API request should resend the serialized upstream artifact context (PRD JSON, persona payload, etc.) so downstream subagents can consume it deterministically, even if the browser reloads.
 
-To request specific artifact combinations from the SDK or frontend, send:
-
-```ts
-await fetch('/api/chat', {
-  method: 'POST',
-  body: JSON.stringify({
-    artifactType: 'story-map',
-    requestedArtifacts: ['prd', 'persona', 'story-map'],
-    messages,
-    settings
-  })
-})
-```
-
-The SSE stream will emit `plan.created` with the classified intent plus `artifact.delivered` events showing each handoff. Consumers can watch `transitionPath` to render breadcrumbs like “PRD → Persona → Story map” and block persona/story-map viewers until their respective nodes complete. Completion payloads now also include a `subagents` array; each entry exposes the persona bundle (or other artifacts) plus the telemetry snapshot emitted by the runner (duration, sanitized prompt/response previews, which model produced it, and whether the heuristics kicked in). Frontends can reuse this payload instead of making a secondary persona request.
+Runs automatically sequence the available subagents; the SSE stream emits `plan.created` with the classified intent plus `artifact.delivered` events showing each handoff. Consumers can watch `transitionPath` to render breadcrumbs like “PRD → Persona → Story map” and block persona/story-map viewers until their respective nodes complete. Completion payloads now also include a `subagents` array; each entry exposes the persona bundle (or other artifacts) plus the telemetry snapshot emitted by the runner (duration, sanitized prompt/response previews, which model produced it, and whether the heuristics kicked in). Frontends can reuse this payload instead of making a secondary persona request.
 
 **Persona agent controls**
 

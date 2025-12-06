@@ -113,9 +113,6 @@ export class IntentClassifierSkill {
     }
 }
 const defaultPromptTemplate = (context) => {
-    const requested = context.requestedArtifacts && context.requestedArtifacts.length > 0
-        ? context.requestedArtifacts.join(', ')
-        : 'none';
     return `
 You are a friendly, concise intent classification expert that guides users to the right artifact plan.
 
@@ -125,8 +122,6 @@ User message:
 """
 ${context.message}
 """
-
-Explicit artifact selections from the UI: ${requested}.
 
 Return JSON with the following fields:
 - targetArtifact: the final artifact the orchestrator should deliver

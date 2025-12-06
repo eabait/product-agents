@@ -74,8 +74,6 @@ export class IntentResolver {
     }
     collectAvailableArtifacts(context) {
         const artifacts = new Set();
-        const requestedArtifacts = context.request.intentPlan?.requestedArtifacts ?? context.intentPlan?.requestedArtifacts ?? [];
-        requestedArtifacts.forEach(artifact => artifacts.add(artifact));
         if (context.request.artifactKind) {
             artifacts.add(context.request.artifactKind);
         }
@@ -90,16 +88,13 @@ export class IntentResolver {
         return Array.from(artifacts);
     }
     buildClassifierInput(context, availableArtifacts, existingArtifacts) {
-        const requested = context.request.intentPlan?.requestedArtifacts ??
-            context.intentPlan?.requestedArtifacts ??
-            [];
         const history = context.request.input?.context?.conversationHistory;
         const message = context.request.input?.message ??
             history?.map(entry => entry?.content ?? '').join('\n') ??
             '';
         return {
             message,
-            requestedArtifacts: requested,
+            requestedArtifacts: [],
             availableArtifacts,
             runId: context.runId,
             metadata: {

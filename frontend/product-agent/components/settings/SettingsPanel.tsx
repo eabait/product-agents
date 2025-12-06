@@ -114,33 +114,6 @@ const SETTINGS_GROUP_IDS = new Set<SettingsGroupId>(SETTINGS_GROUPS.map(group =>
 const isSettingsGroupId = (value: string): value is SettingsGroupId =>
   SETTINGS_GROUP_IDS.has(value as SettingsGroupId)
 
-const BASE_ARTIFACT_OPTIONS = [
-  {
-    id: 'prd',
-    label: 'Product Requirements Document (PRD)',
-    description: 'Generate, edit, and stream PRDs with section-aware controls.',
-    available: true
-  },
-  {
-    id: 'persona',
-    label: 'Persona Builder',
-    description: 'Draft personas from PRD context when the persona subagent is enabled.',
-    available: false
-  },
-  {
-    id: 'research',
-    label: 'Research Summaries',
-    description: 'Synthesize research briefs and data pulls. Coming soon.',
-    available: false
-  },
-  {
-    id: 'story-map',
-    label: 'Story Mapping',
-    description: 'Translate requirements into user story maps. Coming soon.',
-    available: false
-  }
-] as const
-
 export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsChange }: SettingsPanelProps) {
   const [models, setModels] = useState<Model[]>([])
   const [modelsLoading, setModelsLoading] = useState(false)
@@ -170,13 +143,6 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
     return settings.model ? settings.model.split('/')[0] : ''
   })
 
-  const personaMetadata = metadata?.subAgents?.find(subAgent => subAgent.id === 'persona.builder')
-  const artifactOptions = BASE_ARTIFACT_OPTIONS.map(option =>
-    option.id === 'persona'
-      ? { ...option, available: Boolean(personaMetadata) }
-      : option
-  )
-
   // Use reactive contexts
   const { setModels: setModelContextModels, updateModelFromId } = useModelContext()
   const { contextSettings, updateContextSettings } = useContextSettings()
@@ -201,14 +167,6 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
   const modelsForProvider = models.filter(model => model.provider === selectedProvider)
   const currentModel = settings.model ? models.find(model => model.id === settings.model) : undefined
 
-  useEffect(() => {
-    if (!personaMetadata && settings.artifactTypes?.includes('persona')) {
-      onSettingsChange({
-        ...settings,
-        artifactTypes: settings.artifactTypes.filter(id => id !== 'persona')
-      })
-    }
-  }, [personaMetadata, settings, onSettingsChange])
   const getSubAgentDropdownState = (id: string) => {
     const state = subAgentDropdownState[id]
     if (state) {
@@ -243,36 +201,11 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
     subAgentSettings: Object.entries(settings.subAgentSettings || {}).reduce<SubAgentSettingsMap>((acc, [key, value]) => {
       acc[key] = { ...value }
       return acc
-    }, {}),
-    artifactTypes: Array.isArray(settings.artifactTypes) && settings.artifactTypes.length > 0
-      ? [...settings.artifactTypes]
-      : ['prd']
+    }, {})
   })
 
   const setSettings = (updater: (_prev: AgentSettingsState) => AgentSettingsState) => {
     onSettingsChange(updater(cloneSettings()))
-  }
-
-  const toggleArtifactType = (artifactId: string) => {
-    setSettings(prev => {
-      const selection = Array.isArray(prev.artifactTypes) ? prev.artifactTypes : ['prd']
-      const hasArtifact = selection.includes(artifactId)
-
-      if (hasArtifact) {
-        if (selection.length <= 1) {
-          return prev
-        }
-        return {
-          ...prev,
-          artifactTypes: selection.filter(id => id !== artifactId)
-        }
-      }
-
-      return {
-        ...prev,
-        artifactTypes: [artifactId, ...selection]
-      }
-    })
   }
 
   const fetchModels = async (apiKey?: string): Promise<boolean> => {
@@ -609,53 +542,6 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
 
         return (
           <div className="space-y-8">
-            <div className="rounded-md border p-4 space-y-3 bg-muted/20">
-              <div>
-                <h3 className="text-sm font-semibold">Artifact Types</h3>
-                <p className="text-xs text-muted-foreground">
-                  Choose which artifacts the product agent should generate. PRD stays enabled by default.
-                </p>
-              </div>
-              <div className="space-y-2">
-                {artifactOptions.map(option => {
-                  const checked = settings.artifactTypes?.includes(option.id) ?? false
-                  const disabled = !option.available
-                  const lockChecked = option.id === 'prd' && (settings.artifactTypes?.length ?? 0) <= 1
-
-                  return (
-                    <label
-                      key={option.id}
-                      className={`flex items-start gap-3 rounded-md border px-3 py-2 ${
-                        disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer hover:bg-background'
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        className="mt-1 h-4 w-4 rounded border-muted-foreground/40"
-                        checked={checked}
-                        disabled={disabled || lockChecked}
-                        onChange={() => {
-                          if (disabled) return
-                          toggleArtifactType(option.id)
-                        }}
-                      />
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-medium">{option.label}</span>
-                          {!option.available && (
-                            <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                              {option.id === 'persona' ? 'Enable persona subagent in backend' : 'Coming soon'}
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-xs text-muted-foreground">{option.description}</p>
-                      </div>
-                    </label>
-                  )
-                })}
-              </div>
-            </div>
-
             <div className="space-y-4">
               <div>
                 <div className="flex items-center justify-between mb-2">

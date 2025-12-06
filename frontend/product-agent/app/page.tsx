@@ -40,7 +40,7 @@ import { ContextUsageIndicator } from "@/components/context/ContextUsageIndicato
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { contextStorage } from "@/lib/context-storage";
 import { buildEnhancedContextPayload, getContextSummary } from "@/lib/context-utils";
-import { getRun, startRun, streamRun, type StartRunParams } from "@/lib/run-client";
+import { getRun, startRun, streamRun } from "@/lib/run-client";
 import { 
   UI_DIMENSIONS, 
   VALIDATION_LIMITS, 
@@ -53,14 +53,6 @@ type RuntimeOverrides = {
   maxTokens?: number;
   apiKey?: string;
 };
-
-interface PersonaContextState {
-  brief: string;
-  targetUsers: string;
-  keyFeatures: string;
-  constraints: string;
-  successMetrics: string;
-}
 
 function buildSubAgentSettings(
   metadata: AgentMetadata | null,
@@ -146,36 +138,6 @@ type ConversationCostSummary = {
   hasEstimated: boolean;
 };
 
-const coercePersonaArtifact = (candidate: unknown) => {
-  if (!candidate || typeof candidate !== 'object') return null;
-
-  const artifact = candidate as Record<string, unknown>;
-  const dataCandidate =
-    artifact.kind === 'persona' && artifact.data && typeof artifact.data === 'object'
-      ? (artifact.data as Record<string, unknown>)
-      : typeof (artifact as Record<string, unknown>).personas !== 'undefined'
-        ? (artifact as Record<string, unknown>)
-        : null;
-
-  if (!dataCandidate) return null;
-
-  const personas = (dataCandidate as Record<string, unknown>).personas;
-  if (!Array.isArray(personas)) return null;
-
-  return {
-    id: typeof artifact.id === 'string' ? artifact.id : `artifact-${uuidv4()}`,
-    kind: 'persona',
-    label: typeof artifact.label === 'string' ? artifact.label : 'Persona Bundle',
-    version: typeof artifact.version === 'string' ? artifact.version : '1.0.0',
-    data: {
-      ...dataCandidate,
-      personas
-    },
-    ...(artifact.metadata ? { metadata: artifact.metadata } : {})
-  };
-};
-
-
 function PRDAgentPageContent() {
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -198,8 +160,7 @@ function PRDAgentPageContent() {
     maxTokens: 8000, // Will be updated with agent defaults
     apiKey: undefined,
     streaming: true, // Enable streaming by default
-    subAgentSettings: {},
-    artifactTypes: ['prd']
+    subAgentSettings: {}
   });
   const [agentMetadata, setAgentMetadata] = useState<AgentMetadata | null>(null);
   
@@ -209,10 +170,7 @@ function PRDAgentPageContent() {
   const progressCardConversationMap = useRef(new Map<string, string>());
   const activeProgressCardRef = useRef<string | null>(null);
 
-  const activeArtifactType = settings.artifactTypes?.[0] ?? 'prd'
-  const isPersonaMode = activeArtifactType === 'persona'
-  // Derive streaming state from settings (persona runs are batch-only)
-  const isStreamingEnabled = settings.streaming !== false && !isPersonaMode;
+  const isStreamingEnabled = settings.streaming !== false;
   const activeProgressCards = useMemo(() => {
     if (!activeId) return [];
     return progressByConversation[activeId] ?? [];
@@ -222,18 +180,7 @@ function PRDAgentPageContent() {
   const [contextOpen, setContextOpen] = useState(false);
   const [contextSummary, setContextSummary] = useState<string>('');
 
-  const [personaContext, setPersonaContext] = useState<PersonaContextState>({
-    brief: '',
-    targetUsers: '',
-    keyFeatures: '',
-    constraints: '',
-    successMetrics: ''
-  })
-  const personaContextHasEntries = useMemo(
-    () => Object.values(personaContext).some(value => value.trim().length > 0),
-    [personaContext]
-  )
-  const canSubmit = isPersonaMode ? personaContextHasEntries || input.trim().length > 0 : input.trim().length > 0
+  const canSubmit = input.trim().length > 0
 
   // Title editing state
   const [editingConversationId, setEditingConversationId] = useState<string | null>(null);
@@ -1060,9 +1007,6 @@ function PRDAgentPageContent() {
           try {
             const parsed = JSON.parse(rawSettings) as AgentSettingsState;
             parsed.subAgentSettings = parsed.subAgentSettings || {};
-            if (!parsed.artifactTypes || parsed.artifactTypes.length === 0) {
-              parsed.artifactTypes = ['prd'];
-            }
             savedSettings = parsed;
             console.log("Loaded settings from localStorage:", parsed);
           } catch (parseErr) {
@@ -1140,8 +1084,7 @@ function PRDAgentPageContent() {
         maxTokens: baseSettings.maxTokens,
         apiKey: baseSettings.apiKey,
         streaming: baseSettings.streaming,
-        subAgentSettings: baseSettings.subAgentSettings || {},
-        artifactTypes: baseSettings.artifactTypes && baseSettings.artifactTypes.length > 0 ? baseSettings.artifactTypes : ['prd']
+        subAgentSettings: baseSettings.subAgentSettings || {}
       };
 
       if (defaultSettings) {
@@ -1150,9 +1093,6 @@ function PRDAgentPageContent() {
         merged.maxTokens = defaultSettings.maxTokens ?? merged.maxTokens;
         merged.apiKey = defaultSettings.apiKey ?? merged.apiKey;
         merged.subAgentSettings = defaultSettings.subAgentSettings || merged.subAgentSettings;
-        if (defaultSettings.artifactTypes && defaultSettings.artifactTypes.length > 0) {
-          merged.artifactTypes = defaultSettings.artifactTypes;
-        }
       }
 
       if (savedSettings) {
@@ -1161,9 +1101,6 @@ function PRDAgentPageContent() {
         merged.maxTokens = savedSettings.maxTokens ?? merged.maxTokens;
         merged.apiKey = savedSettings.apiKey ?? merged.apiKey;
         merged.streaming = savedSettings.streaming ?? merged.streaming;
-        if (savedSettings.artifactTypes && savedSettings.artifactTypes.length > 0) {
-          merged.artifactTypes = savedSettings.artifactTypes;
-        }
       }
 
       if (metadata || savedSettings?.subAgentSettings || defaultSettings?.subAgentSettings) {
@@ -1304,33 +1241,10 @@ function PRDAgentPageContent() {
     setActiveId(id);
   }
 
-  const parsePersonaField = (value: string): string[] =>
-    value
-      .split(/\r?\n/)
-      .map(entry => entry.trim())
-      .filter(Boolean)
-
   const handleCustomSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    const personaFormHasData = personaContextHasEntries
-    if ((isPersonaMode ? !personaFormHasData && !input.trim() : !input.trim()) || isChatLoading) return;
-
-    const personaInputs = isPersonaMode
-      ? {
-          description: personaContext.brief.trim() || undefined,
-          targetUsers: parsePersonaField(personaContext.targetUsers),
-          keyFeatures: parsePersonaField(personaContext.keyFeatures),
-          constraints: parsePersonaField(personaContext.constraints),
-          successMetrics: parsePersonaField(personaContext.successMetrics)
-        }
-      : undefined
-
-    const messageBody = input.trim() || (isPersonaMode
-      ? personaInputs?.description ?? 'Persona synthesis request'
-      : '')
-    if (!messageBody) {
-      return
-    }
+    const messageBody = input.trim()
+    if (!messageBody || isChatLoading) return;
 
     const userMessage: Message = {
       id: uuidv4(),
@@ -1384,18 +1298,13 @@ function PRDAgentPageContent() {
           newMessages,
           contextPayload,
           userMessage,
-          existingPRD,
-          personaInputs,
-          progressCardId,
-          activeId
+          progressCardId
         );
       } else {
         await handleNonStreamingSubmit(
           newMessages,
           contextPayload,
-          userMessage,
-          existingPRD,
-          personaInputs
+          userMessage
         );
       }
     } catch (error) {
@@ -1430,10 +1339,7 @@ function PRDAgentPageContent() {
     newMessages: Message[],
     contextPayload: any,
     userMessage: Message,
-    existingPRD: any,
-    personaInputs: StartRunParams['personaInputs'] | undefined,
-    progressCardId?: string | null,
-    _conversationId?: string | null
+    progressCardId?: string | null
   ) => {
     let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
     let timeoutId: NodeJS.Timeout | null = null;
@@ -1549,9 +1455,6 @@ function PRDAgentPageContent() {
         messages: newMessages,
         settings,
         contextPayload,
-        artifactType: activeArtifactType,
-        sourceArtifact: existingPRD ?? undefined,
-        personaInputs
       });
 
       if (!run.runId) {
@@ -1801,53 +1704,13 @@ function PRDAgentPageContent() {
   const handleNonStreamingSubmit = async (
     newMessages: Message[],
     contextPayload: any,
-    userMessage: Message,
-    existingPRD: any,
-    personaInputs?: StartRunParams['personaInputs']
+    userMessage: Message
   ) => {
     const runResult = await startRun({
       messages: newMessages,
       settings,
-      contextPayload,
-      artifactType: activeArtifactType,
-      sourceArtifact: existingPRD ?? undefined,
-      personaInputs
+      contextPayload
     });
-
-    if (activeArtifactType === 'persona') {
-      const personaPayload = (runResult.result as Record<string, unknown> | undefined) ?? {};
-      const personaArtifact =
-        coercePersonaArtifact(runResult.artifact) ??
-        coercePersonaArtifact((personaPayload?.artifact as Record<string, unknown> | undefined) ?? null) ??
-        coercePersonaArtifact(personaPayload);
-
-      if (!personaArtifact) {
-        throw new Error('Persona subagent did not return an artifact payload');
-      }
-
-      const messageContent = JSON.stringify(personaArtifact, null, 2);
-      const assistantMetadata = buildAssistantMetadata(null, settings.model ?? null, runResult.metadata ?? undefined);
-
-      const assistantMessage: Message = {
-        id: uuidv4(),
-        role: "assistant",
-        content: messageContent,
-        timestamp: new Date(),
-        ...(assistantMetadata ? { metadata: assistantMetadata } : {})
-      };
-
-      const finalMessages = [...newMessages, assistantMessage];
-      updateActiveConversation(conv => {
-        const shouldUpdateTitle = conv.title === "New PRD" && conv.messages.length === 0;
-        return {
-          ...conv,
-          messages: finalMessages,
-          title: shouldUpdateTitle ? generateTitleFromMessage(userMessage.content) : conv.title
-        };
-      });
-
-      return;
-    }
 
     const data: any = runResult.result ?? {}
     if (data.error) throw new Error(data.error)
@@ -2142,9 +2005,6 @@ function PRDAgentPageContent() {
               </div>
             ) : (
               <>
-                {isPersonaMode && (
-                  <PersonaContextForm value={personaContext} onChange={setPersonaContext} />
-                )}
                 <ChatMessages
                   messages={activeMessages}
                   isProcessing={isChatLoading}
@@ -2165,18 +2025,18 @@ function PRDAgentPageContent() {
                 <div className="flex gap-2 items-center">
                   <Textarea
                     ref={textareaRef}
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        handleCustomSubmit(e as any);
-                      }
-                    }}
-                    placeholder={isPersonaMode ? "Optional extra instructions for persona builder" : "Type your requirements or prompt..."}
-                    className="min-h-[48px] resize-none"
-                    rows={1}
-                  />
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      handleCustomSubmit(e as any);
+                    }
+                  }}
+                  placeholder="Type your requirements or prompt..."
+                  className="min-h-[48px] resize-none"
+                  rows={1}
+                />
 
                   <Button type="submit" disabled={!canSubmit || isChatLoading} size="icon">
                     {isChatLoading ? <Loader className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
@@ -2215,72 +2075,4 @@ export default function PRDAgentPage() {
       <PRDAgentPageContent />
     </AppStateProvider>
   );
-}
-
-// eslint-disable-next-line no-unused-vars
-const PersonaContextForm = ({ value, onChange }: { value: PersonaContextState; onChange: (next: PersonaContextState) => void }) => {
-  const handleFieldChange = (field: keyof PersonaContextState) => (event: React.ChangeEvent<HTMLTextAreaElement>) => {
-    onChange({ ...value, [field]: event.target.value })
-  }
-
-  return (
-    <div className="mb-4 rounded-lg border bg-card p-4 shadow-sm">
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <p className="text-xs uppercase text-muted-foreground">Persona Builder Context</p>
-          <h3 className="text-base font-semibold">Guide the persona agent</h3>
-        </div>
-        <p className="text-xs text-muted-foreground max-w-sm text-right">
-          Lists accept one entry per line and feed directly into the persona agent's structured prompt.
-        </p>
-      </div>
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="md:col-span-2">
-          <label className="text-xs font-medium text-muted-foreground">Brief or problem statement</label>
-          <Textarea
-            value={value.brief}
-            onChange={handleFieldChange('brief')}
-            placeholder="What should the personas focus on?"
-            rows={3}
-          />
-        </div>
-        <div>
-          <label className="text-xs font-medium text-muted-foreground">Target users</label>
-          <Textarea
-            value={value.targetUsers}
-            onChange={handleFieldChange('targetUsers')}
-            placeholder="One persona hint per line"
-            rows={4}
-          />
-        </div>
-        <div>
-          <label className="text-xs font-medium text-muted-foreground">Key features or jobs</label>
-          <Textarea
-            value={value.keyFeatures}
-            onChange={handleFieldChange('keyFeatures')}
-            placeholder="List the workflows the personas care about"
-            rows={4}
-          />
-        </div>
-        <div>
-          <label className="text-xs font-medium text-muted-foreground">Constraints & frustrations</label>
-          <Textarea
-            value={value.constraints}
-            onChange={handleFieldChange('constraints')}
-            placeholder="Budget, compliance, tooling gaps..."
-            rows={4}
-          />
-        </div>
-        <div>
-          <label className="text-xs font-medium text-muted-foreground">Success metrics</label>
-          <Textarea
-            value={value.successMetrics}
-            onChange={handleFieldChange('successMetrics')}
-            placeholder="How you'll know the persona is successful"
-            rows={4}
-          />
-        </div>
-      </div>
-    </div>
-  )
 }
