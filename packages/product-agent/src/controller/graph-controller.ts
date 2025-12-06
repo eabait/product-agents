@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { generateText, type ToolCallOptions } from 'ai'
+import { generateText } from 'ai'
 
 import type {
   AgentController,
@@ -16,11 +16,12 @@ import { resolveRunSettings } from '../config/product-agent.config'
 import type { Artifact, ArtifactKind, PlanNode, StepId } from '../contracts/core'
 import type { WorkspaceDAO, WorkspaceEvent, WorkspaceHandle } from '../contracts/workspace'
 import type { Planner } from '../contracts/planner'
-import type { ClarificationResult } from '@product-agents/prd-shared'
+import type { ClarificationResult, SectionRoutingRequest } from '@product-agents/prd-shared'
 import type { SubagentLifecycle, SubagentRunSummary } from '../contracts/subagent'
 import type { SubagentRegistry } from '../subagents/subagent-registry'
 import { createOpenRouterProvider, resolveOpenRouterModel } from '../providers/openrouter-provider'
 import { createSkillTool, createSubagentTool, type ToolExecutionResult } from '../ai/tool-adapters'
+import { extractExistingArtifactsFromContext } from '../planner/existing-artifacts'
 
 type Clock = () => Date
 
@@ -237,6 +238,8 @@ export class GraphController implements AgentController {
       })
     )
 
+    const existingArtifacts = extractExistingArtifactsFromContext(runContext as unknown as RunContext<SectionRoutingRequest>)
+
     const planDraft = input.initialPlan
       ? { plan: input.initialPlan }
       : await this.planner.createPlan(runContext)
@@ -279,7 +282,7 @@ export class GraphController implements AgentController {
       status: STATUS_RUNNING,
       subagentResults: [],
       artifactsByStep: new Map(),
-      artifactsByKind: new Map()
+      artifactsByKind: new Map(existingArtifacts.artifactsByKind)
     }
 
     try {
@@ -289,20 +292,27 @@ export class GraphController implements AgentController {
         // Skip verification; run awaits user clarification input
       } else {
         if (!executionContext.artifact) {
-          throw new Error('Run completed without producing an artifact')
-        }
-
-        const verifier = this.resolveVerifier(executionContext.artifact.kind)
-        if (verifier) {
-          const verification = await this.runVerification(executionContext, verifier, options)
-          executionContext.verification = verification
-          executionContext.status = mapVerificationStatusToRunStatus(verification)
-
-          if (executionContext.status === STATUS_FAILED) {
-            throw new Error('Verification failed')
+          const needsClarification =
+            executionContext.runContext.intentPlan?.status === 'needs-clarification' ||
+            executionContext.runContext.request.intentPlan?.status === 'needs-clarification'
+          if (needsClarification) {
+            executionContext.status = STATUS_AWAITING_INPUT
+          } else {
+            throw new Error('Run completed without producing an artifact')
           }
         } else {
-          executionContext.status = STATUS_COMPLETED
+          const verifier = this.resolveVerifier(executionContext.artifact.kind)
+          if (verifier) {
+            const verification = await this.runVerification(executionContext, verifier, options)
+            executionContext.verification = verification
+            executionContext.status = mapVerificationStatusToRunStatus(verification)
+
+            if (executionContext.status === STATUS_FAILED) {
+              throw new Error('Verification failed')
+            }
+          } else {
+            executionContext.status = STATUS_COMPLETED
+          }
         }
       }
 
@@ -605,18 +615,21 @@ export class GraphController implements AgentController {
         [params.toolName]: params.tool as any
       },
       toolChoice: { type: 'tool', toolName: params.toolName },
-      maxOutputTokens: Math.min(params.context.runContext.settings.maxOutputTokens ?? 8000, 512),
+      maxTokens: Math.min(params.context.runContext.settings.maxOutputTokens ?? 8000, 512),
       temperature: params.context.runContext.settings.temperature,
       maxRetries: this.config.runtime.retry.attempts,
       abortSignal: params.options?.signal
     })
 
-    const toolResult = response.toolResults[0]?.output as ToolExecutionResult | undefined
+    const toolResult =
+      (response as any).toolResults?.[0]?.result ??
+      (response as any).toolResults?.[0]?.output ??
+      (response as any).toolResults?.[0]
     if (!toolResult) {
       throw new Error(`Tool "${params.toolName}" did not return a result`)
     }
 
-    return toolResult
+    return toolResult as ToolExecutionResult
   }
 
   private async invokeToolDirectly(
@@ -625,16 +638,17 @@ export class GraphController implements AgentController {
     context: ExecutionContext,
     options?: ControllerStartOptions
   ): Promise<ToolExecutionResult> {
-    const executable = tool as { execute?: (input: unknown, options: ToolCallOptions) => any }
+    const executable = tool as { execute?: (input: unknown, options?: { abortSignal?: AbortSignal }) => any }
     if (typeof executable.execute !== 'function') {
       throw new Error(`Tool for node "${node.id}" is missing an execute handler`)
     }
 
-    const result = await executable.execute({}, {
-      abortSignal: options?.signal,
-      toolCallId: `direct-${node.id}`,
-      runId: context.runContext.runId
-    } as ToolCallOptions)
+    const result = await executable.execute(
+      {},
+      {
+        abortSignal: options?.signal
+      }
+    )
 
     return result as ToolExecutionResult
   }

@@ -1,5 +1,5 @@
 {
-  "name": "@product-agents/prd-agent-frontend",
+  "name": "@product-agents/product-agents-frontend",
   "version": "1.0.0",
   "description": "PRD Generator Agent frontend",
   "private": true,
@@ -10,6 +10,7 @@
     "lint": "next lint",
     "lint:fix": "next lint --fix",
     "clean": "rm -rf .next out dist",
+    "test": "playwright test",
     "test:e2e": "playwright test",
     "test:e2e:live": "E2E_LIVE=1 playwright test tests/run-progress.e2e.spec.ts"
   },

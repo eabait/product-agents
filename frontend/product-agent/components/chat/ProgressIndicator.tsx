@@ -64,7 +64,6 @@ export const ProgressIndicator = memo(function ProgressIndicator({
   const latestStep = useMemo(() => getLatestProgressStep(steps, isActive), [steps, isActive]);
   const orderedPlanNodes = useMemo(() => orderPlanNodes(filteredPlan), [filteredPlan]);
   const hasPlanNodes = filteredPlan && Object.keys(filteredPlan.nodes).length > 0;
-  const isPrdArtifact = (filteredPlan?.artifactKind ?? 'prd') === 'prd';
 
   if (!isActive && steps.length === 0 && !plan) {
     return null;

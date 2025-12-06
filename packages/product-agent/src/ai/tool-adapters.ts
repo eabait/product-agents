@@ -1,4 +1,4 @@
-import { tool, type ToolCallOptions } from 'ai'
+import { tool } from 'ai'
 import { z } from 'zod'
 
 import type { Artifact, PlanNode, RunContext } from '../contracts/core'
@@ -41,8 +41,8 @@ const defaultInputSchema = z.object({
 export const createSkillTool = (params: SkillToolParams) =>
   tool({
     description: `Execute plan node "${params.node.label}" using the configured skill runner.`,
-    inputSchema: defaultInputSchema,
-    execute: async (_input: unknown, options: ToolCallOptions): Promise<ToolExecutionResult> => {
+    parameters: defaultInputSchema,
+    execute: async (_input: unknown, options: { abortSignal?: AbortSignal } = {}): Promise<ToolExecutionResult> => {
       const skillId = (params.node.metadata?.skillId as string) ?? params.node.id
       const result = await params.skillRunner.invoke({
         skillId,
@@ -76,8 +76,8 @@ export const createSkillTool = (params: SkillToolParams) =>
 export const createSubagentTool = (params: SubagentToolParams) =>
   tool({
     description: `Run subagent "${params.node.metadata?.subagentId ?? params.node.id}" for this plan step.`,
-    inputSchema: defaultInputSchema,
-    execute: async (_input: unknown, options: ToolCallOptions): Promise<ToolExecutionResult> => {
+    parameters: defaultInputSchema,
+    execute: async (_input: unknown, options: { abortSignal?: AbortSignal } = {}): Promise<ToolExecutionResult> => {
       const lifecycle = await params.resolveLifecycle()
       const sourceArtifact = params.resolveSourceArtifact(lifecycle)
       if (!sourceArtifact) {
@@ -91,7 +91,7 @@ export const createSubagentTool = (params: SubagentToolParams) =>
         run: params.runContext,
         sourceArtifact,
         emit: params.emitProgress
-          ? event => params.emitProgress?.(event as Record<string, unknown>)
+          ? event => params.emitProgress?.(event as unknown as Record<string, unknown>)
           : undefined
       })
 

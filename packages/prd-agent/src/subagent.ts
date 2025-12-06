@@ -64,8 +64,10 @@ const toArtifactWithSourceMetadata = (
   }
 
   return {
-    ...artifact,
+    ...(artifact as Artifact<SectionRoutingResponse>),
     metadata: {
+      createdAt: artifact.metadata?.createdAt ?? new Date().toISOString(),
+      updatedAt: artifact.metadata?.updatedAt,
       ...artifact.metadata,
       extras
     }
@@ -157,7 +159,10 @@ export const createPrdAgentSubagent = (
       }
 
       return {
-        artifact: toArtifactWithSourceMetadata(summary.artifact, request),
+        artifact: toArtifactWithSourceMetadata(
+          summary.artifact as Artifact<SectionRoutingResponse>,
+          request
+        ),
         progress,
         metadata: {
           subagentRunId: summary.runId,

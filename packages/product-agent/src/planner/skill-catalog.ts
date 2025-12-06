@@ -20,7 +20,7 @@ type SkillPackLoader = () => Promise<SkillPackManifest>
 const BUILTIN_SKILL_PACKS: Record<string, SkillPackLoader> = {
   'prd-skill-pack': async () => {
     const module = await import('@product-agents/skills-prd')
-    return module.prdSkillPack
+    return (module as any).prdSkillPack
   }
 }
 

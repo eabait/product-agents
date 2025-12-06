@@ -1,16 +1,18 @@
 import http, { IncomingMessage, ServerResponse } from 'node:http'
 import { URL } from 'node:url'
 import { randomUUID } from 'node:crypto'
-import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 
 import { z } from 'zod'
+import { config as loadEnv } from 'dotenv'
+import { expand as expandEnv } from 'dotenv-expand'
 
 import { createPrdController } from '@product-agents/prd-agent'
 import {
   loadProductAgentConfig,
   type ArtifactIntent,
   type ArtifactKind,
+  type Artifact,
   type ControllerRunSummary,
   type ProgressEvent,
   type ProductAgentApiOverrides,
@@ -21,75 +23,21 @@ import { personaAgentManifest } from '@product-agents/persona-agent'
 import type { SectionRoutingRequest } from '@product-agents/prd-shared'
 
 const loadEnvFiles = () => {
-  const loadedKeys = new Set<string>()
-  const envFiles: Array<{ filename: string; allowOverride: boolean }> = [
-    { filename: '.env', allowOverride: false },
-    { filename: '.env.local', allowOverride: true }
+  const envPaths = [
+    path.resolve(process.cwd(), '.env'),
+    path.resolve(process.cwd(), '.env.local'),
+    path.resolve(__dirname, '..', '.env'),
+    path.resolve(__dirname, '..', '.env.local'),
+    path.resolve(__dirname, '../..', '.env'),
+    path.resolve(__dirname, '../..', '.env.local')
   ]
-  const searchDirectories = [
-    process.cwd(),
-    path.resolve(__dirname, '..'),
-    path.resolve(__dirname, '../..')
-  ].filter((dir, index, self) => self.indexOf(dir) === index)
 
-  const parseLine = (line: string): { key: string; value: string } | null => {
-    const trimmed = line.trim()
-    if (!trimmed || trimmed.startsWith('#')) {
-      return null
-    }
-
-    const sanitized = trimmed.startsWith('export ') ? trimmed.slice(7).trim() : trimmed
-    const equalsIndex = sanitized.indexOf('=')
-    if (equalsIndex <= 0) {
-      return null
-    }
-
-    const key = sanitized.slice(0, equalsIndex).trim()
-    if (!key) {
-      return null
-    }
-
-    let value = sanitized.slice(equalsIndex + 1).trim()
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1)
-    }
-    value = value.replace(/\\n/g, '\n')
-    return { key, value }
-  }
-
-  for (const directory of searchDirectories) {
-    for (const { filename, allowOverride } of envFiles) {
-      const envPath = path.resolve(directory, filename)
-      if (!existsSync(envPath)) {
-        continue
-      }
-
-      let content: string
-      try {
-        content = readFileSync(envPath, 'utf8')
-      } catch {
-        continue
-      }
-
-      for (const line of content.split(/\r?\n/)) {
-        const parsed = parseLine(line)
-        if (!parsed) {
-          continue
-        }
-
-        const alreadySet = process.env[parsed.key] !== undefined
-        if (alreadySet && (!allowOverride || !loadedKeys.has(parsed.key))) {
-          continue
-        }
-
-        process.env[parsed.key] = parsed.value
-        loadedKeys.add(parsed.key)
-      }
-    }
-  }
+  envPaths
+    .filter((envPath, index, self) => self.indexOf(envPath) === index)
+    .forEach(envPath => {
+      const result = loadEnv({ path: envPath, override: envPath.endsWith('.env.local') })
+      expandEnv(result)
+    })
 }
 
 loadEnvFiles()
@@ -137,6 +85,10 @@ const controller = createPrdController({ config, subagentRegistry })
 const runRecords = new Map<string, RunRecord>()
 const streamSubscribers = new Map<string, Set<ServerResponse>>()
 const AGENT_CAPABILITIES = ['structured_output', 'streaming'] as const
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'Content-Type'
+}
 
 const MessageSchema = z.object({
   id: z.string(),
@@ -174,6 +126,38 @@ const StartRunSchema = z.object({
 
 type StartRunPayload = z.infer<typeof StartRunSchema>
 type ClientSettings = z.infer<typeof SettingsSchema>
+
+const normalizeSubagentSettings = (
+  settings: ClientSettings | undefined
+): Record<
+  string,
+  {
+    model: string
+    temperature?: number
+    maxTokens?: number
+    apiKey?: string
+  }
+> | undefined => {
+  if (!settings?.subAgentSettings) {
+    return undefined
+  }
+
+  const normalizedEntries = Object.entries(settings.subAgentSettings).map(([subagentId, overrides]) => [
+    subagentId,
+    {
+      model: overrides.model ?? settings.model,
+      temperature: overrides.temperature,
+      maxTokens: overrides.maxTokens,
+      apiKey: overrides.apiKey
+    }
+  ])
+
+  if (normalizedEntries.length === 0) {
+    return undefined
+  }
+
+  return Object.fromEntries(normalizedEntries)
+}
 
 const readRequestBody = (req: IncomingMessage): Promise<string> =>
   new Promise((resolve, reject) => {
@@ -267,20 +251,15 @@ const normalizeArtifactKind = (value: string | undefined): ArtifactKind | undefi
 }
 
 const buildInitialIntentPlan = (payload: StartRunPayload): ArtifactIntent | undefined => {
-  const requested = payload.requestedArtifacts
-    ?.map(artifact => normalizeArtifactKind(artifact))
-    .filter((artifact): artifact is ArtifactKind => !!artifact)
+  const requested =
+    payload.requestedArtifacts
+      ?.map(artifact => normalizeArtifactKind(artifact))
+      .filter((artifact): artifact is ArtifactKind => !!artifact) ?? []
 
-  if (!requested || requested.length === 0) {
+  const uniqueArtifacts = Array.from(new Set(requested))
+  if (uniqueArtifacts.length === 0) {
     return undefined
   }
-
-  const uniqueArtifacts: ArtifactKind[] = []
-  requested.forEach(kind => {
-    if (!uniqueArtifacts.includes(kind)) {
-      uniqueArtifacts.push(kind)
-    }
-  })
 
   const transitions = uniqueArtifacts.map((artifact, index) => ({
     fromArtifact: index === 0 ? undefined : uniqueArtifacts[index - 1],
@@ -300,8 +279,7 @@ const buildInitialIntentPlan = (payload: StartRunPayload): ArtifactIntent | unde
 const writeJson = (res: ServerResponse, status: number, payload: Record<string, unknown>) => {
   res.writeHead(status, {
     'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type'
+    ...CORS_HEADERS
   })
   res.end(JSON.stringify(payload))
 }
@@ -311,7 +289,7 @@ const setSseHeaders = (res: ServerResponse) => {
     'Content-Type': 'text/event-stream',
     Connection: 'keep-alive',
     'Cache-Control': 'no-cache',
-    'Access-Control-Allow-Origin': '*'
+    ...CORS_HEADERS
   })
 }
 
@@ -369,6 +347,15 @@ const closeSubscribers = (runId: string) => {
     }
   }
   streamSubscribers.delete(runId)
+}
+
+const findRunOrRespond = (runId: string, res: ServerResponse): RunRecord | undefined => {
+  const record = runRecords.get(runId)
+  if (!record) {
+    writeJson(res, 404, { error: 'Run not found' })
+    return undefined
+  }
+  return record
 }
 
 const updateRunRecord = (runId: string, updates: Partial<RunRecord>) => {
@@ -455,8 +442,10 @@ const startRunExecution = async (record: RunRecord) => {
   }
 
   const enrichProgressEvent = (event: ProgressEvent): ProgressEvent => {
+    const payload = (event.payload ?? {}) as Record<string, unknown>
+
     if (event.type === 'plan.created') {
-      const plan = event.payload?.plan as { metadata?: Record<string, unknown> } | undefined
+      const plan = payload.plan as { metadata?: Record<string, unknown> } | undefined
       const intentMetadata = plan?.metadata?.intent as ArtifactIntent | undefined
       if (intentMetadata) {
         const metadata = ensureRecordMetadata()
@@ -464,7 +453,7 @@ const startRunExecution = async (record: RunRecord) => {
         return {
           ...event,
           payload: {
-            ...event.payload,
+            ...payload,
             intent: intentMetadata
           }
         }
@@ -473,7 +462,7 @@ const startRunExecution = async (record: RunRecord) => {
     }
 
     if (event.type === 'artifact.delivered') {
-      const artifactPreview = event.payload?.artifact as Record<string, unknown> | undefined
+      const artifactPreview = payload.artifact as Record<string, unknown> | undefined
       if (artifactPreview) {
         const metadata = ensureRecordMetadata()
         metadata.previewArtifacts = metadata.previewArtifacts ?? []
@@ -481,7 +470,7 @@ const startRunExecution = async (record: RunRecord) => {
           id: artifactPreview.id,
           kind: artifactPreview.artifactKind ?? artifactPreview.kind,
           label: artifactPreview.label,
-          transition: event.payload?.transition
+          transition: payload.transition
         })
       }
       return event
@@ -557,9 +546,9 @@ const handleCorsPreflight = (req: IncomingMessage, res: ServerResponse): boolean
   }
 
   res.writeHead(204, {
-    'Access-Control-Allow-Origin': '*',
+    ...CORS_HEADERS,
     'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type'
+    'Access-Control-Allow-Headers': CORS_HEADERS['Access-Control-Allow-Headers']
   })
   res.end()
   return true
@@ -579,7 +568,7 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && url.pathname === '/health') {
     const registryManifests = subagentRegistry.list()
-    const builtInSubagents = controller.subagents ?? []
+    const builtInSubagents = (controller as any).subagents ?? []
 
     const subagentMap = new Map<
       string,
@@ -610,7 +599,7 @@ const server = http.createServer(async (req, res) => {
       })
     })
 
-    builtInSubagents.forEach(subagent => {
+    builtInSubagents.forEach((subagent: any) => {
       if (subagentMap.has(subagent.metadata.id)) {
         return
       }
@@ -701,11 +690,8 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && /^\/runs\/[^/]+$/.test(url.pathname)) {
     const runId = url.pathname.split('/')[2]
-    const record = runRecords.get(runId)
-    if (!record) {
-      writeJson(res, 404, { error: 'Run not found' })
-      return
-    }
+    const record = findRunOrRespond(runId, res)
+    if (!record) return
 
     writeJson(res, 200, {
       runId: record.id,
@@ -726,11 +712,8 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && /^\/runs\/[^/]+\/stream$/.test(url.pathname)) {
     const runId = url.pathname.split('/')[2]
-    const record = runRecords.get(runId)
-    if (!record) {
-      writeJson(res, 404, { error: 'Run not found' })
-      return
-    }
+    const record = findRunOrRespond(runId, res)
+    if (!record) return
 
     setSseHeaders(res)
 
@@ -779,34 +762,3 @@ server.listen(PORT, HOST, () => {
   console.log(`[product-agent/api] listening on http://${HOST}:${PORT}`)
   console.log(`[product-agent/api] planner: ${controller.planner.constructor.name}`)
 })
-const normalizeSubagentSettings = (
-  settings: ClientSettings | undefined
-): Record<
-  string,
-  {
-    model: string
-    temperature?: number
-    maxTokens?: number
-    apiKey?: string
-  }
-> | undefined => {
-  if (!settings?.subAgentSettings) {
-    return undefined
-  }
-
-  const normalizedEntries = Object.entries(settings.subAgentSettings).map(([subagentId, overrides]) => [
-    subagentId,
-    {
-      model: overrides.model ?? settings.model,
-      temperature: overrides.temperature,
-      maxTokens: overrides.maxTokens,
-      apiKey: overrides.apiKey
-    }
-  ])
-
-  if (normalizedEntries.length === 0) {
-    return undefined
-  }
-
-  return Object.fromEntries(normalizedEntries)
-}

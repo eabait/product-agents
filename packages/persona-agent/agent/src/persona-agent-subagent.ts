@@ -55,12 +55,26 @@ export const createPersonaAgentSubagent = (
   const idFactory = options?.idFactory ?? (() => randomUUID())
   const runner = options?.runner ?? new PersonaAgentRunner()
 
+  const emitProgress = (
+    request: Parameters<SubagentLifecycle['execute']>[0],
+    message: string,
+    payload?: Record<string, unknown>
+  ): void => {
+    request.emit?.({
+      type: 'subagent.progress',
+      runId: request.run.runId,
+      timestamp: clock().toISOString(),
+      message,
+      payload
+    } as any)
+  }
+
   return {
     metadata: {
       id: personaAgentManifest.id,
       label: personaAgentManifest.label,
       version: personaAgentManifest.version,
-      artifactKind: personaAgentManifest.creates,
+      artifactKind: personaAgentManifest.creates ?? 'persona',
       sourceKinds: personaAgentManifest.consumes,
       description: personaAgentManifest.description,
       tags: personaAgentManifest.capabilities
@@ -68,6 +82,8 @@ export const createPersonaAgentSubagent = (
     async execute(request) {
       const params = (request.params as PersonaBuilderParams | undefined) ?? undefined
       const sectionInput = request.run.request.input as SectionRoutingRequest | undefined
+
+      emitProgress(request, 'persona-agent.context.start')
 
       const resolvedParams: PersonaBuilderParams | undefined =
         params?.contextPayload || sectionInput?.context?.contextPayload
@@ -106,6 +122,14 @@ export const createPersonaAgentSubagent = (
         additionalNotes.push('Explicit target users missing — infer personas from broader PRD details.')
       }
 
+      emitProgress(request, 'persona-agent.generation.start', {
+        targetUsers: targetUsers.length,
+        keyFeatures: keyFeatures.length,
+        constraints: constraints.length,
+        successMetrics: successMetrics.length,
+        derivedFromPrompt
+      })
+
       const llmDisabled = process.env.PERSONA_AGENT_FORCE_HEURISTIC === 'true'
 
       const buildForcedTelemetry = (): PersonaAgentTelemetry => ({
@@ -128,8 +152,8 @@ export const createPersonaAgentSubagent = (
           }
         : await runner.run({
             model: request.run.settings.model,
-            temperature: request.run.settings.temperature,
-            maxOutputTokens: request.run.settings.maxOutputTokens,
+            temperature: request.run.settings.temperature ?? 0.7,
+            maxOutputTokens: request.run.settings.maxOutputTokens ?? 800,
             targetUsers,
             keyFeatures,
             constraints,
@@ -140,6 +164,11 @@ export const createPersonaAgentSubagent = (
             params: resolvedParams,
             additionalNotes
           })
+
+      emitProgress(request, 'persona-agent.generation.complete', {
+        strategy: runnerResult.strategy,
+        personaCount: runnerResult.personas.length
+      })
 
       const personas: PersonaProfile[] =
         runnerResult.personas.length > 0
@@ -186,6 +215,12 @@ export const createPersonaAgentSubagent = (
           }
         }
       }
+
+      emitProgress(request, 'persona-agent.artifact.ready', {
+        personaCount: personas.length,
+        sourceKind,
+        sourceArtifactId: derivedSourceId
+      })
 
       return {
         artifact: personaArtifact,

@@ -456,7 +456,7 @@ export class OpenRouterClient {
             return value;
         }
         if (Array.isArray(value)) {
-            return value.map((entry) => this.parseNestedJsonStrings(entry));
+            return value.map(entry => this.parseNestedJsonStrings(entry));
         }
         const result = {};
         for (const [key, entry] of Object.entries(value)) {

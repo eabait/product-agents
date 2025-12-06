@@ -398,6 +398,7 @@ function PRDAgentPageContent() {
 
   const updateProgressCard = (
     cardId: string,
+    // eslint-disable-next-line no-unused-vars
     updater: (card: RunProgressCard) => RunProgressCard
   ) => {
     const conversationId = progressCardConversationMap.current.get(cardId);
@@ -1432,7 +1433,7 @@ function PRDAgentPageContent() {
     existingPRD: any,
     personaInputs: StartRunParams['personaInputs'] | undefined,
     progressCardId?: string | null,
-    conversationId?: string | null
+    _conversationId?: string | null
   ) => {
     let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
     let timeoutId: NodeJS.Timeout | null = null;
@@ -1443,7 +1444,6 @@ function PRDAgentPageContent() {
     let streamedModel: string | null = settings.model ?? null;
     let streamStatus: RunProgressStatus | null = null;
     const fallbackCardId = progressCardId ?? null;
-    const conversationForProgress = conversationId ?? activeId;
     const appendedSubagentIds = new Set<string>();
 
     const pushAssistantMessage = (message: Message) => {
@@ -2217,6 +2217,7 @@ export default function PRDAgentPage() {
   );
 }
 
+// eslint-disable-next-line no-unused-vars
 const PersonaContextForm = ({ value, onChange }: { value: PersonaContextState; onChange: (next: PersonaContextState) => void }) => {
   const handleFieldChange = (field: keyof PersonaContextState) => (event: React.ChangeEvent<HTMLTextAreaElement>) => {
     onChange({ ...value, [field]: event.target.value })

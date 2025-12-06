@@ -1,7 +1,7 @@
 import { z } from 'zod'
 
 import { OpenRouterClient } from '@product-agents/openrouter-client'
-import type { GenerationUsage } from '@product-agents/agent-core'
+type GenerationUsage = ReturnType<OpenRouterClient['getLastUsage']>
 
 import { buildPersonaProfiles, type PersonaBuilderParams, type PersonaProfile } from './persona-subagent'
 
@@ -197,13 +197,13 @@ export class PersonaAgentRunner {
     const startedAt = Date.now()
 
     try {
-      const response: PersonaResponse = await this.client.generateStructured({
+      const response = (await this.client.generateStructured({
         model: input.model,
         schema: PersonaResponseSchema,
         prompt,
         temperature: input.temperature,
         maxTokens: input.maxOutputTokens
-      })
+      })) as PersonaResponse
 
       if (!Array.isArray(response.personas)) {
         throw new Error('Persona payload malformed')

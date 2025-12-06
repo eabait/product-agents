@@ -1,4 +1,5 @@
-import type { ArtifactIntent, ArtifactKind, RunContext } from '../contracts/core'
+import type { ArtifactKind, RunContext } from '../contracts/core'
+import type { ArtifactIntent, ArtifactTransition } from '../contracts/intent'
 import type { SectionRoutingRequest } from '@product-agents/prd-shared'
 import type { SubagentRegistry } from '../subagents/subagent-registry'
 import {
@@ -6,6 +7,7 @@ import {
   type IntentClassifierInput,
   type IntentClassifierOutput
 } from '@product-agents/skills-intent'
+import { extractExistingArtifactsFromContext } from './existing-artifacts'
 
 export interface IntentResolverOptions {
   classifier: Pick<IntentClassifierSkill, 'classify'>
@@ -36,21 +38,23 @@ export class IntentResolver {
       return existing
     }
 
+    const existingArtifacts = extractExistingArtifactsFromContext(context)
     const availableArtifacts = this.collectAvailableArtifacts(context)
     const classifierInput = this.buildClassifierInput(
       context,
-      availableArtifacts
+      availableArtifacts,
+      existingArtifacts.kinds
     )
 
     try {
       const classification = await this.classifier.classify(classifierInput)
-      const plan = this.buildIntentFromClassification(classification)
+      const plan = this.buildIntentFromClassification(classification, existingArtifacts.kinds)
       if (plan) {
         this.cacheIntent(context, plan)
         return plan
       }
 
-      const fallback = this.buildClarificationIntent(context, 'empty-classification')
+      const fallback = this.buildDefaultIntent(context, 'empty-classification')
       this.cacheIntent(context, fallback)
       return fallback
     } catch (error) {
@@ -128,6 +132,9 @@ export class IntentResolver {
       artifacts.add(context.request.artifactKind)
     }
 
+    const existing = extractExistingArtifactsFromContext(context)
+    existing.kinds.forEach(kind => artifacts.add(kind))
+
     this.subagentRegistry
       ?.list()
       .forEach(manifest => artifacts.add(manifest.creates))
@@ -141,17 +148,20 @@ export class IntentResolver {
 
   private buildClassifierInput(
     context: RunContext<SectionRoutingRequest>,
-    availableArtifacts: ArtifactKind[]
+    availableArtifacts: ArtifactKind[],
+    existingArtifacts: ArtifactKind[]
   ): IntentClassifierInput {
     const requested =
       context.request.intentPlan?.requestedArtifacts ??
       context.intentPlan?.requestedArtifacts ??
       []
+    const history = (context.request.input as any)?.context?.conversationHistory as
+      | Array<{ content?: string }>
+      | undefined
+
     const message =
       context.request.input?.message ??
-      context.request.input?.context?.conversationHistory
-        ?.map(entry => entry.content)
-        .join('\n') ??
+      history?.map(entry => entry?.content ?? '').join('\n') ??
       ''
 
     return {
@@ -160,13 +170,15 @@ export class IntentResolver {
       availableArtifacts,
       runId: context.runId,
       metadata: {
-        artifactKind: context.request.artifactKind
+        artifactKind: context.request.artifactKind,
+        existingArtifacts
       }
     }
   }
 
   private buildIntentFromClassification(
-    classification: IntentClassifierOutput
+    classification: IntentClassifierOutput,
+    existingArtifacts: ArtifactKind[]
   ): ArtifactIntent | null {
     const uniqueRequested = Array.from(
       new Set(classification.chain ?? [])
@@ -176,12 +188,21 @@ export class IntentResolver {
       return null
     }
 
+    // Remove upstream artifacts that already exist, but keep the target artifact
+    const requested = uniqueRequested.filter(
+      artifact => artifact === classification.targetArtifact || !existingArtifacts.includes(artifact)
+    )
+
+    if (requested.length === 0) {
+      requested.push(classification.targetArtifact)
+    }
+
     return {
       source: 'resolver',
-      requestedArtifacts: uniqueRequested,
+      requestedArtifacts: requested,
       targetArtifact: classification.targetArtifact,
-      transitions: uniqueRequested.map((artifact, index) => ({
-        fromArtifact: index === 0 ? undefined : uniqueRequested[index - 1],
+      transitions: requested.map((artifact, index) => ({
+        fromArtifact: index === 0 ? undefined : requested[index - 1],
         toArtifact: artifact,
         metadata: {
           probability: classification.probabilities?.[artifact]
@@ -208,6 +229,34 @@ export class IntentResolver {
       transitions: [],
       confidence: 0,
       status: 'needs-clarification',
+      metadata: {
+        reason
+      }
+    }
+  }
+
+  private buildDefaultIntent(
+    context: RunContext<SectionRoutingRequest>,
+    reason: string
+  ): ArtifactIntent {
+    const target = context.request.artifactKind ?? 'prd'
+    const chain =
+      target === 'persona' || target === 'story-map' ? (['prd', target] as ArtifactKind[]) : [target]
+    const transitions: ArtifactTransition[] = []
+    chain.forEach((artifact, index) => {
+      transitions.push({
+        fromArtifact: index === 0 ? undefined : chain[index - 1],
+        toArtifact: artifact
+      })
+    })
+
+    return {
+      source: 'resolver',
+      requestedArtifacts: chain,
+      targetArtifact: target,
+      transitions,
+      confidence: 0.4,
+      status: 'ready',
       metadata: {
         reason
       }

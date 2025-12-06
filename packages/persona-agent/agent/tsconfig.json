@@ -1,10 +1,17 @@
 {
   "extends": "../../../tsconfig.json",
   "compilerOptions": {
-    "rootDir": "src",
+    "rootDir": "../..",
     "outDir": "dist",
-    "noEmit": false,
-    "composite": false
+    "noEmit": true,
+    "composite": false,
+    "allowImportingTsExtensions": true,
+    "moduleResolution": "node",
+    "paths": {
+      "@product-agents/product-agent": ["./packages/persona-agent/agent/src/types/product-agent"],
+      "@product-agents/prd-shared": ["./packages/persona-agent/agent/src/types/prd-shared"],
+      "@product-agents/skills-prd": ["./packages/persona-agent/agent/src/types/skills-prd"]
+    }
   },
   "include": ["src/**/*"]
 }

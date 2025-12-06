@@ -89,7 +89,7 @@ export function ChatMessages({
   
   return (
     <div className="max-w-4xl mx-auto px-6 py-4 space-y-6">
-      {messages.map((message, index) => (
+      {messages.map((message, _index) => (
         <div key={message.id}>
           <motion.div
             initial={{ opacity: 0, y: 6 }}

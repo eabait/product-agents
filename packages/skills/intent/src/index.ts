@@ -21,6 +21,7 @@ export interface IntentClassifierOutput {
   confidence: number
   probabilities: Record<string, number>
   rationale?: string
+  guidance?: string
   metadata?: Record<string, unknown>
 }
 
@@ -46,7 +47,8 @@ const CLASSIFICATION_SCHEMA = z.object({
   probabilities: z
     .record(z.number().min(0).max(1))
     .default({}),
-  rationale: z.string().optional()
+  rationale: z.string().optional(),
+  guidance: z.string().optional()
 })
 
 const DEFAULT_SETTINGS: AgentSettings = {
@@ -101,7 +103,7 @@ export class IntentClassifierSkill {
   }
 
   private normalizeResult(
-    raw: z.infer<typeof CLASSIFICATION_SCHEMA>,
+    raw: Partial<z.infer<typeof CLASSIFICATION_SCHEMA>>,
     availableArtifacts: string[]
   ): IntentClassifierOutput {
     const canonicalArtifacts = new Set(
@@ -120,14 +122,15 @@ export class IntentClassifierSkill {
     }
 
     const chain: string[] = []
-    raw.chain.forEach(artifact => {
+    const rawChain = raw.chain ?? []
+    rawChain.forEach(artifact => {
       const normalized = normalizeKind(artifact)
       if (!chain.includes(normalized)) {
         chain.push(normalized)
       }
     })
 
-    const normalizedTarget = normalizeKind(raw.targetArtifact)
+    const normalizedTarget = normalizeKind(raw.targetArtifact ?? availableArtifacts[0] ?? 'prd')
     if (!chain.includes(normalizedTarget)) {
       chain.push(normalizedTarget)
     }
@@ -158,7 +161,8 @@ export class IntentClassifierSkill {
       chain,
       confidence: boundedConfidence,
       probabilities,
-      rationale: raw.rationale
+      rationale: raw.rationale,
+      guidance: raw.guidance
     }
   }
 
@@ -181,7 +185,7 @@ const defaultPromptTemplate = (context: IntentClassifierPromptContext): string =
     : 'none'
 
   return `
-You are an intent classification expert that determines which product-development artifacts should be generated.
+You are a friendly, concise intent classification expert that guides users to the right artifact plan.
 
 Available artifact types: ${context.availableArtifacts.join(', ')}.
 
@@ -198,8 +202,14 @@ Return JSON with the following fields:
 - confidence: value between 0 and 1
 - probabilities: map of artifact -> probability score
 - rationale: brief explanation
+- guidance: one short, friendly sentence suggesting the next step or asking for the single most important missing input
 
-Focus on reasoning about whether personas or user story maps are requested explicitly or implicitly. Always include "prd" in the chain if downstream artifacts (persona/story-map) are needed.
+Rules:
+- Be encouraging and goal-directed. Reuse any referenced artifacts (e.g., "use the PRD we just made") instead of recreating them.
+- When personas or story maps are requested, include "prd" before them unless the user clearly provided a PRD already or insists on skipping it.
+- Start from the prompt when it is the only source. If context is thin or confidence <0.6, keep the chain conservative and use guidance to ask for 1–2 specifics (e.g., target users, success metrics, constraints, region).
+- Handle: fresh starts, starts with brief/research context, persona from prompt or PRD, story map from persona or PRD, multi-artifact requests (PRD + personas + story map), partial artifacts present (only personas or only PRD), updates/refinements to existing artifacts.
+- Keep guidance short and helpful, e.g., "I'll draft a PRD, then personas. Share target users if you have them."
 
 Current timestamp: ${context.timestamp}
 `

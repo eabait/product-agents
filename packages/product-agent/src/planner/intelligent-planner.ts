@@ -10,6 +10,7 @@ import { ALL_SECTION_NAMES } from '@product-agents/prd-shared'
 import type { CatalogSkill } from './skill-catalog'
 import { SkillCatalog } from './skill-catalog'
 import type { PrdPlanTask } from './legacy-prd-planner'
+import { extractExistingArtifactsFromContext } from './existing-artifacts'
 
 type IntentResolverLike = {
   resolve: (context: PlannerRunContext) => Promise<ArtifactIntent>
@@ -117,11 +118,12 @@ export class IntelligentPlanner implements Planner<IntelligentPlannerTask> {
     }
   }
 
-  private selectCoreBuilder(intent: ArtifactIntent): CorePlanBuilder | undefined {
+  private selectCoreBuilder(intent: ArtifactIntent, existingArtifacts: ArtifactKind[]): CorePlanBuilder | undefined {
     if (intent.status === 'needs-clarification') {
       return undefined
     }
 
+    const existingKinds = new Set(existingArtifacts)
     const transitions = this.normalizeTransitions(intent)
     const orderedArtifacts: ArtifactKind[] = []
 
@@ -139,9 +141,11 @@ export class IntelligentPlanner implements Planner<IntelligentPlannerTask> {
     }
 
     for (const artifact of orderedArtifacts) {
-      const builder = this.coreBuilders.get(artifact)
-      if (builder) {
-        return builder
+      if (!existingKinds.has(artifact)) {
+        const builder = this.coreBuilders.get(artifact)
+        if (builder) {
+          return builder
+        }
       }
     }
 
@@ -150,11 +154,12 @@ export class IntelligentPlanner implements Planner<IntelligentPlannerTask> {
 
   async createPlan(context: PlannerRunContext): Promise<PlanDraft<IntelligentPlannerTask>> {
     const intent = await this.intentResolver.resolve(context)
+    const existingArtifacts = extractExistingArtifactsFromContext(context)
     const createdAt = this.clock()
     const needsClarification = intent.status === 'needs-clarification'
     const subagentEntries = await this.collectSubagentEntries()
     const allowPromptStart = this.subagentsAllowPrompt(subagentEntries)
-    const coreBuilder = this.selectCoreBuilder(intent)
+    const coreBuilder = this.selectCoreBuilder(intent, existingArtifacts.kinds)
     const coreSegment = coreBuilder ? await coreBuilder.build({ intent, context }) : null
     const initialArtifactKind = this.resolveInitialArtifactKind(
       intent,
@@ -166,7 +171,7 @@ export class IntelligentPlanner implements Planner<IntelligentPlannerTask> {
       ? {
           nodes: {},
           summaries: [],
-          terminalNodeId: coreSegment?.terminalNodeId ?? '',
+          terminalNodeId: coreSegment?.terminalNodeId ?? coreSegment?.entryId,
           entryNodeId: undefined,
           transitionPath: initialArtifactKind ? [initialArtifactKind] : []
         }
@@ -184,9 +189,12 @@ export class IntelligentPlanner implements Planner<IntelligentPlannerTask> {
       ...transitions.nodes
     }
 
-    const defaultEntryId = intent.status === 'needs-clarification' ? 'intent-clarification' : ''
+    const defaultEntryId = coreSegment?.entryId ?? 'clarification-check'
     const entryId =
-      coreSegment?.entryId ?? transitions.entryNodeId ?? transitions.terminalNodeId ?? defaultEntryId
+      coreSegment?.entryId ||
+      transitions.entryNodeId ||
+      transitions.terminalNodeId ||
+      defaultEntryId
     if (!entryId) {
       throw new Error('Planner could not build a runnable plan for the requested intent')
     }

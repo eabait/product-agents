@@ -71,4 +71,4 @@ export const resolveOpenRouterModel = (
   provider: OpenRouterProvider,
   config: ProductAgentConfig,
   modelId?: string
-) => provider(modelId ?? config.runtime.defaultModel)
+): unknown => provider(modelId ?? config.runtime.defaultModel)

@@ -13,7 +13,7 @@ import {
 
 const normalizePlanAction = (action: string): 'add' | 'update' | 'remove' => {
   const normalized = action.toLowerCase().trim()
-  if (normalized === 'modify' || normalized === 'edit' || normalized === 'keep') {
+  if (normalized === 'modify' || normalized === 'edit' || normalized === 'keep' || normalized === 'retain') {
     return 'update'
   }
   if (normalized === 'delete') {
@@ -31,6 +31,7 @@ const TargetUserPlanOperationSchema = z.object({
       z.literal('modify'),
       z.literal('edit'),
       z.literal('keep'),
+      z.literal('retain'),
       z.literal('delete')
     ])
     .default('add')
@@ -79,7 +80,8 @@ const extractJsonArray = (value: string): unknown[] | null => {
 const parseJsonField = (value: unknown) => {
   if (typeof value === 'string') {
     const trimmed = value.trim()
-    const withoutTrailingComma = trimmed.replace(/,+\s*$/, '')
+    const withoutParamArtifacts = trimmed.replace(/<parameter[^>]*>.*$/gis, '')
+    const withoutTrailingComma = withoutParamArtifacts.replace(/,+\s*$/, '')
     const normalized = withoutTrailingComma.replace(/,\s*([}\]])/g, '$1')
     try {
       return JSON.parse(normalized)
@@ -159,7 +161,8 @@ export class TargetUsersSectionWriter extends BaseSectionWriter {
     const plan = await this.generateStructuredWithFallback({
       schema: TargetUsersSectionPlanSchema,
       prompt,
-      temperature: DEFAULT_TEMPERATURE
+      temperature: DEFAULT_TEMPERATURE,
+      arrayFields: ['operations', 'proposedUsers']
     })
 
     const normalizedPlan = normalizeTargetUsersPlan(plan)

@@ -318,9 +318,12 @@ const normalizePersona = (persona: PersonaProfile): PersonaProfile => ({
 
 interface EditablePersonaFormProps {
   persona: PersonaProfile
+  // eslint-disable-next-line no-unused-vars
   onFieldChange: (field: keyof PersonaProfile, value: string) => void
   onArrayChange: (
+    // eslint-disable-next-line no-unused-vars
     field: keyof Pick<PersonaProfile, 'goals' | 'frustrations' | 'opportunities' | 'successIndicators' | 'tags'>,
+    // eslint-disable-next-line no-unused-vars
     value: string
   ) => void
   onSave: () => void
@@ -365,7 +368,7 @@ const EditablePersonaForm = ({ persona, onFieldChange, onArrayChange, onSave, on
   )
 }
 
-const PersonaArrayField = ({ label, value, onChange, helperText }: { label: string; value: string; onChange: (value: string) => void; helperText?: string }) => (
+const PersonaArrayField = ({ label, value, onChange, helperText }: { label: string; value: string; onChange: (_value: string) => void; helperText?: string }) => (
   <div className="space-y-1">
     <label className="text-xs uppercase tracking-wide text-muted-foreground">{label}</label>
     <Textarea value={value} onChange={event => onChange(event.target.value)} rows={3} />
