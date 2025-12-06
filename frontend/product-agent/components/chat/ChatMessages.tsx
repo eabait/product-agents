@@ -122,7 +122,6 @@ export function ChatMessages({
                 status={card.status}
                 startedAt={card.startedAt}
                 completedAt={card.completedAt}
-                defaultCollapsed={card.status !== 'active'}
               />
             </motion.div>
           ))}
@@ -145,7 +144,6 @@ export function ChatMessages({
             status={card.status}
             startedAt={card.startedAt}
             completedAt={card.completedAt}
-            defaultCollapsed={card.status !== 'active'}
           />
         </motion.div>
       ))}
