@@ -213,7 +213,6 @@ Runs automatically sequence the available subagents; the SSE stream emits `plan.
 
 **Persona agent controls**
 
-- `PERSONA_AGENT_FORCE_HEURISTIC=true` – Short-circuits the LLM runner and forces the deterministic personas. Handy for low-trust environments or live rollback.
 - Persona artifacts attach `metadata.extras.telemetry` so downstream consumers can plot latency, strategy (`llm` vs `heuristic`), and sanitized previews without logging the full prompt.
 
 ### 3. Settings and Configuration Management

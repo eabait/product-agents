@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-export const ArtifactTypeSchema = z.enum(['prd'])
+export const ArtifactTypeSchema = z.enum(['prd', 'persona', 'story-map', 'prompt'])
 
 export const MessageSchema = z.object({
   id: z.string(),

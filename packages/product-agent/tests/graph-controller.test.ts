@@ -467,3 +467,108 @@ test('GraphController selects verifier by artifact kind', async () => {
     await fs.rm(workspaceRoot, { recursive: true, force: true })
   }
 })
+
+test('GraphController falls back to direct tool execution when provider call fails', async () => {
+  const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'product-agent-tool-fallback-'))
+  const workspaceDao = new FilesystemWorkspaceDAO({ root: workspaceRoot, clock: fixedClock })
+  const config = getDefaultProductAgentConfig()
+  config.workspace.storageRoot = workspaceRoot
+
+  const planNode = {
+    id: 'prd-step',
+    label: 'Generate PRD',
+    task: { kind: 'legacy-prd-run' },
+    status: 'pending' as const,
+    dependsOn: [] as string[],
+    metadata: { skillId: 'prd.legacy-orchestrator', kind: 'skill' }
+  }
+
+  const plan = {
+    id: 'plan-fallback',
+    artifactKind: 'prd',
+    entryId: planNode.id,
+    createdAt: fixedClock(),
+    version: 'test-plan',
+    nodes: {
+      [planNode.id]: planNode
+    }
+  }
+
+  const planner = {
+    async createPlan(context: any) {
+      return { plan, context }
+    },
+    async refinePlan(input: any) {
+      return { plan: input.currentPlan, context: input.context }
+    }
+  }
+
+  const artifact = {
+    id: 'artifact-fallback',
+    kind: 'prd',
+    version: '1.0.0',
+    data: { sections: {}, metadata: {}, validation: { is_valid: true, issues: [], warnings: [] } },
+    metadata: { createdAt: fixedClock().toISOString() }
+  }
+
+  const skillRunner = {
+    async invoke() {
+      return {
+        output: artifact.data,
+        metadata: { artifact },
+        confidence: 0.9
+      }
+    }
+  }
+
+  const verifier = {
+    async verify({ artifact: inputArtifact }: any) {
+      return {
+        status: 'pass' as const,
+        artifact: inputArtifact,
+        issues: [] as any[]
+      }
+    }
+  }
+
+  let invokerCalls = 0
+  const failingToolInvoker = async () => {
+    invokerCalls += 1
+    const error: any = new Error('Bad Request')
+    error.status = 400
+    throw error
+  }
+
+  const controller = new GraphController(
+    {
+      planner,
+      skillRunner,
+      verifier: { primary: verifier, registry: { prd: verifier } },
+      workspace: workspaceDao
+    },
+    config,
+    {
+      clock: fixedClock,
+      idFactory: () => 'tool-fallback-run',
+      toolInvoker: failingToolInvoker
+    }
+  )
+
+  try {
+    const summary = await controller.start({
+      request: {
+        artifactKind: 'prd',
+        input: { message: 'generate prd', settings: { apiKey: 'test-key' } },
+        createdBy: 'unit-test',
+        attributes: { apiKey: 'test-key' }
+      }
+    })
+
+    assert.equal(invokerCalls, 1)
+    assert.equal(summary.status, 'completed')
+    assert.equal(summary.artifact?.id, artifact.id)
+  } finally {
+    await workspaceDao.teardown('tool-fallback-run').catch(() => {})
+    await fs.rm(workspaceRoot, { recursive: true, force: true })
+  }
+})

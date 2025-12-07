@@ -52,7 +52,7 @@ export const createOpenRouterProvider = (
     apiKey,
     baseURL,
     headers: buildHeaders(options?.headers),
-    compatibility: options?.compatibility ?? 'strict',
+    compatibility: options?.compatibility ?? 'compatible',
     fetch: options?.fetch,
     extraBody: {
       usage: {

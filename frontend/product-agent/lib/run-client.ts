@@ -1,11 +1,14 @@
 import type { AgentSettingsState, Message } from '@/types'
 
+type ArtifactType = 'prd' | 'persona' | 'story-map' | 'prompt'
+
 interface StartRunParams {
   messages: Message[]
   settings: AgentSettingsState
   contextPayload?: unknown
   targetSections?: string[]
   runId?: string
+  artifactType?: ArtifactType
 }
 
 interface StartRunResult {
@@ -30,6 +33,7 @@ export const startRun = async (params: StartRunParams): Promise<StartRunResult> 
         settings: params.settings,
         contextPayload: params.contextPayload,
         targetSections: params.targetSections,
+        artifactType: params.artifactType,
         stream: false
       })
     })
@@ -56,7 +60,8 @@ export const startRun = async (params: StartRunParams): Promise<StartRunResult> 
       messages: params.messages,
       settings: params.settings,
       contextPayload: params.contextPayload,
-      targetSections: params.targetSections
+      targetSections: params.targetSections,
+      artifactType: params.artifactType
     })
   })
 
@@ -106,4 +111,4 @@ export const streamRun = async (
   return response
 }
 
-export type { StartRunParams }
+export type { StartRunParams, ArtifactType }

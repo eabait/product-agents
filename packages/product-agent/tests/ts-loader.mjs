@@ -32,13 +32,18 @@ try {
 const resolveFromParent = async (specifier, parentURL) => {
   const parentPath = parentURL ? fileURLToPath(parentURL) : process.cwd()
   const basePath = path.resolve(path.dirname(parentPath), specifier)
+  const ext = path.extname(basePath)
+  const baseCandidates =
+    ext && ['.js', '.mjs', '.cjs'].includes(ext)
+      ? [basePath.slice(0, -ext.length), basePath]
+      : [basePath]
 
-  const candidates = TS_EXTENSIONS.some(ext => specifier.endsWith(ext))
-    ? [basePath]
-    : [
-        ...TS_EXTENSIONS.map(ext => `${basePath}${ext}`),
-        ...TS_EXTENSIONS.map(ext => path.join(basePath, `index${ext}`))
-      ]
+  const candidates = TS_EXTENSIONS.some(extension => specifier.endsWith(extension))
+    ? baseCandidates
+    : baseCandidates.flatMap(base => [
+        ...TS_EXTENSIONS.map(extCandidate => `${base}${extCandidate}`),
+        ...TS_EXTENSIONS.map(extCandidate => path.join(base, `index${extCandidate}`))
+      ])
 
   for (const candidate of candidates) {
     try {

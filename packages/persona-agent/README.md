@@ -14,7 +14,6 @@ LLM-backed persona synthesis package that plugs into the product-agent orchestra
 | Setting | Description |
 | --- | --- |
 | `runtime.defaultModel`, `runtime.defaultTemperature`, `runtime.maxOutputTokens` | Pulled from the global product-agent config and passed to the runner. |
-| `PERSONA_AGENT_FORCE_HEURISTIC=true` | Optional flag to skip the LLM entirely and rely on the heuristic personas. Useful for smoke tests or constrained environments. |
 
 Every persona artifact stores its source metadata plus the runner strategy, usage, and telemetry snapshot under `artifact.metadata.extras`. Downstream consumers (API, frontend) can read `summary.subagents[i].metadata.telemetry` to display latency or flag fallback events.
 

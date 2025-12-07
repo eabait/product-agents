@@ -1,7 +1,7 @@
 {
   "name": "@product-agents/product-agents-frontend",
   "version": "1.0.0",
-  "description": "PRD Generator Agent frontend",
+  "description": "Product Agents frontend",
   "private": true,
   "scripts": {
     "dev": "next dev",

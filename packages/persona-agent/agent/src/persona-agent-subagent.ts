@@ -15,8 +15,8 @@ import {
   extractSuccessMetrics,
   extractSolutionSummary,
   buildPersonaProfiles
-} from './persona-subagent'
-import { PersonaAgentRunner, type PersonaAgentTelemetry } from './persona-agent-runner'
+} from './persona-subagent.js'
+import { PersonaAgentRunner } from './persona-agent-runner.js'
 
 const PERSONA_AGENT_VERSION = '0.2.0'
 
@@ -80,157 +80,171 @@ export const createPersonaAgentSubagent = (
       tags: personaAgentManifest.capabilities
     },
     async execute(request) {
-      const params = (request.params as PersonaBuilderParams | undefined) ?? undefined
-      const sectionInput = request.run.request.input as SectionRoutingRequest | undefined
+      try {
+        const params = (request.params as PersonaBuilderParams | undefined) ?? undefined
+        const sectionInput = request.run.request.input as SectionRoutingRequest | undefined
 
-      emitProgress(request, 'persona-agent.context.start')
+        // Trace input shape for diagnostics
+        // eslint-disable-next-line no-console
+        console.log('[persona-agent] execute start', {
+          runId: request.run.runId,
+          artifactKind: request.run.request.artifactKind,
+          sourceArtifact: request.sourceArtifact?.id,
+          hasParams: !!params,
+          hasContextPayload: !!params?.contextPayload || !!sectionInput?.context?.contextPayload
+        })
 
-      const resolvedParams: PersonaBuilderParams | undefined =
-        params?.contextPayload || sectionInput?.context?.contextPayload
-          ? {
-              ...params,
-              contextPayload: params?.contextPayload ?? sectionInput?.context?.contextPayload
-            }
-          : params
+        emitProgress(request, 'persona-agent.context.start')
 
-      const { sections, summary: promptSummary, derivedFromPrompt } = resolveSectionsContext(
-        request.sourceArtifact as Artifact<SectionRoutingResponse> | undefined,
-        resolvedParams,
-        sectionInput
-      )
+        const resolvedParams: PersonaBuilderParams | undefined =
+          params?.contextPayload || sectionInput?.context?.contextPayload
+            ? {
+                ...params,
+                contextPayload: params?.contextPayload ?? sectionInput?.context?.contextPayload
+              }
+            : params
 
-      const sectionsUsed = new Set<string>()
-      if (derivedFromPrompt) {
-        sectionsUsed.add('promptContext')
-      }
+        const { sections, summary: promptSummary, derivedFromPrompt } = resolveSectionsContext(
+          request.sourceArtifact as Artifact<SectionRoutingResponse> | undefined,
+          resolvedParams,
+          sectionInput
+        )
 
-      const targetUsers = extractTargetUsers(sections, sectionsUsed)
-      const keyFeatures = extractKeyFeatures(sections, sectionsUsed)
-      const constraints = extractConstraints(sections, sectionsUsed)
-      const successMetrics = extractSuccessMetrics(sections, sectionsUsed)
-      let solutionSummary = extractSolutionSummary(sections, sectionsUsed)
-      if (!solutionSummary && promptSummary) {
-        solutionSummary = promptSummary
-        sectionsUsed.add('promptSummary')
-      }
+        // eslint-disable-next-line no-console
+        console.log('[persona-agent] resolved context', {
+          runId: request.run.runId,
+          derivedFromPrompt,
+          sectionKeys: Object.keys(sections || {})
+        })
 
-      const additionalNotes: string[] = []
-      if (!request.sourceArtifact) {
-        additionalNotes.push('No prior PRD artifact supplied; relying on prompt context only.')
-      }
-      if (targetUsers.length === 0) {
-        additionalNotes.push('Explicit target users missing — infer personas from broader PRD details.')
-      }
+        const sectionsUsed = new Set<string>()
+        if (derivedFromPrompt) {
+          sectionsUsed.add('promptContext')
+        }
 
-      emitProgress(request, 'persona-agent.generation.start', {
-        targetUsers: targetUsers.length,
-        keyFeatures: keyFeatures.length,
-        constraints: constraints.length,
-        successMetrics: successMetrics.length,
-        derivedFromPrompt
-      })
+        const targetUsers = extractTargetUsers(sections, sectionsUsed)
+        const keyFeatures = extractKeyFeatures(sections, sectionsUsed)
+        const constraints = extractConstraints(sections, sectionsUsed)
+        const successMetrics = extractSuccessMetrics(sections, sectionsUsed)
+        let solutionSummary = extractSolutionSummary(sections, sectionsUsed)
+        if (!solutionSummary && promptSummary) {
+          solutionSummary = promptSummary
+          sectionsUsed.add('promptSummary')
+        }
 
-      const llmDisabled = process.env.PERSONA_AGENT_FORCE_HEURISTIC === 'true'
+        const additionalNotes: string[] = []
+        if (!request.sourceArtifact) {
+          additionalNotes.push('No prior artifact supplied; relying on prompt context only.')
+        }
+        if (targetUsers.length === 0) {
+          additionalNotes.push('Explicit target users missing — infer personas from broader context details.')
+        }
 
-      const buildForcedTelemetry = (): PersonaAgentTelemetry => ({
-        model: request.run.settings.model,
-        durationMs: 0,
-        promptLength: 0,
-        promptPreview: undefined,
-        responsePreview: undefined,
-        strategy: 'heuristic',
-        timestamp: clock().toISOString(),
-        errorMessage: 'forced-heuristic-mode'
-      })
+        emitProgress(request, 'persona-agent.generation.start', {
+          targetUsers: targetUsers.length,
+          keyFeatures: keyFeatures.length,
+          constraints: constraints.length,
+          successMetrics: successMetrics.length,
+          derivedFromPrompt
+        })
 
-      const runnerResult: PersonaRunnerResult = llmDisabled
-        ? {
-            personas: [],
-            strategy: 'heuristic',
-            notes: ['LLM persona generation disabled via PERSONA_AGENT_FORCE_HEURISTIC.'],
-            telemetry: buildForcedTelemetry()
-          }
-        : await runner.run({
-            model: request.run.settings.model,
-            temperature: request.run.settings.temperature ?? 0.7,
-            maxOutputTokens: request.run.settings.maxOutputTokens ?? 800,
-            targetUsers,
-            keyFeatures,
-            constraints,
-            successMetrics,
-            solutionSummary,
-            promptSummary,
-            requestMessage: sectionInput?.message,
-            params: resolvedParams,
-            additionalNotes
-          })
+        const runnerResult: PersonaRunnerResult = await runner.run({
+          model: request.run.settings.model,
+          temperature: request.run.settings.temperature ?? 0.7,
+          maxOutputTokens: request.run.settings.maxOutputTokens ?? 800,
+          targetUsers,
+          keyFeatures,
+          constraints,
+          successMetrics,
+          solutionSummary,
+          promptSummary,
+          requestMessage: sectionInput?.message,
+          params: resolvedParams,
+          additionalNotes
+        })
 
-      emitProgress(request, 'persona-agent.generation.complete', {
-        strategy: runnerResult.strategy,
-        personaCount: runnerResult.personas.length
-      })
+        emitProgress(request, 'persona-agent.generation.complete', {
+          strategy: runnerResult.strategy,
+          personaCount: runnerResult.personas.length
+        })
 
-      const personas: PersonaProfile[] =
-        runnerResult.personas.length > 0
-          ? runnerResult.personas
-          : buildPersonaProfiles(targetUsers, keyFeatures, constraints, successMetrics, solutionSummary)
+        // eslint-disable-next-line no-console
+        console.log('[persona-agent] runner result', {
+          runId: request.run.runId,
+          strategy: runnerResult.strategy,
+          personaCount: runnerResult.personas.length
+        })
 
-      const generatedAt = clock().toISOString()
-      const artifactId = `artifact-${idFactory()}`
+        const personas: PersonaProfile[] =
+          runnerResult.personas.length > 0
+            ? runnerResult.personas
+            : buildPersonaProfiles(targetUsers, keyFeatures, constraints, successMetrics, solutionSummary)
 
-      const sourceArtifactId =
-        request.sourceArtifact?.id ?? (request.run.request.attributes?.sourceArtifactId as string | undefined)
-      const derivedSourceId = sourceArtifactId ?? `input-${request.run.runId}`
-      const sourceKind = request.sourceArtifact?.kind ?? request.run.request.artifactKind ?? 'prompt'
+        const generatedAt = clock().toISOString()
+        const artifactId = `artifact-${idFactory()}`
 
-      const personaArtifact: Artifact<PersonaArtifact> = {
-        id: artifactId,
-        kind: 'persona',
-        version: '1.0.0',
-        label: 'Persona Bundle',
-        data: {
-          personas,
-          source: {
-            artifactId: derivedSourceId,
-            artifactKind: sourceKind,
-            runId: request.run.runId,
-            sectionsUsed: Array.from(sectionsUsed)
+        const sourceArtifactId =
+          request.sourceArtifact?.id ?? (request.run.request.attributes?.sourceArtifactId as string | undefined)
+        const derivedSourceId = sourceArtifactId ?? `input-${request.run.runId}`
+        const sourceKind = request.sourceArtifact?.kind ?? request.run.request.artifactKind ?? 'prompt'
+
+        const personaArtifact: Artifact<PersonaArtifact> = {
+          id: artifactId,
+          kind: 'persona',
+          version: '1.0.0',
+          label: 'Persona Bundle',
+          data: {
+            personas,
+            source: {
+              artifactId: derivedSourceId,
+              artifactKind: sourceKind,
+              runId: request.run.runId,
+              sectionsUsed: Array.from(sectionsUsed)
+            },
+            generatedAt,
+            notes: buildArtifactNotes(additionalNotes, runnerResult.notes)
           },
-          generatedAt,
-          notes: buildArtifactNotes(additionalNotes, runnerResult.notes)
-        },
-        metadata: {
-          createdAt: generatedAt,
-          createdBy: request.run.request.createdBy,
-          tags: ['persona', runnerResult.strategy],
-          extras: {
-            sourceArtifactId: derivedSourceId,
+          metadata: {
+            createdAt: generatedAt,
+            createdBy: request.run.request.createdBy,
+            tags: ['persona', runnerResult.strategy],
+            extras: {
+              sourceArtifactId: derivedSourceId,
+              personaCount: personas.length,
+              sectionsUsed: Array.from(sectionsUsed),
+              sourceArtifactKind: sourceKind,
+              sourceMode: request.sourceArtifact ? 'artifact' : 'prompt',
+              generationStrategy: runnerResult.strategy,
+              usage: runnerResult.usage ?? null,
+              telemetry: runnerResult.telemetry ?? null
+            }
+          }
+        }
+
+        emitProgress(request, 'persona-agent.artifact.ready', {
+          personaCount: personas.length,
+          sourceKind,
+          sourceArtifactId: derivedSourceId
+        })
+
+        return {
+          artifact: personaArtifact,
+          metadata: {
             personaCount: personas.length,
             sectionsUsed: Array.from(sectionsUsed),
-            sourceArtifactKind: sourceKind,
-            sourceMode: request.sourceArtifact ? 'artifact' : 'prompt',
-            generationStrategy: runnerResult.strategy,
-            usage: runnerResult.usage ?? null,
+            sourceArtifactId: derivedSourceId,
+            strategy: runnerResult.strategy,
             telemetry: runnerResult.telemetry ?? null
           }
         }
-      }
-
-      emitProgress(request, 'persona-agent.artifact.ready', {
-        personaCount: personas.length,
-        sourceKind,
-        sourceArtifactId: derivedSourceId
-      })
-
-      return {
-        artifact: personaArtifact,
-        metadata: {
-          personaCount: personas.length,
-          sectionsUsed: Array.from(sectionsUsed),
-          sourceArtifactId: derivedSourceId,
-          strategy: runnerResult.strategy,
-          telemetry: runnerResult.telemetry ?? null
-        }
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.error('[persona-agent] execution error; aborting persona generation', {
+          runId: request.run.runId,
+          error: error instanceof Error ? error.message : error
+        })
+        const message = error instanceof Error ? error.message : 'Unknown error'
+        throw new Error(`Persona generation failed: ${message}`)
       }
     }
   }

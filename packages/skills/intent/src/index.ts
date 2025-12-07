@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import type { AgentSettings } from '@product-agents/agent-core'
 import { OpenRouterClient } from '@product-agents/openrouter-client'
+import { buildIntentPrompt } from './prompt'
 
 export type IntentClassifierClient = Pick<
   OpenRouterClient,
@@ -20,6 +21,11 @@ export interface IntentClassifierOutput {
   chain: string[]
   confidence: number
   probabilities: Record<string, number>
+  transitions?: Array<{
+    fromArtifact?: string
+    toArtifact: string
+  }>
+  requestedSections?: string[]
   rationale?: string
   guidance?: string
   metadata?: Record<string, unknown>
@@ -40,9 +46,16 @@ export interface IntentClassifierPromptContext extends IntentClassifierInput {
   timestamp: string
 }
 
+const TransitionSchema = z.object({
+  fromArtifact: z.string().min(1).optional(),
+  toArtifact: z.string().min(1)
+})
+
 const CLASSIFICATION_SCHEMA = z.object({
   targetArtifact: z.string().min(1),
-  chain: z.array(z.string().min(1)).min(1),
+  chain: z.array(z.string().min(1)).min(1).optional(),
+  transitions: z.array(TransitionSchema).optional(),
+  requestedSections: z.array(z.string().min(1)).optional(),
   confidence: z.number().min(0).max(1),
   probabilities: z
     .record(z.number().min(0).max(1))
@@ -69,7 +82,7 @@ export class IntentClassifierSkill {
       ...(options?.settings ?? {})
     }
     this.client = options?.client ?? new OpenRouterClient(options?.settings?.apiKey)
-    this.promptTemplate = options?.promptTemplate ?? defaultPromptTemplate
+    this.promptTemplate = options?.promptTemplate ?? buildIntentPrompt
     this.logger = options?.logger
   }
 
@@ -122,6 +135,32 @@ export class IntentClassifierSkill {
     }
 
     const chain: string[] = []
+
+    const normalizedTransitions: IntentClassifierOutput['transitions'] = []
+    if (Array.isArray(raw.transitions)) {
+      raw.transitions.forEach(transition => {
+        const toArtifact = transition.toArtifact ? normalizeKind(transition.toArtifact) : undefined
+        if (!toArtifact) {
+          return
+        }
+        const fromArtifact = transition.fromArtifact
+          ? normalizeKind(transition.fromArtifact)
+          : undefined
+        normalizedTransitions.push({ fromArtifact, toArtifact })
+      })
+    }
+
+    if (normalizedTransitions.length > 0) {
+      normalizedTransitions.forEach(transition => {
+        if (transition.fromArtifact && !chain.includes(transition.fromArtifact)) {
+          chain.push(transition.fromArtifact)
+        }
+        if (transition.toArtifact && !chain.includes(transition.toArtifact)) {
+          chain.push(transition.toArtifact)
+        }
+      })
+    }
+
     const rawChain = raw.chain ?? []
     rawChain.forEach(artifact => {
       const normalized = normalizeKind(artifact)
@@ -161,6 +200,10 @@ export class IntentClassifierSkill {
       chain,
       confidence: boundedConfidence,
       probabilities,
+      transitions: normalizedTransitions.length > 0 ? normalizedTransitions : undefined,
+      requestedSections: Array.isArray(raw.requestedSections)
+        ? Array.from(new Set(raw.requestedSections.map(value => value.trim()).filter(Boolean)))
+        : undefined,
       rationale: raw.rationale,
       guidance: raw.guidance
     }
@@ -179,32 +222,4 @@ export class IntentClassifierSkill {
   }
 }
 
-const defaultPromptTemplate = (context: IntentClassifierPromptContext): string => {
-  return `
-You are a friendly, concise intent classification expert that guides users to the right artifact plan.
-
-Available artifact types: ${context.availableArtifacts.join(', ')}.
-
-User message:
-"""
-${context.message}
-"""
-
-Return JSON with the following fields:
-- targetArtifact: the final artifact the orchestrator should deliver
-- chain: ordered list of artifacts to create (include intermediate steps like PRD before persona/story-map if necessary)
-- confidence: value between 0 and 1
-- probabilities: map of artifact -> probability score
-- rationale: brief explanation
-- guidance: one short, friendly sentence suggesting the next step or asking for the single most important missing input
-
-Rules:
-- Be encouraging and goal-directed. Reuse any referenced artifacts (e.g., "use the PRD we just made") instead of recreating them.
-- When personas or story maps are requested, include "prd" before them unless the user clearly provided a PRD already or insists on skipping it.
-- Start from the prompt when it is the only source. If context is thin or confidence <0.6, keep the chain conservative and use guidance to ask for 1–2 specifics (e.g., target users, success metrics, constraints, region).
-- Handle: fresh starts, starts with brief/research context, persona from prompt or PRD, story map from persona or PRD, multi-artifact requests (PRD + personas + story map), partial artifacts present (only personas or only PRD), updates/refinements to existing artifacts.
-- Keep guidance short and helpful, e.g., "I'll draft a PRD, then personas. Share target users if you have them."
-
-Current timestamp: ${context.timestamp}
-`
-}
+// defaultPromptTemplate moved to prompt.ts

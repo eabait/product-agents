@@ -40,7 +40,7 @@ import { ContextUsageIndicator } from "@/components/context/ContextUsageIndicato
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { contextStorage } from "@/lib/context-storage";
 import { buildEnhancedContextPayload, getContextSummary } from "@/lib/context-utils";
-import { getRun, startRun, streamRun } from "@/lib/run-client";
+import { getRun, startRun, streamRun, type ArtifactType } from "@/lib/run-client";
 import { 
   UI_DIMENSIONS, 
   VALIDATION_LIMITS, 
@@ -401,6 +401,22 @@ function PRDAgentPageContent() {
       }
     }
     return undefined;
+  };
+
+  const detectArtifactType = (messages: Message[]): ArtifactType => {
+    const lastUser = [...messages].reverse().find(message => message.role === 'user');
+    const content = lastUser?.content?.toLowerCase() ?? '';
+
+    const personaHint = /(persona|personas|user persona|audience|target users|user profile)/i;
+    const storyMapHint = /(story\s*map|journey map|user journey|user flow)/i;
+
+    if (storyMapHint.test(content)) {
+      return 'story-map';
+    }
+    if (personaHint.test(content)) {
+      return 'persona';
+    }
+    return 'prd';
   };
 
   const applyNodeStateEvent = (
@@ -1418,7 +1434,8 @@ function PRDAgentPageContent() {
     const appendSubagentArtifacts = (
       entries: unknown,
       usage?: any,
-      modelOverride?: string | null
+      modelOverride?: string | null,
+      primaryArtifactId?: string | null
     ) => {
       if (!Array.isArray(entries)) {
         return;
@@ -1433,6 +1450,9 @@ function PRDAgentPageContent() {
           metadata?: Record<string, unknown> | null
         };
         if (!candidate.artifact) {
+          return;
+        }
+        if (primaryArtifactId && (candidate.artifact as { id?: string }).id === primaryArtifactId) {
           return;
         }
         const key = candidate.subagentId ?? `subagent-${appendedSubagentIds.size + 1}`;
@@ -1450,11 +1470,14 @@ function PRDAgentPageContent() {
       });
     };
 
+    const artifactType = detectArtifactType(newMessages);
+
     try {
       const run = await startRun({
         messages: newMessages,
         settings,
         contextPayload,
+        artifactType,
       });
 
       if (!run.runId) {
@@ -1580,7 +1603,16 @@ function PRDAgentPageContent() {
                   finalizeProgressCard(fallbackCardId, 'completed');
                 }
                 if (eventData.subagents) {
-                  appendSubagentArtifacts(eventData.subagents, streamedUsageSummary ?? eventData.usage, streamedModel);
+                  const artifactId =
+                    typeof artifactPayload === 'object' && artifactPayload
+                      ? (artifactPayload as { id?: string }).id ?? null
+                      : null;
+                  appendSubagentArtifacts(
+                    eventData.subagents,
+                    streamedUsageSummary ?? eventData.usage,
+                    streamedModel,
+                    artifactId
+                  );
                 }
               } else if (eventData.content) {
                 const contentPayload = eventData.content;
@@ -1613,12 +1645,31 @@ function PRDAgentPageContent() {
                   finalizeProgressCard(fallbackCardId, 'completed');
                 }
               } else if (eventData.needsClarification) {
-                // Handle clarification request
-                const questionsText = eventData.questions?.map((q: string, index: number) => 
-                  `**${index + 1}. ${q}**`
-                ).join('\n\n');
-                
-                const content = `I need more information to create a comprehensive PRD. Please help me understand:\n\n${questionsText}\n\nPlease provide as much detail as possible for each area.`;
+                // Handle clarification/guidance requests for any artifact
+                const questions = Array.isArray(eventData.questions)
+                  ? eventData.questions.filter((q: string) => typeof q === 'string' && q.trim())
+                  : [];
+                const guidance =
+                  typeof eventData.guidance === 'string' && eventData.guidance.trim()
+                    ? eventData.guidance.trim()
+                    : null;
+
+                const questionsText =
+                  questions.length > 0
+                    ? questions
+                        .map((q: string, index: number) => `**${index + 1}. ${q}**`)
+                        .join('\n\n')
+                    : '';
+
+                const contentParts = ['I need a bit more information to continue.'];
+                if (guidance) {
+                  contentParts.push(guidance);
+                }
+                if (questionsText) {
+                  contentParts.push(questionsText);
+                }
+                const content = contentParts.join('\n\n');
+
                 const assistantMetadata = buildAssistantMetadata(
                   streamedUsageSummary ?? eventData.usage,
                   streamedModel,
@@ -1686,7 +1737,16 @@ function PRDAgentPageContent() {
           }
 
           if (runSummary?.summary?.subagents) {
-            appendSubagentArtifacts(runSummary.summary.subagents, runSummary?.usage ?? null, streamedModel);
+            const artifactId =
+              typeof runSummary?.artifact === 'object' && runSummary?.artifact
+                ? (runSummary.artifact as { id?: string }).id ?? null
+                : null;
+            appendSubagentArtifacts(
+              runSummary.summary.subagents,
+              runSummary?.usage ?? null,
+              streamedModel,
+              artifactId
+            );
           }
         } catch (fallbackError) {
           console.warn('Failed to fetch run summary after stream completion', fallbackError);
@@ -1706,10 +1766,12 @@ function PRDAgentPageContent() {
     contextPayload: any,
     userMessage: Message
   ) => {
+    const artifactType = detectArtifactType(newMessages);
     const runResult = await startRun({
       messages: newMessages,
       settings,
-      contextPayload
+      contextPayload,
+      artifactType
     });
 
     const data: any = runResult.result ?? {}
@@ -1759,7 +1821,7 @@ function PRDAgentPageContent() {
         </Button>
 
         <div className="flex-1">
-          <h1 className="text-lg font-semibold">PRD Generator Agent</h1>
+          <h1 className="text-lg font-semibold">Product Agents</h1>
         </div>
 
         <div className="flex items-center gap-2">
@@ -1978,9 +2040,9 @@ function PRDAgentPageContent() {
           <div ref={scrollRef} className="flex-1 overflow-auto p-6">
             {activeMessages.length === 0 ? (
               <div className="mx-auto max-w-2xl text-center py-24">
-                <h2 className="text-2xl font-bold mb-2">Welcome to PRD Agent</h2>
+                <h2 className="text-2xl font-bold mb-2">Welcome to Product Agent</h2>
                 <p className="text-muted-foreground mb-6">
-                  Ask the agent to generate or edit a PRD. Try: &quot;Create a PRD for a mobile payment app&quot;
+                  Ask the agent to generate or edit a PRD or Personas.
                 </p>
                 <div className="grid gap-2">
                   <button
@@ -2000,6 +2062,15 @@ function PRDAgentPageContent() {
                     }}
                   >
                     Create a PRD for an AI customer support chatbot
+                  </button>
+                  <button
+                    className="rounded-md border p-3 text-left hover:bg-accent"
+                    onClick={() => {
+                      const suggestion = "Create Personas for a note taking app";
+                      setInput(suggestion);
+                    }}
+                  >
+                    Create Personas for a note taking app
                   </button>
                 </div>
               </div>

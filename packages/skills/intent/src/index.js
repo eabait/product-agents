@@ -1,8 +1,16 @@
 import { z } from 'zod';
 import { OpenRouterClient } from '@product-agents/openrouter-client';
+import { buildIntentPrompt } from './prompt.js';
+const TransitionSchema = z.object({
+    fromArtifact: z.string().min(1).optional(),
+    toArtifact: z.string().min(1)
+});
 const CLASSIFICATION_SCHEMA = z.object({
     targetArtifact: z.string().min(1),
-    chain: z.array(z.string().min(1)).min(1),
+    chain: z.array(z.string().min(1)).min(1).optional(),
+    transitions: z.array(TransitionSchema).optional(),
+    requestedSections: z.array(z.string().min(1)).optional(),
+    startFrom: z.string().min(1).optional(),
     confidence: z.number().min(0).max(1),
     probabilities: z
         .record(z.number().min(0).max(1))
@@ -26,7 +34,7 @@ export class IntentClassifierSkill {
             ...(options?.settings ?? {})
         };
         this.client = options?.client ?? new OpenRouterClient(options?.settings?.apiKey);
-        this.promptTemplate = options?.promptTemplate ?? defaultPromptTemplate;
+        this.promptTemplate = options?.promptTemplate ?? buildIntentPrompt;
         this.logger = options?.logger;
     }
     async classify(input) {
@@ -64,6 +72,24 @@ export class IntentClassifierSkill {
             return match ?? value;
         };
         const chain = [];
+        const normalizedTransitions = Array.isArray(raw.transitions)
+            ? raw.transitions
+                .map((transition) => ({
+                fromArtifact: transition.fromArtifact ? normalizeKind(transition.fromArtifact) : undefined,
+                toArtifact: transition.toArtifact ? normalizeKind(transition.toArtifact) : undefined
+            }))
+                .filter(entry => entry.toArtifact)
+            : [];
+        if (normalizedTransitions.length > 0) {
+            normalizedTransitions.forEach(transition => {
+                if (transition.fromArtifact && !chain.includes(transition.fromArtifact)) {
+                    chain.push(transition.fromArtifact);
+                }
+                if (transition.toArtifact && !chain.includes(transition.toArtifact)) {
+                    chain.push(transition.toArtifact);
+                }
+            });
+        }
         const rawChain = raw.chain ?? [];
         rawChain.forEach(artifact => {
             const normalized = normalizeKind(artifact);
@@ -71,7 +97,7 @@ export class IntentClassifierSkill {
                 chain.push(normalized);
             }
         });
-        const normalizedTarget = normalizeKind(raw.targetArtifact ?? availableArtifacts[0] ?? 'prd');
+        const normalizedTarget = normalizeKind(raw.targetArtifact ?? chain[chain.length - 1] ?? availableArtifacts[0] ?? 'prd');
         if (!chain.includes(normalizedTarget)) {
             chain.push(normalizedTarget);
         }
@@ -98,7 +124,11 @@ export class IntentClassifierSkill {
             confidence: boundedConfidence,
             probabilities,
             rationale: raw.rationale,
-            guidance: raw.guidance
+            guidance: raw.guidance,
+            transitions: normalizedTransitions.length > 0 ? normalizedTransitions : undefined,
+            requestedSections: Array.isArray(raw.requestedSections)
+                ? Array.from(new Set(raw.requestedSections.map(value => value.trim()).filter(Boolean)))
+                : undefined
         };
     }
     composeMetadata(output) {

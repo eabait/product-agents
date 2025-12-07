@@ -607,29 +607,42 @@ export class GraphController implements AgentController {
       return this.invokeToolDirectly(params.tool, params.node, params.context, params.options)
     }
 
-    const response = await this.toolInvoker({
-      model: params.model as any,
-      system: this.buildToolSystemPrompt(params.context),
-      prompt: this.buildToolPrompt(params.context, params.node),
-      tools: {
-        [params.toolName]: params.tool as any
-      },
-      toolChoice: { type: 'tool', toolName: params.toolName },
-      maxTokens: Math.min(params.context.runContext.settings.maxOutputTokens ?? 8000, 512),
-      temperature: params.context.runContext.settings.temperature,
-      maxRetries: this.config.runtime.retry.attempts,
-      abortSignal: params.options?.signal
-    })
+    try {
+      const response = await this.toolInvoker({
+        model: params.model as any,
+        system: this.buildToolSystemPrompt(params.context),
+        prompt: this.buildToolPrompt(params.context, params.node),
+        tools: {
+          [params.toolName]: params.tool as any
+        },
+        toolChoice: { type: 'tool', toolName: params.toolName },
+        maxTokens: Math.min(params.context.runContext.settings.maxOutputTokens ?? 8000, 512),
+        temperature: params.context.runContext.settings.temperature,
+        maxRetries: this.config.runtime.retry.attempts,
+        abortSignal: params.options?.signal
+      })
 
-    const toolResult =
-      (response as any).toolResults?.[0]?.result ??
-      (response as any).toolResults?.[0]?.output ??
-      (response as any).toolResults?.[0]
-    if (!toolResult) {
-      throw new Error(`Tool "${params.toolName}" did not return a result`)
+      const toolResult =
+        (response as any).toolResults?.[0]?.result ??
+        (response as any).toolResults?.[0]?.output ??
+        (response as any).toolResults?.[0]
+      if (!toolResult) {
+        throw new Error(`Tool "${params.toolName}" did not return a result`)
+      }
+
+      return toolResult as ToolExecutionResult
+    } catch (error) {
+      const providerError = this.extractProviderError(error)
+      if (providerError) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[graph-controller] model tool invocation failed for node ${params.node.id} (run ${params.context.runContext.runId}); falling back to direct execution`,
+          { status: providerError.status, message: providerError.message }
+        )
+        return this.invokeToolDirectly(params.tool, params.node, params.context, params.options)
+      }
+      throw error
     }
-
-    return toolResult as ToolExecutionResult
   }
 
   private async invokeToolDirectly(
@@ -651,6 +664,42 @@ export class GraphController implements AgentController {
     )
 
     return result as ToolExecutionResult
+  }
+
+  private extractProviderError(error: unknown): { status?: number; message?: string } | null {
+    if (!error) {
+      return null
+    }
+
+    const candidate = error as Record<string, unknown>
+    const status =
+      typeof candidate?.status === 'number'
+        ? (candidate.status as number)
+        : typeof candidate?.statusCode === 'number'
+          ? (candidate.statusCode as number)
+          : typeof (candidate?.response as { status?: number } | undefined)?.status === 'number'
+            ? ((candidate.response as { status: number }).status as number)
+            : undefined
+
+    const message =
+      typeof candidate?.message === 'string'
+        ? (candidate.message as string)
+        : typeof error === 'string'
+          ? (error as string)
+          : undefined
+
+    const normalizedMessage = message?.toLowerCase() ?? ''
+    const isProviderFailure =
+      (status !== undefined && status >= 400 && status < 500) ||
+      normalizedMessage.includes('bad request') ||
+      normalizedMessage.includes('unauthorized') ||
+      (typeof candidate?.name === 'string' && candidate.name === 'AIRequestError')
+
+    if (!isProviderFailure) {
+      return null
+    }
+
+    return { status, message }
   }
 
   private async handleSkillToolResult(params: {

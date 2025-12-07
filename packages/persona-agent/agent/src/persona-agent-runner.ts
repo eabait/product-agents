@@ -3,7 +3,51 @@ import { z } from 'zod'
 import { OpenRouterClient } from '@product-agents/openrouter-client'
 type GenerationUsage = ReturnType<OpenRouterClient['getLastUsage']>
 
-import { buildPersonaProfiles, type PersonaBuilderParams, type PersonaProfile } from './persona-subagent'
+import { buildPersonaProfiles, type PersonaBuilderParams, type PersonaProfile } from './persona-subagent.js'
+
+// Coerce persona payloads that sometimes arrive as JSON strings with stray parameter tags
+const parsePersonaArrayString = (value: string): unknown => {
+  const candidates: string[] = []
+  const addCandidate = (candidate?: string) => {
+    if (candidate && !candidates.includes(candidate)) {
+      candidates.push(candidate)
+    }
+  }
+
+  const trimmed = value.trim()
+  const withoutFences = trimmed.replace(/^```(?:json)?/i, '').replace(/```\s*$/i, '').trim()
+
+  addCandidate(withoutFences)
+  addCandidate(withoutFences.replace(/,\s*$/, ''))
+
+  if (withoutFences.startsWith('[')) {
+    const lastBracket = withoutFences.lastIndexOf(']')
+    if (lastBracket > 0) {
+      addCandidate(withoutFences.slice(0, lastBracket + 1))
+    }
+  }
+
+  if (withoutFences.includes('<parameter')) {
+    const beforeParameter = withoutFences.slice(0, withoutFences.indexOf('<parameter')).trim()
+    addCandidate(beforeParameter.replace(/,\s*$/, ''))
+  }
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate)
+      if (Array.isArray(parsed)) {
+        return parsed
+      }
+      if (parsed && typeof parsed === 'object' && Array.isArray((parsed as any).personas)) {
+        return (parsed as any).personas
+      }
+    } catch {
+      // continue to next candidate
+    }
+  }
+
+  return undefined
+}
 
 const PersonaProfileSchema = z.object({
   id: z.string().min(1).optional(),
@@ -19,11 +63,11 @@ const PersonaProfileSchema = z.object({
 
 const PersonaArraySchema = z.preprocess(value => {
   if (typeof value === 'string') {
-    try {
-      return JSON.parse(value)
-    } catch {
-      return value
+    const parsed = parsePersonaArrayString(value)
+    if (parsed !== undefined) {
+      return parsed
     }
+    return value
   }
   return value
 }, z.array(PersonaProfileSchema).min(1).max(4))
@@ -33,6 +77,15 @@ const PersonaNotesSchema = z.preprocess(value => {
     return value
   }
   if (typeof value === 'string') {
+    const trimmed = value.trim()
+    try {
+      const parsed = JSON.parse(trimmed)
+      if (Array.isArray(parsed)) {
+        return parsed
+      }
+    } catch {
+      // fallback to wrapping string
+    }
     return [value]
   }
   return value

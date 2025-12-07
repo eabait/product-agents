@@ -1,11 +1,12 @@
 {
   "extends": "../../../tsconfig.json",
   "compilerOptions": {
-    "rootDir": "../..",
+    "rootDir": "src",
     "outDir": "dist",
-    "noEmit": true,
+    "noEmit": false,
+    "declaration": true,
+    "declarationMap": true,
     "composite": false,
-    "allowImportingTsExtensions": true,
     "moduleResolution": "node",
     "paths": {
       "@product-agents/product-agent": ["./packages/persona-agent/agent/src/types/product-agent"],

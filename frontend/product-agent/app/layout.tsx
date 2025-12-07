@@ -2,8 +2,8 @@ import type { Metadata } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'PRD Generator Agent',
-  description: 'AI-powered Product Requirements Document generator',
+  title: 'Product Agents',
+  description: 'Agents for Product Development',
 }
 
 export default function RootLayout({

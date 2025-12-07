@@ -109,7 +109,7 @@ const DEFAULT_PERSONA_SUBAGENT_MANIFEST: SubagentConfigEntry = {
 
 const DEFAULT_CONFIG: ProductAgentConfig = {
   runtime: {
-    defaultModel: 'qwen/qwen3-235b-a22b-2507', //'anthropic/claude-3.5-haiku',
+    defaultModel: 'openai/gpt-5.1', //'qwen/qwen3-235b-a22b-2507', //'anthropic/claude-haiku-4.5',
     defaultTemperature: 0.2,
     maxOutputTokens: 8000,
     allowStreaming: true,

@@ -581,6 +581,16 @@ export const resolveSectionsContext = (
   input: unknown
 ): { sections: SectionsMap; summary?: string; derivedFromPrompt: boolean } => {
   if (sourceArtifact) {
+    // If the upstream artifact is not a PRD bundle, fall back to prompt-derived sections.
+    if (sourceArtifact.kind && sourceArtifact.kind !== 'prd') {
+      const fallback = buildSectionsFromPrompt(params, input as SectionRoutingRequest | undefined)
+      return {
+        sections: fallback.sections,
+        summary: fallback.summary,
+        derivedFromPrompt: true
+      }
+    }
+
     const sourceData = sourceArtifact.data as SectionRoutingResponse | undefined
     if (!sourceData || typeof sourceData !== 'object' || !('sections' in sourceData)) {
       throw new Error('Persona builder expected PRD sections in the source artifact.')

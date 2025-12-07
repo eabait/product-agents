@@ -48,7 +48,17 @@ export class IntentResolver {
 
     try {
       const classification = await this.classifier.classify(classifierInput)
-      const plan = this.buildIntentFromClassification(classification, existingArtifacts.kinds)
+      if (this.logger?.debug) {
+        this.logger.debug('[intent-resolver] classifier output', classification)
+      } else {
+        // eslint-disable-next-line no-console
+        console.log('[intent-resolver] classifier output', classification)
+      }
+      const plan = this.buildIntentFromClassification(
+        classification,
+        existingArtifacts.kinds,
+        context.request.artifactKind
+      )
       if (plan) {
         this.cacheIntent(context, plan)
         return plan
@@ -170,7 +180,8 @@ export class IntentResolver {
 
   private buildIntentFromClassification(
     classification: IntentClassifierOutput,
-    existingArtifacts: ArtifactKind[]
+    existingArtifacts: ArtifactKind[],
+    requestedArtifactKind?: ArtifactKind
   ): ArtifactIntent | null {
     const uniqueRequested = Array.from(
       new Set(classification.chain ?? [])
@@ -181,11 +192,14 @@ export class IntentResolver {
     }
 
     // Remove upstream artifacts that already exist, but keep the target artifact
-    const requested = uniqueRequested.filter(
+    let requested = uniqueRequested.filter(
       artifact => artifact === classification.targetArtifact || !existingArtifacts.includes(artifact)
     )
 
-    if (requested.length === 0) {
+    if (requestedArtifactKind === 'persona' && classification.targetArtifact === 'persona') {
+      // Force prompt-first persona chain when the caller explicitly asked for personas.
+      requested = ['persona']
+    } else if (requested.length === 0) {
       requested.push(classification.targetArtifact)
     }
 
@@ -193,18 +207,22 @@ export class IntentResolver {
       source: 'resolver',
       requestedArtifacts: requested,
       targetArtifact: classification.targetArtifact,
-      transitions: requested.map((artifact, index) => ({
-        fromArtifact: index === 0 ? undefined : requested[index - 1],
-        toArtifact: artifact,
-        metadata: {
-          probability: classification.probabilities?.[artifact]
-        }
-      })),
+      transitions:
+        classification.transitions && classification.transitions.length > 0
+          ? classification.transitions
+          : requested.map((artifact, index) => ({
+              fromArtifact: index === 0 ? undefined : requested[index - 1],
+              toArtifact: artifact,
+              metadata: {
+                probability: classification.probabilities?.[artifact]
+              }
+            })),
       confidence: classification.confidence,
       status: 'ready',
       metadata: {
         probabilities: classification.probabilities,
         rationale: classification.rationale,
+        requestedSections: classification.requestedSections,
         ...(classification.metadata ?? {})
       }
     }
@@ -232,8 +250,24 @@ export class IntentResolver {
     reason: string
   ): ArtifactIntent {
     const target = context.request.artifactKind ?? 'prd'
-    const chain =
-      target === 'persona' || target === 'story-map' ? (['prd', target] as ArtifactKind[]) : [target]
+    const existing = extractExistingArtifactsFromContext(context).kinds
+
+    const chain: ArtifactKind[] = []
+    if (target === 'persona' || target === 'story-map') {
+      // Prefer to start directly from the requested artifact when no upstream context exists.
+      // If a PRD already exists, keep it in the chain as upstream context.
+      if (existing.includes('prd')) {
+        chain.push('prd')
+      } else if (target === 'story-map' && existing.includes('persona')) {
+        chain.push('persona')
+      }
+      if (!chain.includes(target)) {
+        chain.push(target)
+      }
+    } else {
+      chain.push(target)
+    }
+
     const transitions: ArtifactTransition[] = []
     chain.forEach((artifact, index) => {
       transitions.push({
