@@ -14,6 +14,7 @@ import type { VerificationResult, Verifier } from '../contracts/verifier'
 import type { ProductAgentConfig, ProductAgentApiOverrides } from '../config/product-agent.config'
 import { resolveRunSettings } from '../config/product-agent.config'
 import type { Artifact, ArtifactKind, PlanNode, StepId } from '../contracts/core'
+import type { ArtifactIntent } from '../contracts/intent'
 import type { WorkspaceDAO, WorkspaceEvent, WorkspaceHandle } from '../contracts/workspace'
 import type { Planner } from '../contracts/planner'
 import type { ClarificationResult, SectionRoutingRequest } from '@product-agents/prd-shared'
@@ -1208,7 +1209,14 @@ export class GraphController implements AgentController {
       return
     }
 
-    const resolvedSubagents = await this.resolveSubagents(context, options)
+    const requestedArtifacts = this.resolveRequestedArtifacts(context)
+    if (requestedArtifacts.size === 0) {
+      return
+    }
+
+    const resolvedSubagents = (await this.resolveSubagents(context, options)).filter(subagent =>
+      requestedArtifacts.has(subagent.metadata.artifactKind)
+    )
     if (resolvedSubagents.length === 0) {
       return
     }
@@ -1217,6 +1225,9 @@ export class GraphController implements AgentController {
     const sourceKind = context.artifact.kind
     const executedSubagents = new Set(context.subagentResults.map(result => result.subagentId))
     const shouldRunSubagent = (subagent: SubagentLifecycle) => {
+      if (!requestedArtifacts.has(subagent.metadata.artifactKind)) {
+        return false
+      }
       if (
         subagent.metadata.sourceKinds.length > 0 &&
         !subagent.metadata.sourceKinds.includes(sourceKind)
@@ -1407,6 +1418,31 @@ export class GraphController implements AgentController {
     }
 
     return resolved
+  }
+
+  private resolveRequestedArtifacts(context: ExecutionContext): Set<ArtifactKind> {
+    const requested = new Set<ArtifactKind>()
+    const planMetadata = context.plan.metadata as { intent?: ArtifactIntent } | undefined
+    const intent = context.runContext.intentPlan ?? planMetadata?.intent
+
+    const addArtifact = (artifact?: ArtifactKind) => {
+      if (artifact) {
+        requested.add(artifact)
+      }
+    }
+
+    if (intent) {
+      intent.requestedArtifacts?.forEach(addArtifact)
+      addArtifact(intent.targetArtifact)
+      intent.transitions?.forEach(transition => {
+        addArtifact(transition.fromArtifact)
+        addArtifact(transition.toArtifact)
+      })
+    }
+
+    addArtifact(context.runContext.request.artifactKind as ArtifactKind | undefined)
+
+    return requested
   }
 
   private toSummary<TArtifact>(
