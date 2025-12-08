@@ -1,0 +1,26 @@
+{
+  "name": "@product-agents/research-agent",
+  "version": "0.1.0",
+  "description": "Research subagent for market intelligence and competitor analysis with web search capabilities",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "node --test --loader ./tests/ts-loader.mjs tests/**/*.test.ts",
+    "lint": "eslint 'src/**/*.{ts,tsx}'",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@product-agents/product-agent": "*",
+    "@product-agents/agent-core": "*",
+    "zod": "^3.25.76"
+  },
+  "peerDependencies": {
+    "ai": "^3.1.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

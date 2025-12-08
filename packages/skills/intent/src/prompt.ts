@@ -38,6 +38,9 @@ Rules:
 - Only include artifacts you truly need; avoid redundant steps.
 - Keep chains deterministic and minimal; never invent artifacts outside the available list.
 - If information is insufficient, set confidence < 0.6 and use guidance to ask for the top missing item.
+- If the user asks to "research", "investigate", "explore", "understand the market", "analyze competitors", or "gather intelligence", use research as the target artifact.
+- Research artifacts can be used as input to PRDs or personas to provide market context. Chain: research -> prd or research -> persona.
+- If the request is for a PRD or persona but lacks domain context (e.g., "create a neobank PRD" without market details), consider suggesting research first with low confidence.
 
 Current timestamp: ${context.timestamp}
 `
