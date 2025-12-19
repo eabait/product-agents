@@ -505,15 +505,18 @@ export class GraphController implements AgentController {
             })
 
       try {
-        const toolResult = await this.invokeToolWithModel({
-          toolName,
-          tool,
-          model,
-          node,
-          context,
-          options,
-          hasApiKey
-        })
+        // For subagents, use direct execution to avoid tool choice issues
+        const toolResult = nodeKind === 'subagent'
+          ? await this.invokeToolDirectly(tool, node, context, options)
+          : await this.invokeToolWithModel({
+              toolName,
+              tool,
+              model,
+              node,
+              context,
+              options,
+              hasApiKey
+            })
 
         if (nodeKind === 'subagent') {
           await this.handleSubagentToolResult({
@@ -616,8 +619,8 @@ export class GraphController implements AgentController {
         tools: {
           [params.toolName]: params.tool as any
         },
-        toolChoice: { type: 'tool', toolName: params.toolName },
-        maxTokens: Math.min(params.context.runContext.settings.maxOutputTokens ?? 8000, 512),
+        toolChoice: 'required',
+        maxTokens: Math.min(params.context.runContext.settings.maxOutputTokens ?? 8000, 2048),
         temperature: params.context.runContext.settings.temperature,
         maxRetries: this.config.runtime.retry.attempts,
         abortSignal: params.options?.signal

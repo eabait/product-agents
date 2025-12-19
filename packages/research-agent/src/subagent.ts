@@ -37,7 +37,7 @@ const STATUS_AWAITING_PLAN_CONFIRMATION = 'awaiting-plan-confirmation'
 const STATUS_AWAITING_CLARIFICATION = 'awaiting-clarification'
 
 export interface CreateResearchAgentOptions {
-  settings: AgentSettings
+  settings?: AgentSettings
   tavilyApiKey?: string
   clock?: () => Date
   idFactory?: () => string
@@ -151,18 +151,25 @@ function createPendingArtifact(
 }
 
 export const createResearchAgentSubagent = (
-  options: CreateResearchAgentOptions
+  options?: CreateResearchAgentOptions
 ): SubagentLifecycle<ResearchBuilderParams, unknown, ResearchArtifactData> => {
-  const clock = options.clock ?? (() => new Date())
-  const idFactory = options.idFactory ?? (() => randomUUID())
+  const clock = options?.clock ?? (() => new Date())
+  const idFactory = options?.idFactory ?? (() => randomUUID())
 
-  const tavilyApiKey = options.tavilyApiKey ?? process.env.TAVILY_API_KEY
+  const defaultSettings: AgentSettings = {
+    model: process.env.DEFAULT_MODEL ?? 'openai/gpt-4o-mini',
+    temperature: 0.2,
+    maxTokens: 4000
+  }
+
+  const settings = options?.settings ?? defaultSettings
+  const tavilyApiKey = options?.tavilyApiKey ?? process.env.TAVILY_API_KEY
   if (!tavilyApiKey) {
     console.warn('[research-agent] TAVILY_API_KEY not set - web search will fail')
   }
 
   const planner = new ResearchPlanner({
-    settings: options.settings,
+    settings,
     clock,
     idFactory: () => `plan-${idFactory()}`
   })
@@ -176,7 +183,7 @@ export const createResearchAgentSubagent = (
   })
 
   const synthesizer = new ResearchSynthesizer({
-    settings: options.settings
+    settings
   })
 
   return {

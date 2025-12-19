@@ -20,6 +20,7 @@ import {
   SubagentRegistry
 } from '@product-agents/product-agent'
 import { personaAgentManifest } from '@product-agents/persona-agent'
+import { researchAgentManifest, createResearchAgentSubagent } from '@product-agents/research-agent'
 import type { SectionRoutingRequest } from '@product-agents/prd-shared'
 
 const loadEnvFiles = () => {
@@ -72,13 +73,38 @@ const MAX_RUN_HISTORY = 50
 const config = loadProductAgentConfig()
 const subagentRegistry = new SubagentRegistry()
 const registeredSubagents = new Set<string>()
+
+// Custom loader for research agent to avoid dynamic TS import
+const researchAgentLoader = async () => {
+  // Create a wrapper that provides the Tavily API key from runtime env
+  const createResearchAgentWithConfig = (options?: any) => {
+    return createResearchAgentSubagent({
+      ...options,
+      tavilyApiKey: options?.tavilyApiKey ?? process.env.TAVILY_API_KEY
+    })
+  }
+
+  return {
+    createResearchAgentSubagent: createResearchAgentWithConfig
+  }
+}
+
 for (const manifest of config.subagents.manifests) {
-  subagentRegistry.register(manifest)
+  // Use custom loader for research agent
+  if (manifest.id === researchAgentManifest.id) {
+    subagentRegistry.register(manifest, researchAgentLoader)
+  } else {
+    subagentRegistry.register(manifest)
+  }
   registeredSubagents.add(manifest.id)
 }
 
 if (!registeredSubagents.has(personaAgentManifest.id)) {
   subagentRegistry.register(personaAgentManifest)
+}
+
+if (!registeredSubagents.has(researchAgentManifest.id)) {
+  subagentRegistry.register(researchAgentManifest, researchAgentLoader)
 }
 
 const controller = createPrdController({ config, subagentRegistry })

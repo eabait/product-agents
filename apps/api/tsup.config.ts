@@ -10,6 +10,7 @@ export default defineConfig({
     '@product-agents/product-agent',
     '@product-agents/prd-agent',
     '@product-agents/prd-shared',
-    '@product-agents/agent-core'
+    '@product-agents/agent-core',
+    '@product-agents/research-agent'
   ]
 })
