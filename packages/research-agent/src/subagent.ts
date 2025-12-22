@@ -157,7 +157,7 @@ export const createResearchAgentSubagent = (
   const idFactory = options?.idFactory ?? (() => randomUUID())
 
   const defaultSettings: AgentSettings = {
-    model: process.env.DEFAULT_MODEL ?? 'openai/gpt-4o-mini',
+    model: process.env.RESEARCH_SYNTHESIS_MODEL ?? 'openai/gpt-4o-mini',
     temperature: 0.2,
     maxTokens: 4000
   }
