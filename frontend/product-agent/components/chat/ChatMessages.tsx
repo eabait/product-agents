@@ -12,6 +12,7 @@ interface ChatMessagesProps {
   copied: string | null;
   onCopy: (_content: string, _messageId: string) => void;
   onPRDUpdate?: (_messageId: string, _updatedPRD: NewPRD) => void;
+  onResearchPlanAction?: (_action: 'approve' | 'reject', _plan: any) => void;
   progressCards?: RunProgressCard[];
   isStreaming?: boolean;
 }
@@ -22,6 +23,7 @@ export function ChatMessages({
   copied,
   onCopy,
   onPRDUpdate,
+  onResearchPlanAction,
   progressCards = [],
   isStreaming = false,
 }: ChatMessagesProps) {
@@ -101,6 +103,7 @@ export function ChatMessages({
               onCopy={onCopy}
               copied={copied === message.id}
               onPRDUpdate={onPRDUpdate}
+              onResearchPlanAction={onResearchPlanAction}
               isExpanded={expandedPRDs.has(message.id)}
               onToggleExpanded={handleToggleExpanded}
             />

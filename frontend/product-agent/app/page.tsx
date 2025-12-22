@@ -1238,6 +1238,99 @@ function PRDAgentPageContent() {
     }));
   };
 
+  const handleResearchPlanAction = async (action: 'approve' | 'reject', plan: any) => {
+    if (action === 'reject') {
+      const rejectMessage: Message = {
+        id: uuidv4(),
+        role: 'assistant',
+        content: 'Research plan rejected. Please provide a new research request.',
+        timestamp: new Date(),
+      };
+      updateActiveConversation(conv => ({
+        ...conv,
+        messages: [...conv.messages, rejectMessage]
+      }));
+      return;
+    }
+
+    // Approve: send message with approved plan
+    const approveMessage: Message = {
+      id: uuidv4(),
+      role: 'user',
+      content: 'Approve and execute research plan',
+      timestamp: new Date(),
+    };
+
+    const newMessages = [...activeMessages, approveMessage];
+    updateActiveConversation(conv => ({ ...conv, messages: newMessages }));
+    setIsChatLoading(true);
+
+    let progressCardId: string | null = null;
+    if (isStreamingEnabled && activeId) {
+      progressCardId = uuidv4();
+      registerProgressCard({
+        id: progressCardId,
+        runId: null,
+        conversationId: activeId,
+        messageId: approveMessage.id,
+        status: 'active',
+        startedAt: new Date().toISOString(),
+        events: [],
+        plan: undefined,
+        completedAt: undefined,
+        nodeStates: {}
+      });
+      activeProgressCardRef.current = progressCardId;
+    }
+
+    try {
+      newMessages.forEach(message => {
+        if (message.role === 'user' || message.role === 'assistant') {
+          contextStorage.addSelectableMessage({
+            id: message.id,
+            content: message.content,
+            role: message.role,
+            timestamp: message.timestamp || new Date()
+          });
+        }
+      });
+
+      const existingPRD = getPRDFromMessages(newMessages);
+      const baseContextPayload = buildEnhancedContextPayload(newMessages, existingPRD);
+
+      // Build research-specific context payload with approved plan
+      const researchContextPayload = {
+        ...baseContextPayload,
+        // Add research parameters at root level for the subagent
+        approvedPlan: plan,
+        requirePlanConfirmation: false,
+        query: plan.topic || 'Execute approved research plan'
+      };
+
+      if (isStreamingEnabled) {
+        await handleStreamingSubmit(newMessages, researchContextPayload, approveMessage, progressCardId);
+      } else {
+        await handleNonStreamingSubmit(newMessages, researchContextPayload, approveMessage);
+      }
+    } catch (error) {
+      console.error('Research approval error:', error);
+      const errorMessage: Message = {
+        id: uuidv4(),
+        role: 'assistant',
+        content: `Error: ${error instanceof Error ? error.message : 'Failed to execute research'}`,
+        timestamp: new Date(),
+      };
+      updateActiveConversation(conv => ({
+        ...conv,
+        messages: [...newMessages, errorMessage]
+      }));
+    } finally {
+      if (!isStreamingEnabled) {
+        setIsChatLoading(false);
+      }
+    }
+  };
+
   const handleCopy = async (content: string, messageId: string) => {
     await navigator.clipboard.writeText(content);
     setCopied(messageId);
@@ -1397,8 +1490,8 @@ function PRDAgentPageContent() {
           : payload;
 
       let messageContent: string;
-      if (artifactKind === 'persona') {
-        // Preserve wrapper so the persona renderer can detect kind + personas
+      if (artifactKind === 'persona' || artifactKind === 'research') {
+        // Preserve wrapper so the persona/research renderer can detect kind + metadata
         messageContent = JSON.stringify(payload, null, 2);
       } else if (typeof artifactData === 'string') {
         messageContent = artifactData;
@@ -2082,6 +2175,7 @@ function PRDAgentPageContent() {
                   copied={copied}
                   onCopy={handleCopy}
                   onPRDUpdate={handlePRDUpdate}
+                  onResearchPlanAction={handleResearchPlanAction}
                   progressCards={activeProgressCards}
                   isStreaming={isChatLoading && isStreamingEnabled}
                 />

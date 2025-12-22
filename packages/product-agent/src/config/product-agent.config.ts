@@ -123,7 +123,7 @@ const DEFAULT_RESEARCH_SUBAGENT_MANIFEST: SubagentConfigEntry = {
 
 const DEFAULT_CONFIG: ProductAgentConfig = {
   runtime: {
-    defaultModel: 'openai/gpt-4o', //'openai/gpt-4o-mini', //'anthropic/claude-sonnet-4',
+    defaultModel: 'qwen/qwen3-235b-a22b-2507', //'openai/gpt-4o-mini', //'anthropic/claude-sonnet-4',
     defaultTemperature: 0.2,
     maxOutputTokens: 8000,
     allowStreaming: true,

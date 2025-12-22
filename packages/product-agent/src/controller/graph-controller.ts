@@ -1273,8 +1273,15 @@ export class GraphController implements AgentController {
       )
 
       try {
+        // Extract context payload and research-specific parameters from the run request
+        const requestInput = context.runContext.request.input as SectionRoutingRequest | undefined
+        const contextPayload = requestInput?.context?.contextPayload as Record<string, unknown> | undefined
+
+        // Build params for the subagent, including any parameters from contextPayload
+        const subagentParams = contextPayload ?? {}
+
         const result = await subagent.execute({
-          params: {},
+          params: subagentParams,
           run: context.runContext,
           sourceArtifact: context.artifact,
           emit: event =>

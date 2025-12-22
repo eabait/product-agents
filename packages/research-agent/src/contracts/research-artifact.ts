@@ -46,7 +46,10 @@ export const MarketInsightSchema = z.object({
   keyDrivers: z.array(z.string()),
   barriers: z.array(z.string()),
   trends: z.array(z.string()),
-  regions: z.array(z.string()).optional()
+  regions: z.union([z.array(z.string()), z.string()]).optional().transform(val => {
+    if (typeof val === 'string') return val === 'Not specified' ? [] : [val]
+    return val || []
+  })
 })
 
 export const RecommendationSchema = z.object({

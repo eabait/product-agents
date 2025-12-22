@@ -13,12 +13,13 @@ interface MessageBubbleProps {
   onCopy: (_content: string, _messageId: string) => void;
   copied: boolean;
   onPRDUpdate?: (_messageId: string, _updatedPRD: NewPRD) => void;
+  onResearchPlanAction?: (_action: 'approve' | 'reject', _plan: any) => void;
   isExpanded?: boolean;
   onToggleExpanded?: (_messageId: string) => void;
 }
 
 // eslint-disable-next-line no-unused-vars
-export function MessageBubble({ message, onCopy, copied, onPRDUpdate, isExpanded, onToggleExpanded }: MessageBubbleProps) {
+export function MessageBubble({ message, onCopy, copied, onPRDUpdate, onResearchPlanAction, isExpanded, onToggleExpanded }: MessageBubbleProps) {
   const isUser = message.role === 'user';
   const [isSelectedForContext, setIsSelectedForContext] = useState(false);
 
@@ -110,10 +111,11 @@ export function MessageBubble({ message, onCopy, copied, onPRDUpdate, isExpanded
         {isUser ? (
           <div className="whitespace-pre-wrap break-words">{message.content}</div>
         ) : (         
-          <SmartMessageRenderer 
-            content={message.content} 
+          <SmartMessageRenderer
+            content={message.content}
             messageId={message.id}
             onPRDUpdate={onPRDUpdate}
+            onResearchPlanAction={onResearchPlanAction}
             isExpanded={isExpanded}
             onToggleExpanded={onToggleExpanded}
           />

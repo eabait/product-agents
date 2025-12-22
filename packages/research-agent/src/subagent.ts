@@ -396,6 +396,7 @@ export const createResearchAgentSubagent = (
           tags: ['research', 'synthesized'],
           confidence: synthesizedData.overallConfidence,
           extras: {
+            status: 'completed',
             sourceArtifactId: request.sourceArtifact?.id,
             planId: plan.id,
             sourcesConsulted: synthesizedData.methodology.sourcesConsulted,
