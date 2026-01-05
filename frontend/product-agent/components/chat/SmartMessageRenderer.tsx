@@ -3,6 +3,8 @@
 import { useState, useCallback, useMemo, useEffect } from 'react';
 import { MarkdownMessage } from './MarkdownMessage';
 import { PRDEditor } from './PRDEditor';
+import { ResearchPlanCard } from '../research/ResearchPlanCard';
+import { ResearchArtifactView } from '../research/ResearchArtifactView';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ChevronDown, ChevronUp, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -17,17 +19,19 @@ interface SmartMessageRendererProps {
   messageId: string;
   onPRDUpdate?: (_messageId: string, _updatedPRD: NewPRD) => void;
   onRegenerateSection?: (_messageId: string, _sectionName: string) => void;
+  onResearchPlanAction?: (_action: 'approve' | 'reject', _plan: any) => void;
   isExpanded?: boolean;
   onToggleExpanded?: (_messageId: string) => void;
 }
 
-export function SmartMessageRenderer({ 
-  content, 
-  messageId, 
-  onPRDUpdate, 
+export function SmartMessageRenderer({
+  content,
+  messageId,
+  onPRDUpdate,
   onRegenerateSection,
-  isExpanded = false, 
-  onToggleExpanded 
+  onResearchPlanAction,
+  isExpanded = false,
+  onToggleExpanded
 }: SmartMessageRendererProps) {
   const parsedContent = useMemo(() => {
     try {
@@ -61,6 +65,13 @@ export function SmartMessageRenderer({
     return null
   }, [parsedContent])
 
+  const researchArtifact = useMemo(() => {
+    if (parsedContent && isResearchArtifact(parsedContent)) {
+      return parsedContent
+    }
+    return null
+  }, [parsedContent])
+
   const handlePRDChange = useCallback((updatedPRD: NewPRD) => {
     setLocalPRD(updatedPRD);
     onPRDUpdate?.(messageId, updatedPRD);
@@ -72,6 +83,10 @@ export function SmartMessageRenderer({
 
   if (personaArtifact) {
     return <PersonaArtifactViewer artifact={personaArtifact} />
+  }
+
+  if (researchArtifact) {
+    return <ResearchArtifactRenderer artifact={researchArtifact} onResearchPlanAction={onResearchPlanAction} />
   }
 
   // If we have a valid PRD, render the collapsible editor
@@ -484,4 +499,82 @@ function getMetadataText(prd: NewPRD | FlattenedPRD | any): string {
   }
 
   return '';
+}
+
+// Research Artifact Types
+interface ResearchArtifactShape {
+  id: string
+  kind: string
+  label?: string
+  data?: any
+  metadata?: {
+    status?: string
+    plan?: any
+    confidence?: number
+    createdAt?: string
+    tags?: string[]
+    extras?: any
+  }
+}
+
+const isResearchArtifact = (value: unknown): value is ResearchArtifactShape => {
+  if (!value || typeof value !== 'object') {
+    return false
+  }
+  const artifact = value as ResearchArtifactShape
+  return artifact.kind === 'research'
+}
+
+const ResearchArtifactRenderer = ({
+  artifact,
+  onResearchPlanAction
+}: {
+  artifact: ResearchArtifactShape
+  onResearchPlanAction?: (_action: 'approve' | 'reject', _plan: any) => void
+}) => {
+  // Status can be in metadata.status OR metadata.extras.status
+  const status = artifact.metadata?.extras?.status || artifact.metadata?.status
+  const plan = artifact.metadata?.extras?.plan || artifact.metadata?.plan
+  const data = artifact.data
+  const confidence = artifact.metadata?.confidence
+
+  // If awaiting plan confirmation, show the plan card
+  if (status === 'awaiting-plan-confirmation' && plan) {
+    return (
+      <ResearchPlanCard
+        plan={plan}
+        status="awaiting-plan-confirmation"
+        onApprove={() => {
+          onResearchPlanAction?.('approve', plan)
+        }}
+        onReject={() => {
+          onResearchPlanAction?.('reject', plan)
+        }}
+      />
+    )
+  }
+
+  // If awaiting clarification, show the plan card with clarification status
+  if (status === 'awaiting-clarification' && plan) {
+    return (
+      <ResearchPlanCard
+        plan={plan}
+        status="awaiting-clarification"
+      />
+    )
+  }
+
+  // If completed, show the full research artifact
+  if (status === 'completed' && data) {
+    return <ResearchArtifactView data={data} confidence={confidence} />
+  }
+
+  // Fallback: show basic artifact info
+  return (
+    <div className="p-4 border rounded-lg bg-card">
+      <h4 className="font-semibold mb-2">{artifact.label || 'Research Artifact'}</h4>
+      <p className="text-sm text-muted-foreground">Status: {status || 'unknown'}</p>
+      {data?.topic && <p className="text-sm">Topic: {data.topic}</p>}
+    </div>
+  )
 }

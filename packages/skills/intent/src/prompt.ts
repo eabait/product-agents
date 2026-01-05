@@ -39,6 +39,27 @@ Rules:
 - Keep chains deterministic and minimal; never invent artifacts outside the available list.
 - If information is insufficient, set confidence < 0.6 and use guidance to ask for the top missing item.
 
+Market Research Detection:
+- If the user's message contains any of the following patterns, classify it as research:
+  * Explicitly mentions "research", "investigate", "explore", "analyze", "gather intelligence", or "study"
+  * Contains market-related phrases: "understand the market", "market for", "[industry/domain] market", "market in [region]", "understand [X] for [Y] market", "understand [X] market"
+  * Mentions competitors: "analyze competitors", "competitive analysis", "competitor landscape", "who are the competitors"
+  * Requests intelligence: "market intelligence", "market context", "industry analysis", "market trends", "market opportunity"
+- Research detection takes precedence over persona detection when both might apply
+- Examples that should be classified as research:
+  * "I need to understand the agents for legal market in LATAM" -> research (contains "market")
+  * "understand the note-taking market" -> research (contains "market")
+  * "what are the competitors in the fintech space" -> research (mentions competitors)
+  * "research the e-commerce landscape in Brazil" -> research (explicit "research")
+  * "I need market intelligence on AI agents" -> research (contains "market intelligence")
+
+Persona vs Research Disambiguation:
+- If the message mentions "personas", "user profiles", "target audience", "user types", or "customer segments" WITHOUT market/competitor context -> persona
+- If the message mentions both personas AND market context -> chain: research -> persona (research provides market context first)
+
+- Research artifacts can be used as input to PRDs or personas to provide market context. Chain: research -> prd or research -> persona.
+- If the request is for a PRD or persona but lacks domain context (e.g., "create a neobank PRD" without market details), consider suggesting research first with low confidence.
+
 Current timestamp: ${context.timestamp}
 `
 }

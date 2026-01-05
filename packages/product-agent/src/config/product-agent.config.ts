@@ -107,9 +107,23 @@ const DEFAULT_PERSONA_SUBAGENT_MANIFEST: SubagentConfigEntry = {
   tags: ['persona', 'agent']
 }
 
+const DEFAULT_RESEARCH_SUBAGENT_MANIFEST: SubagentConfigEntry = {
+  id: 'research.core.agent',
+  package: '@product-agents/research-agent',
+  version: '0.1.0',
+  label: 'Research Agent',
+  creates: 'research',
+  consumes: ['prompt', 'prd', 'brief'],
+  capabilities: ['plan', 'search', 'synthesize', 'clarify'],
+  description: 'Conducts market research, competitor analysis, and contextual intelligence gathering with web search capabilities.',
+  entry: '@product-agents/research-agent',
+  exportName: 'createResearchAgentSubagent',
+  tags: ['research', 'market-intelligence', 'web-search']
+}
+
 const DEFAULT_CONFIG: ProductAgentConfig = {
   runtime: {
-    defaultModel: 'openai/gpt-5.1', //'qwen/qwen3-235b-a22b-2507', //'anthropic/claude-haiku-4.5',
+    defaultModel: process.env.ORCHESTRATOR_MODEL ?? 'qwen/qwen3-235b-a22b-2507',
     defaultTemperature: 0.2,
     maxOutputTokens: 8000,
     allowStreaming: true,
@@ -142,7 +156,7 @@ const DEFAULT_CONFIG: ProductAgentConfig = {
     eventThrottleMs: 250
   },
   subagents: {
-    manifests: [DEFAULT_PERSONA_SUBAGENT_MANIFEST]
+    manifests: [DEFAULT_PERSONA_SUBAGENT_MANIFEST, DEFAULT_RESEARCH_SUBAGENT_MANIFEST]
   },
   planner: {
     strategy: 'intelligent'

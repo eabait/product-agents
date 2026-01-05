@@ -86,8 +86,16 @@ export const createSubagentTool = (params: SubagentToolParams) =>
         )
       }
 
+      // Extract context payload from the run context request input
+      const requestInput = params.runContext.request.input as { context?: { contextPayload?: unknown } } | undefined
+      const contextPayload = requestInput?.context?.contextPayload as Record<string, unknown> | undefined
+
+      // Merge node params and context payload, with context payload taking precedence
+      const nodeParams = (params.node.metadata?.params as Record<string, unknown>) ?? {}
+      const subagentParams = contextPayload ? { ...nodeParams, ...contextPayload } : nodeParams
+
       const result = await lifecycle.execute({
-        params: (params.node.metadata?.params as Record<string, unknown>) ?? {},
+        params: subagentParams,
         run: params.runContext,
         sourceArtifact,
         emit: params.emitProgress
