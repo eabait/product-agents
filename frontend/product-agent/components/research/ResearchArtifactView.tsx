@@ -8,10 +8,7 @@ import {
   Lightbulb,
   ExternalLink,
   CheckCircle2,
-  Target,
-  BarChart3,
-  Shield,
-  Search
+  Target
 } from 'lucide-react';
 
 interface ResearchSource {

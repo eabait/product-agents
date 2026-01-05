@@ -1,0 +1,1 @@
+Use AGENTS.md to understand this project and how to colaborate in this codebase.
