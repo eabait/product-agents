@@ -1,0 +1,12 @@
+{
+  "name": "@product-agents/config-schemas",
+  "version": "0.1.0",
+  "description": "Centralized configuration schemas and constants for product agents",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "dependencies": {
+    "zod": "^3.25.76"
+  }
+}

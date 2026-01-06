@@ -9,22 +9,12 @@ export const MessageSchema = z.object({
   timestamp: z.union([z.string(), z.date()]).optional()
 })
 
-const RuntimeOverridesSchema = z.object({
-  model: z.string().optional(),
-  temperature: z.number().min(0).max(2).optional(),
-  maxTokens: z.number().min(1).max(100000).optional(),
-  apiKey: z.string().optional()
-})
-
-export const SubAgentSettingsSchema = z.record(z.string(), RuntimeOverridesSchema).optional()
-
 export const SettingsSchema = z.object({
   model: z.string(),
   temperature: z.number().min(0).max(2),
   maxTokens: z.number().min(1).max(100000),
   apiKey: z.string().optional(),
-  streaming: z.boolean().optional(),
-  subAgentSettings: SubAgentSettingsSchema
+  streaming: z.boolean().optional()
 })
 
 export const StartRunSchema = z.object({

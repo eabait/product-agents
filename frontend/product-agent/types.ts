@@ -137,22 +137,10 @@ export interface AgentMetadata {
   subAgents: SubAgentMetadata[];
 }
 
-export type SubAgentSettingsMap = Record<
-  string,
-  {
-    model: string;
-    temperature: number;
-    maxTokens: number;
-    apiKey?: string;
-    advanced?: Record<string, unknown>;
-  }
->;
-
 export interface AgentSettingsState {
   model: string;
   temperature: number;
   maxTokens: number;
   apiKey?: string;
   streaming?: boolean;
-  subAgentSettings: SubAgentSettingsMap;
 }

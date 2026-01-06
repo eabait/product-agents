@@ -123,22 +123,12 @@ const MessageSchema = z.object({
   timestamp: z.union([z.string(), z.date()]).optional()
 })
 
-const RuntimeOverridesSchema = z.object({
-  model: z.string().optional(),
-  temperature: z.number().min(0).max(2).optional(),
-  maxTokens: z.number().min(1).max(100000).optional(),
-  apiKey: z.string().optional()
-})
-
-const SubAgentSettingsSchema = z.record(z.string(), RuntimeOverridesSchema).optional()
-
 const SettingsSchema = z.object({
   model: z.string().min(1),
   temperature: z.number().min(0).max(2),
   maxTokens: z.number().min(1).max(100000),
   apiKey: z.string().optional(),
-  streaming: z.boolean().optional(),
-  subAgentSettings: SubAgentSettingsSchema
+  streaming: z.boolean().optional()
 })
 
 const StartRunSchema = z.object({
@@ -150,39 +140,6 @@ const StartRunSchema = z.object({
 })
 
 type StartRunPayload = z.infer<typeof StartRunSchema>
-type ClientSettings = z.infer<typeof SettingsSchema>
-
-const normalizeSubagentSettings = (
-  settings: ClientSettings | undefined
-): Record<
-  string,
-  {
-    model: string
-    temperature?: number
-    maxTokens?: number
-    apiKey?: string
-  }
-> | undefined => {
-  if (!settings?.subAgentSettings) {
-    return undefined
-  }
-
-  const normalizedEntries = Object.entries(settings.subAgentSettings).map(([subagentId, overrides]) => [
-    subagentId,
-    {
-      model: overrides.model ?? settings.model,
-      temperature: overrides.temperature,
-      maxTokens: overrides.maxTokens,
-      apiKey: overrides.apiKey
-    }
-  ])
-
-  if (normalizedEntries.length === 0) {
-    return undefined
-  }
-
-  return Object.fromEntries(normalizedEntries)
-}
 
 const readRequestBody = (req: IncomingMessage): Promise<string> =>
   new Promise((resolve, reject) => {
@@ -231,7 +188,6 @@ const extractExistingArtifact = (messages: StartRunPayload['messages']): unknown
 
 const toSectionRoutingRequest = (payload: StartRunPayload): SectionRoutingRequest => {
   const existingArtifact = extractExistingArtifact(payload.messages)
-  const subAgentSettings = normalizeSubagentSettings(payload.settings)
 
   return {
     message: buildConversationContext(payload.messages),
@@ -245,8 +201,7 @@ const toSectionRoutingRequest = (payload: StartRunPayload): SectionRoutingReques
           model: payload.settings.model,
           temperature: payload.settings.temperature,
           maxTokens: payload.settings.maxTokens,
-          apiKey: payload.settings.apiKey,
-          subAgentSettings
+          apiKey: payload.settings.apiKey
         }
       : undefined,
     targetSections: payload.targetSections

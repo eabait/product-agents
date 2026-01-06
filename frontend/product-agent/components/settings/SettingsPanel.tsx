@@ -15,7 +15,7 @@ import {
 } from '@/components/ui/select'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Slider } from '@/components/ui/slider'
-import { Settings, ChevronDown } from 'lucide-react'
+import { Settings } from 'lucide-react'
 import { formatContextWindow } from '@/lib/context-utils'
 import { useModelContext, useContextSettings } from '@/contexts/AppStateProvider'
 import {
@@ -24,22 +24,7 @@ import {
   SLIDER_CONFIGS,
   ICON_SIZES
 } from '@/lib/ui-constants'
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import type { AgentMetadata, AgentSettingsState, SubAgentMetadata, SubAgentSettingsMap } from '@/types'
-
-type RuntimeOverrides = {
-  model?: string;
-  temperature?: number;
-  maxTokens?: number;
-  apiKey?: string;
-}
-
-type ResolvedRuntime = {
-  model: string;
-  temperature: number;
-  maxTokens: number;
-  apiKey?: string;
-}
+import type { AgentMetadata, AgentSettingsState } from '@/types'
 
 interface Model {
   id: string
@@ -95,7 +80,7 @@ const SETTINGS_GROUPS: Array<{
   {
     id: 'model',
     label: 'Model',
-    description: 'Set orchestrator defaults and fine-tune sub-agent overrides.'
+    description: 'Set orchestrator model, temperature, and token limits.'
   },
   {
     id: 'streaming',
@@ -120,7 +105,6 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
   const [modelsError, setModelsError] = useState<string | null>(null)
   const [providerDropdownOpen, setProviderDropdownOpen] = useState(false)
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false)
-  const [subAgentDropdownState, setSubAgentDropdownState] = useState<Record<string, { providerOpen: boolean; modelOpen: boolean }>>({})
   const [activeGroup, setActiveGroup] = useState<SettingsGroupId>(() => {
     if (typeof window === 'undefined') {
       return DEFAULT_SETTINGS_GROUP
@@ -167,45 +151,8 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
   const modelsForProvider = models.filter(model => model.provider === selectedProvider)
   const currentModel = settings.model ? models.find(model => model.id === settings.model) : undefined
 
-  const getSubAgentDropdownState = (id: string) => {
-    const state = subAgentDropdownState[id]
-    if (state) {
-      return state
-    }
-    const fallback = { providerOpen: false, modelOpen: false } as const
-    return fallback
-  }
-  const setSubAgentDropdown = (
-    id: string,
-    update:
-      | Partial<{ providerOpen: boolean; modelOpen: boolean }>
-      | ((_state: { providerOpen: boolean; modelOpen: boolean }) => { providerOpen: boolean; modelOpen: boolean })
-  ) => {
-    setSubAgentDropdownState(prev => {
-      const snapshot = getSubAgentDropdownState(id)
-      const next = typeof update === 'function'
-        ? update(snapshot)
-        : {
-            providerOpen: update.providerOpen ?? snapshot.providerOpen,
-            modelOpen: update.modelOpen ?? snapshot.modelOpen
-          }
-      return {
-        ...prev,
-        [id]: next
-      }
-    })
-  }
-
-  const cloneSettings = (): AgentSettingsState => ({
-    ...settings,
-    subAgentSettings: Object.entries(settings.subAgentSettings || {}).reduce<SubAgentSettingsMap>((acc, [key, value]) => {
-      acc[key] = { ...value }
-      return acc
-    }, {})
-  })
-
   const setSettings = (updater: (_prev: AgentSettingsState) => AgentSettingsState) => {
-    onSettingsChange(updater(cloneSettings()))
+    onSettingsChange(updater({ ...settings }))
   }
 
   const fetchModels = async (apiKey?: string): Promise<boolean> => {
@@ -245,88 +192,6 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
       setModelsLoading(false)
     }
     return didSucceed
-  }
-
-  const subAgents: SubAgentMetadata[] = metadata?.subAgents || []
-  const agentDefaults = metadata?.defaultSettings
-
-  const resolveBaselineForSubAgent = (subAgent: SubAgentMetadata) => ({
-    model: subAgent.defaultSettings?.model ?? agentDefaults?.model ?? settings.model,
-    temperature: subAgent.defaultSettings?.temperature ?? agentDefaults?.temperature ?? settings.temperature,
-    maxTokens: subAgent.defaultSettings?.maxTokens ?? agentDefaults?.maxTokens ?? settings.maxTokens
-  })
-
-  const resolveSubAgentSettings = (subAgent: SubAgentMetadata) => {
-    const baseline = resolveBaselineForSubAgent(subAgent)
-    const overrides = settings.subAgentSettings?.[subAgent.id]
-    return {
-      ...baseline,
-      ...overrides
-    }
-  }
-
-  const getCompatibleModels = (subAgent: SubAgentMetadata) => {
-    const requiredCaps = Array.isArray(subAgent.requiredCapabilities)
-      ? subAgent.requiredCapabilities
-      : []
-    if (requiredCaps.length === 0) {
-      return models
-    }
-    return models.filter(model => {
-      const caps = model.capabilities || []
-      return requiredCaps.every(capability => caps.includes(capability))
-    })
-  }
-
-  const hasSubAgentOverride = (subAgent: SubAgentMetadata) => {
-    const baseline = resolveBaselineForSubAgent(subAgent)
-    const overrides = settings.subAgentSettings?.[subAgent.id]
-    if (!overrides) return false
-
-    return (
-      overrides.model !== baseline.model ||
-      overrides.temperature !== baseline.temperature ||
-      overrides.maxTokens !== baseline.maxTokens
-    )
-  }
-
-  const updateSubAgentSettings = (
-    subAgentId: string,
-    updater: (_current: ResolvedRuntime) => Partial<ResolvedRuntime>
-  ) => {
-    setSettings(prev => {
-      const next = { ...prev }
-      const currentOverrides: RuntimeOverrides = next.subAgentSettings?.[subAgentId] || {}
-      const baseline: ResolvedRuntime = {
-        model: currentOverrides.model ?? next.model,
-        temperature: currentOverrides.temperature ?? next.temperature,
-        maxTokens: currentOverrides.maxTokens ?? next.maxTokens,
-        apiKey: currentOverrides.apiKey ?? next.apiKey
-      }
-      const overrides = updater(baseline) || {}
-      next.subAgentSettings = {
-        ...next.subAgentSettings,
-        [subAgentId]: {
-          model: overrides.model ?? baseline.model,
-          temperature: overrides.temperature ?? baseline.temperature,
-          maxTokens: overrides.maxTokens ?? baseline.maxTokens,
-          apiKey: overrides.apiKey ?? baseline.apiKey
-        }
-      }
-      return next
-    })
-  }
-
-  const resetSubAgentSettings = (subAgent: SubAgentMetadata) => {
-    setSettings(prev => {
-      const next = { ...prev }
-      const baseline = resolveBaselineForSubAgent(subAgent)
-      next.subAgentSettings = {
-        ...next.subAgentSettings,
-        [subAgent.id]: { ...baseline }
-      }
-      return next
-    })
   }
 
   // Fetch models when panel opens or settings change
@@ -373,7 +238,6 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
   const contextLimitTokens = currentModel
     ? Math.floor(currentModel.contextLength * (contextSettings.tokenLimitPercentage / 100))
     : null
-  const subAgentOverrideCount = subAgents.filter(hasSubAgentOverride).length
   const availableProviderCount = availableProviders.length
 
   const groupContent = (() => {
@@ -756,293 +620,6 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
                 />
               </div>
             </div>
-
-            {metadata && subAgents.length > 0 && (
-              <div className="space-y-4">
-                <div>
-                  <div className="flex items-center justify-between">
-                    <div className="text-xs text-muted-foreground uppercase tracking-wide">
-                      Sub-agent Overrides
-                    </div>
-                    {subAgentOverrideCount > 0 && (
-                      <div className="text-xs text-blue-600">
-                        {subAgentOverrideCount} override{subAgentOverrideCount !== VALIDATION_LIMITS.SINGULAR_ITEM_COUNT ? 's' : ''} active
-                      </div>
-                    )}
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Override individual worker settings when you need specialized models or tuning. Defaults inherit from the orchestrator if left unchanged.
-                  </p>
-                </div>
-
-                <div className="space-y-3">
-                  {subAgents.map((subAgent) => {
-                    const currentSettings = resolveSubAgentSettings(subAgent)
-                    const baselineSettings = resolveBaselineForSubAgent(subAgent)
-                    const overrideActive = hasSubAgentOverride(subAgent)
-                    const compatibleModels = getCompatibleModels(subAgent)
-
-                    const providerOptions = compatibleModels.reduce<Provider[]>((acc, model) => {
-                      const existing = acc.find(provider => provider.name === model.provider)
-                      if (existing) {
-                        existing.count += 1
-                        if (model.isTopProvider) existing.isTopProvider = true
-                        if (model.isRecommended) existing.hasRecommended = true
-                      } else {
-                        acc.push({
-                          name: model.provider,
-                          count: 1,
-                          isTopProvider: model.isTopProvider,
-                          hasRecommended: !!model.isRecommended
-                        })
-                      }
-                      return acc
-                    }, [])
-
-                    const currentProvider = currentSettings.model?.split('/')[0]
-                    const dropdownState = getSubAgentDropdownState(subAgent.id)
-                    const recommendedProviderOptions = providerOptions.filter(provider => provider.hasRecommended)
-                    const additionalProviderOptions = recommendedProviderOptions.length > 0
-                      ? providerOptions.filter(provider => !provider.hasRecommended)
-                      : providerOptions
-
-                    const modelsForCurrentProvider = currentProvider
-                      ? compatibleModels.filter(model => model.provider === currentProvider)
-                      : []
-
-                    const recommendedModelOptions = modelsForCurrentProvider.filter(model => model.isRecommended)
-                    const additionalModelOptions = recommendedModelOptions.length > 0
-                      ? modelsForCurrentProvider.filter(model => !model.isRecommended)
-                      : modelsForCurrentProvider
-
-                    return (
-                      <Collapsible key={subAgent.id}>
-                        <CollapsibleTrigger className="flex w-full items-center justify-between rounded-md border px-3 py-2 text-left hover:bg-muted/50 focus:outline-none focus:ring-2 focus:ring-primary/20">
-                          <div className="flex flex-col gap-1">
-                            <span className="font-medium text-sm">
-                              {subAgent.name}
-                            </span>
-                            <span className="text-xs text-muted-foreground">
-                              {subAgent.description}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            {overrideActive ? (
-                              <span className="text-xs text-blue-600 font-medium">Override active</span>
-                            ) : (
-                              <span className="text-xs text-muted-foreground">Using defaults</span>
-                            )}
-                            <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                          </div>
-                        </CollapsibleTrigger>
-                        <CollapsibleContent className="mt-3 space-y-4 rounded-md border bg-background px-3 py-3">
-                          <div className="flex justify-between text-xs text-muted-foreground">
-                            <span>Baseline: {baselineSettings.model}</span>
-                            <button
-                              type="button"
-                              onClick={() => resetSubAgentSettings(subAgent)}
-                              className="text-blue-600 hover:underline"
-                            >
-                              Reset to default
-                            </button>
-                          </div>
-
-                          {compatibleModels.length === 0 ? (
-                            <div className="rounded-md bg-red-50 p-3 text-xs text-red-600">
-                              No models available that satisfy {(Array.isArray(subAgent.requiredCapabilities) ? subAgent.requiredCapabilities : []).join(', ') || 'the required capabilities'}. Fetch models with a broader API key or adjust requirements.
-                            </div>
-                          ) : (
-                            <>
-                              <div className="space-y-2">
-                                <label className="block text-sm font-medium">Provider</label>
-                                <Select
-                                  value={currentProvider || undefined}
-                                  open={dropdownState.providerOpen}
-                                  onOpenChange={(open) => {
-                                    setSubAgentDropdown(subAgent.id, (currentState) => ({
-                                      providerOpen: open,
-                                      modelOpen: open ? false : currentState.modelOpen
-                                    }))
-                                  }}
-                                  onValueChange={(value: string) => {
-                                    const preferredModel =
-                                      compatibleModels.find(model => model.provider === value && model.isRecommended) ||
-                                      compatibleModels.find(model => model.provider === value)
-                                    if (preferredModel) {
-                                      updateSubAgentSettings(subAgent.id, prev => ({
-                                        ...prev,
-                                        model: preferredModel.id
-                                      }))
-                                      setSubAgentDropdown(subAgent.id, { providerOpen: false, modelOpen: false })
-                                    }
-                                  }}
-                                  disabled={modelsLoading}
-                                >
-                                  <SelectTrigger>
-                                    <SelectValue placeholder={modelsLoading ? 'Loading providers...' : 'Select a provider'} />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {recommendedProviderOptions.length > 0 && (
-                                      <>
-                                        <SelectGroup>
-                                          <SelectLabel>Recommended</SelectLabel>
-                                          {recommendedProviderOptions.map(renderProviderOption)}
-                                        </SelectGroup>
-                                        {additionalProviderOptions.length > 0 && <SelectSeparator />}
-                                      </>
-                                    )}
-                                    {additionalProviderOptions.length > 0 && (
-                                      <SelectGroup>
-                                        {recommendedProviderOptions.length > 0 && (
-                                          <SelectLabel>All Providers</SelectLabel>
-                                        )}
-                                        {additionalProviderOptions.map(renderProviderOption)}
-                                      </SelectGroup>
-                                    )}
-                                    {recommendedProviderOptions.length === 0 && additionalProviderOptions.length === 0 && (
-                                      <SelectGroup>
-                                        {providerOptions.map(renderProviderOption)}
-                                      </SelectGroup>
-                                    )}
-                                  </SelectContent>
-                                </Select>
-                              </div>
-
-                              <div>
-                                <label className="block text-sm font-medium mb-2">Model</label>
-                                {(() => {
-                                  if (!currentProvider) {
-                                    return (
-                                      <div className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
-                                        Select a provider to view compatible models.
-                                      </div>
-                                    )
-                                  }
-
-                                  if (modelsForCurrentProvider.length === 0) {
-                                    return (
-                                      <div className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
-                                        No compatible models for this provider.
-                                      </div>
-                                    )
-                                  }
-
-                                  return (
-                                    <Select
-                                      value={currentSettings.model}
-                                      open={dropdownState.modelOpen}
-                                      onOpenChange={(open) => {
-                                        setSubAgentDropdown(subAgent.id, (currentState) => ({
-                                          modelOpen: open,
-                                          providerOpen: open ? false : currentState.providerOpen
-                                        }))
-                                      }}
-                                      onValueChange={(value: string) => {
-                                        updateSubAgentSettings(subAgent.id, prev => ({
-                                          ...prev,
-                                          model: value
-                                        }))
-                                        setSubAgentDropdown(subAgent.id, { modelOpen: false })
-                                      }}
-                                      disabled={modelsLoading}
-                                    >
-                                      <SelectTrigger>
-                                        <SelectValue placeholder="Select a model" />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        {recommendedModelOptions.length > 0 && (
-                                          <>
-                                            <SelectGroup>
-                                              <SelectLabel>Recommended</SelectLabel>
-                                              {recommendedModelOptions.map(renderModelOption)}
-                                            </SelectGroup>
-                                            {additionalModelOptions.length > 0 && <SelectSeparator />}
-                                          </>
-                                        )}
-                                        {additionalModelOptions.length > 0 && (
-                                          <SelectGroup>
-                                            {recommendedModelOptions.length > 0 && (
-                                              <SelectLabel>More Models</SelectLabel>
-                                            )}
-                                            {additionalModelOptions.map(renderModelOption)}
-                                          </SelectGroup>
-                                        )}
-                                        {recommendedModelOptions.length === 0 && additionalModelOptions.length === 0 && (
-                                          <SelectGroup>
-                                            {modelsForCurrentProvider.map(renderModelOption)}
-                                          </SelectGroup>
-                                        )}
-                                      </SelectContent>
-                                    </Select>
-                                  )
-                                })()}
-                              </div>
-                            </>
-                          )}
-
-                          <div>
-                            <div className="flex items-center justify-between">
-                              <label className="block text-sm font-medium">
-                                Temperature: {currentSettings.temperature.toFixed(2)}
-                              </label>
-                              {baselineSettings.temperature !== currentSettings.temperature && (
-                                <span className="text-xs text-muted-foreground">Default {baselineSettings.temperature.toFixed(2)}</span>
-                              )}
-                            </div>
-                            <Slider
-                              value={[currentSettings.temperature]}
-                              onValueChange={([value]) =>
-                                updateSubAgentSettings(subAgent.id, prev => ({
-                                  ...prev,
-                                  temperature: value
-                                }))
-                              }
-                              max={SLIDER_CONFIGS.TEMPERATURE.MAX}
-                              min={SLIDER_CONFIGS.TEMPERATURE.MIN}
-                              step={SLIDER_CONFIGS.TEMPERATURE.STEP}
-                              className="w-full"
-                            />
-                            <div className="flex justify-between text-xs text-muted-foreground mt-1">
-                              <span>Precise</span>
-                              <span>Balanced</span>
-                              <span>Creative</span>
-                            </div>
-                          </div>
-
-                          <div>
-                            <div className="flex items-center justify-between">
-                              <label className="block text-sm font-medium">Max Tokens</label>
-                              {baselineSettings.maxTokens !== currentSettings.maxTokens && (
-                                <span className="text-xs text-muted-foreground">Default {baselineSettings.maxTokens}</span>
-                              )}
-                            </div>
-                            <Input
-                              type="number"
-                              value={currentSettings.maxTokens}
-                              min={256}
-                              step={256}
-                              onChange={(e) => {
-                                const value = Number.parseInt(e.target.value, 10)
-                                updateSubAgentSettings(subAgent.id, prev => ({
-                                  ...prev,
-                                  maxTokens: Number.isNaN(value) ? prev.maxTokens : value
-                                }))
-                              }}
-                            />
-                          </div>
-
-                          <div className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
-                            <div>
-                              Defaults: {baselineSettings.model} • Temp {baselineSettings.temperature.toFixed(2)} • {baselineSettings.maxTokens} tokens
-                            </div>
-                          </div>
-                        </CollapsibleContent>
-                      </Collapsible>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
           </div>
         )
       }
@@ -1164,12 +741,6 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
 
                 if (group.id === 'openrouter' && modelsError) {
                   indicator = <span className="text-xs font-semibold text-red-500">!</span>
-                } else if (group.id === 'model' && subAgentOverrideCount > 0) {
-                  indicator = (
-                    <span className="text-xs font-semibold text-blue-600">
-                      {subAgentOverrideCount}
-                    </span>
-                  )
                 } else if (group.id === 'streaming' && streamingEnabled && !streamingSupported) {
                   indicator = <span className="text-xs font-semibold text-amber-600">!</span>
                 }

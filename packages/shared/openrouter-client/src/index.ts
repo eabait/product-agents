@@ -262,11 +262,12 @@ export class OpenRouterClient {
       return response.object
     } catch (error: any) {
       // Enhanced fallback handling for various response malformation issues
-      const shouldAttemptFallback = error.message?.includes('validation') || 
+      const shouldAttemptFallback = error.message?.includes('validation') ||
                                    error.message?.includes('Expected array') ||
                                    error.message?.includes('Required') ||
                                    error.message?.includes('Invalid') ||
-                                   error.message?.includes('parse')
+                                   error.message?.includes('parse') ||
+                                   error.message?.includes('No object generated')
       
       if (shouldAttemptFallback) {
         console.warn('Schema validation failed, attempting enhanced fallback...', error.message)

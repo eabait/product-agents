@@ -5,16 +5,16 @@ const PRD_AGENT_URL = process.env.PRD_AGENT_URL || 'http://localhost:3001';
 export async function GET() {
   try {
     console.log('Fetching agent defaults from:', `${PRD_AGENT_URL}/health`);
-    
+
     const response = await fetch(`${PRD_AGENT_URL}/health`, {
       method: 'GET',
       headers: { 'Content-Type': 'application/json' }
     });
-    
+
     if (!response.ok) {
       throw new Error(`Failed to fetch agent defaults: ${response.status}`);
     }
-    
+
     const data = await response.json();
     console.log('Agent defaults received:', data);
 
@@ -22,17 +22,9 @@ export async function GET() {
     const defaults = {
       model: data.defaultSettings?.model ?? 'anthropic/claude-3-5-sonnet',
       temperature: data.defaultSettings?.temperature ?? 0.2,
-      maxTokens: data.defaultSettings?.maxTokens ?? 8000,
-      subAgentSettings: { ...(data.defaultSettings?.subAgentSettings ?? {}) }
+      maxTokens: data.defaultSettings?.maxTokens ?? 8000
     };
 
-    const subAgentSettings = defaults.subAgentSettings
-      ? Object.entries(defaults.subAgentSettings).reduce<Record<string, any>>((acc, [key, value]: [string, any]) => {
-          acc[key] = { ...value };
-          return acc;
-        }, {})
-      : {};
-    
     const mergedMetadata =
       data.metadata && typeof data.metadata === 'object'
         ? {
@@ -60,20 +52,11 @@ export async function GET() {
       ]
     }
 
-    if (!defaults.subAgentSettings['persona.builder']) {
-      defaults.subAgentSettings['persona.builder'] = {
-        model: defaults.model,
-        temperature: defaults.temperature,
-        maxTokens: defaults.maxTokens
-      }
-    }
-
     return NextResponse.json({
       settings: {
         model: defaults.model,
         temperature: defaults.temperature,
-        maxTokens: defaults.maxTokens,
-        subAgentSettings,
+        maxTokens: defaults.maxTokens
       },
       agentInfo: data.agentInfo || null,
       metadata: mergedMetadata
@@ -81,20 +64,13 @@ export async function GET() {
 
   } catch (error) {
     console.error('Error fetching agent defaults:', error);
-    
-    // Return fallback defaults instead of undefined
+
+    // Return fallback defaults
     return NextResponse.json({
       settings: {
         model: 'anthropic/claude-3-5-sonnet',
         temperature: 0.3,
-        maxTokens: 8000,
-        subAgentSettings: {
-          'persona.builder': {
-            model: 'anthropic/claude-3-5-sonnet',
-            temperature: 0.3,
-            maxTokens: 8000
-          }
-        }
+        maxTokens: 8000
       },
       metadata: {
         subAgents: [

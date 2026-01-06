@@ -27,7 +27,6 @@ import {
   Message,
   AgentMetadata,
   AgentSettingsState,
-  SubAgentSettingsMap,
   type RunProgressCard,
   type AgentProgressEvent,
   type RunProgressStatus,
@@ -46,49 +45,6 @@ import {
   VALIDATION_LIMITS, 
   TimingSettings
 } from "@/lib/ui-constants";
-
-type RuntimeOverrides = {
-  model?: string;
-  temperature?: number;
-  maxTokens?: number;
-  apiKey?: string;
-};
-
-function buildSubAgentSettings(
-  metadata: AgentMetadata | null,
-  defaults: SubAgentSettingsMap | undefined,
-  saved: SubAgentSettingsMap | undefined,
-  fallback: {
-    model: string;
-    temperature: number;
-    maxTokens: number;
-    apiKey?: string;
-  }
-): SubAgentSettingsMap {
-  const subAgents = metadata?.subAgents || [];
-
-  if (subAgents.length === 0) {
-    const source = saved || defaults || {};
-    return Object.entries(source).reduce<SubAgentSettingsMap>((acc, [key, value]) => {
-      acc[key] = { ...value };
-      return acc;
-    }, {});
-  }
-
-  return subAgents.reduce<SubAgentSettingsMap>((acc, subAgent) => {
-    const defaultEntry: RuntimeOverrides = defaults?.[subAgent.id] ?? subAgent.defaultSettings ?? {};
-    const savedEntry: RuntimeOverrides = saved?.[subAgent.id] ?? {};
-
-    acc[subAgent.id] = {
-      model: savedEntry.model ?? defaultEntry.model ?? fallback.model,
-      temperature: savedEntry.temperature ?? defaultEntry.temperature ?? fallback.temperature,
-      maxTokens: savedEntry.maxTokens ?? defaultEntry.maxTokens ?? fallback.maxTokens,
-      apiKey: savedEntry.apiKey ?? defaultEntry.apiKey ?? fallback.apiKey,
-    };
-
-    return acc;
-  }, {} as SubAgentSettingsMap);
-}
 
 // Streaming configuration constants
 const STREAM_TIMEOUT_MS = 300000; // 5 minutes
@@ -152,15 +108,14 @@ function PRDAgentPageContent() {
   const [input, setInput] = useState("");
   const [isChatLoading, setIsChatLoading] = useState(false);
   
-  // Settings state  
+  // Settings state
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settings, setSettings] = useState<AgentSettingsState>({
-    model: "anthropic/claude-3-7-sonnet", // Will be updated with agent defaults
-    temperature: 0.7, // Will be updated with agent defaults
+    model: "qwen/qwen-2.5-72b-instruct", // Will be updated with agent defaults
+    temperature: 0.2, // Will be updated with agent defaults
     maxTokens: 8000, // Will be updated with agent defaults
     apiKey: undefined,
-    streaming: true, // Enable streaming by default
-    subAgentSettings: {}
+    streaming: true // Enable streaming by default
   });
   const [agentMetadata, setAgentMetadata] = useState<AgentMetadata | null>(null);
   
@@ -883,39 +838,7 @@ function PRDAgentPageContent() {
 
   // Fetch agent defaults from backend
   const pruneInvalidOverrides = useCallback((availableModels: string[]) => {
-    if (!availableModels || availableModels.length === 0) {
-      return;
-    }
-
-    const availableSet = new Set(availableModels);
-
-    setSettings(prev => {
-      const overrides = prev.subAgentSettings;
-      if (!overrides || Object.keys(overrides).length === 0) {
-        return prev;
-      }
-
-      let changed = false;
-      const filtered: SubAgentSettingsMap = {};
-
-      for (const [key, value] of Object.entries(overrides)) {
-        if (value?.model && availableSet.has(value.model)) {
-          filtered[key] = value;
-        } else {
-          changed = true;
-        }
-      }
-
-      if (!changed) {
-        return prev;
-      }
-
-      console.warn('Removing unavailable sub-agent overrides that are no longer in the model catalog');
-      return {
-        ...prev,
-        subAgentSettings: filtered
-      };
-    });
+    // No longer need to filter subAgentSettings - they're configured via env
   }, []);
 
   const fetchAgentDefaults = useCallback(async () => {
@@ -1022,7 +945,6 @@ function PRDAgentPageContent() {
         if (rawSettings && rawSettings.trim() && rawSettings !== "undefined" && rawSettings !== "null") {
           try {
             const parsed = JSON.parse(rawSettings) as AgentSettingsState;
-            parsed.subAgentSettings = parsed.subAgentSettings || {};
             savedSettings = parsed;
             console.log("Loaded settings from localStorage:", parsed);
           } catch (parseErr) {
@@ -1099,8 +1021,7 @@ function PRDAgentPageContent() {
         temperature: baseSettings.temperature,
         maxTokens: baseSettings.maxTokens,
         apiKey: baseSettings.apiKey,
-        streaming: baseSettings.streaming,
-        subAgentSettings: baseSettings.subAgentSettings || {}
+        streaming: baseSettings.streaming
       };
 
       if (defaultSettings) {
@@ -1108,7 +1029,6 @@ function PRDAgentPageContent() {
         merged.temperature = defaultSettings.temperature ?? merged.temperature;
         merged.maxTokens = defaultSettings.maxTokens ?? merged.maxTokens;
         merged.apiKey = defaultSettings.apiKey ?? merged.apiKey;
-        merged.subAgentSettings = defaultSettings.subAgentSettings || merged.subAgentSettings;
       }
 
       if (savedSettings) {
@@ -1117,20 +1037,6 @@ function PRDAgentPageContent() {
         merged.maxTokens = savedSettings.maxTokens ?? merged.maxTokens;
         merged.apiKey = savedSettings.apiKey ?? merged.apiKey;
         merged.streaming = savedSettings.streaming ?? merged.streaming;
-      }
-
-      if (metadata || savedSettings?.subAgentSettings || defaultSettings?.subAgentSettings) {
-        merged.subAgentSettings = buildSubAgentSettings(
-          metadata,
-          defaultSettings?.subAgentSettings,
-          savedSettings?.subAgentSettings,
-          {
-            model: merged.model,
-            temperature: merged.temperature,
-            maxTokens: merged.maxTokens,
-            apiKey: merged.apiKey,
-          }
-        );
       }
 
       if (isMounted) {

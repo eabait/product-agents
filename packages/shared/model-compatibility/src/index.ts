@@ -38,8 +38,12 @@ export const MODEL_CAPABILITIES: Record<ModelCapability, string[]> = {
     'openai/gpt-3.5-turbo',
     'google/gemini-pro',
     'google/gemini-pro-1.5',
+    'google/gemini-2.0-flash-exp',
+    'google/gemini-3-flash-preview',
     'mistralai/mistral-large',
-    'cohere/command-r-plus'
+    'cohere/command-r-plus',
+    'qwen/qwen-2.5-72b-instruct',
+    'qwen/qwen-2-72b-instruct'
   ],
   
   // Models with function calling/tool use capabilities
@@ -47,7 +51,7 @@ export const MODEL_CAPABILITIES: Record<ModelCapability, string[]> = {
     'anthropic/claude-3-7-sonnet',
     'anthropic/claude-3-7-haiku',
     'anthropic/claude-3-5-sonnet',
-    'anthropic/claude-3-5-haiku', 
+    'anthropic/claude-3-5-haiku',
     'anthropic/claude-3-opus',
     'anthropic/claude-3-sonnet',
     'anthropic/claude-3-haiku',
@@ -58,8 +62,12 @@ export const MODEL_CAPABILITIES: Record<ModelCapability, string[]> = {
     'openai/gpt-3.5-turbo',
     'google/gemini-pro',
     'google/gemini-pro-1.5',
+    'google/gemini-2.0-flash-exp',
+    'google/gemini-3-flash-preview',
     'mistralai/mistral-large',
-    'cohere/command-r-plus'
+    'cohere/command-r-plus',
+    'qwen/qwen-2.5-72b-instruct',
+    'qwen/qwen-2-72b-instruct'
   ],
   
   // Models with multimodal capabilities (vision, etc.)
@@ -89,8 +97,12 @@ export const MODEL_CAPABILITIES: Record<ModelCapability, string[]> = {
     'openai/gpt-3.5-turbo',
     'google/gemini-pro',
     'google/gemini-pro-1.5',
+    'google/gemini-2.0-flash-exp',
+    'google/gemini-3-flash-preview',
     'mistralai/mistral-large',
-    'cohere/command-r-plus'
+    'cohere/command-r-plus',
+    'qwen/qwen-2.5-72b-instruct',
+    'qwen/qwen-2-72b-instruct'
   ]
 }
 
@@ -213,8 +225,9 @@ export function mapOpenRouterToAgentCapabilities(model: any): ModelCapability[] 
       'anthropic/claude-3-7-sonnet', 'anthropic/claude-3-7-haiku',
       'anthropic/claude-3-5-sonnet', 'anthropic/claude-3-opus', 'anthropic/claude-3-sonnet', 'anthropic/claude-3-haiku',
       'openai/gpt-4o', 'openai/gpt-4-turbo', 'openai/gpt-4', 'openai/gpt-3.5-turbo',
-      'google/gemini-pro', 'google/gemini-pro-1.5',
-      'mistralai/mistral-large'
+      'google/gemini-pro', 'google/gemini-pro-1.5', 'google/gemini-2.0', 'google/gemini-3',
+      'mistralai/mistral-large',
+      'qwen/qwen-2.5', 'qwen/qwen-2'
     ]
     
     const isFullCapability = fullCapabilityModels.some(known => model.id === known || model.id.startsWith(known))

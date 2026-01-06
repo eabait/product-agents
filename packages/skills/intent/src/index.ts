@@ -92,13 +92,25 @@ export class IntentClassifierSkill {
       timestamp: new Date().toISOString()
     })
 
-    const raw = await this.client.generateStructured({
-      model: this.settings.model,
-      schema: CLASSIFICATION_SCHEMA,
-      prompt,
-      temperature: this.settings.temperature,
-      maxTokens: this.settings.maxTokens
-    })
+    let raw: Partial<z.infer<typeof CLASSIFICATION_SCHEMA>>
+    try {
+      raw = await this.client.generateStructured({
+        model: this.settings.model,
+        schema: CLASSIFICATION_SCHEMA,
+        prompt,
+        temperature: this.settings.temperature,
+        maxTokens: this.settings.maxTokens
+      })
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      console.error('[intent-classifier] generateStructured failed:', {
+        model: this.settings.model,
+        runId: input.runId,
+        error: errorMessage,
+        promptLength: prompt.length
+      })
+      throw error
+    }
 
     const normalized = this.normalizeResult(raw, input.availableArtifacts)
 

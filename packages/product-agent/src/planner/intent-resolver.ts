@@ -68,10 +68,25 @@ export class IntentResolver {
       this.cacheIntent(context, fallback)
       return fallback
     } catch (error) {
-      this.logger?.error?.(
-        '[intent-resolver] failed to classify intent, using fallback',
-        error
-      )
+      // Always log classification errors to help debugging
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      const errorStack = error instanceof Error ? error.stack : undefined
+
+      console.error('[intent-resolver] failed to classify intent:', {
+        error: errorMessage,
+        stack: errorStack,
+        runId: context.runId,
+        model: classifierInput.metadata?.artifactKind,
+        messageLength: classifierInput.message?.length
+      })
+
+      if (this.logger?.error) {
+        this.logger.error(
+          '[intent-resolver] failed to classify intent, using fallback',
+          error
+        )
+      }
+
       const fallback = this.buildClarificationIntent(context, 'classification-error')
       this.cacheIntent(context, fallback)
       return fallback

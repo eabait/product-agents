@@ -36,6 +36,7 @@ const PlannerConfigSchema = z.object({
 export const ProductAgentConfigSchema = z.object({
   runtime: z.object({
     defaultModel: z.string().min(1),
+    skillsModel: z.string().min(1).nullable().default(null),
     defaultTemperature: z.number().min(0).max(2),
     maxOutputTokens: z.number().int().min(128),
     allowStreaming: z.boolean(),
@@ -123,7 +124,8 @@ const DEFAULT_RESEARCH_SUBAGENT_MANIFEST: SubagentConfigEntry = {
 
 const DEFAULT_CONFIG: ProductAgentConfig = {
   runtime: {
-    defaultModel: process.env.ORCHESTRATOR_MODEL ?? 'qwen/qwen3-235b-a22b-2507',
+    defaultModel: process.env.ORCHESTRATOR_MODEL ?? 'qwen/qwen-2.5-72b-instruct',
+    skillsModel: null,
     defaultTemperature: 0.2,
     maxOutputTokens: 8000,
     allowStreaming: true,
@@ -307,14 +309,24 @@ const parseEnvOverrides = (env: NodeJS.ProcessEnv): PartialProductAgentConfig | 
   const subagents: SubagentOverrides = {}
   const planner: PlannerOverrides = {}
 
-  if (env.PRODUCT_AGENT_MODEL) {
+  // Support both ORCHESTRATOR_MODEL (new centralized config) and PRODUCT_AGENT_MODEL (legacy)
+  // Prefer ORCHESTRATOR_MODEL for consistency with centralized .env
+  if (env.ORCHESTRATOR_MODEL) {
+    runtime.defaultModel = env.ORCHESTRATOR_MODEL
+  } else if (env.PRODUCT_AGENT_MODEL) {
     runtime.defaultModel = env.PRODUCT_AGENT_MODEL
   }
-  const envTemp = toNumber(env.PRODUCT_AGENT_TEMPERATURE)
+  // Optional: Override model specifically for skills (falls back to defaultModel if not set)
+  if (env.SKILLS_MODEL) {
+    runtime.skillsModel = env.SKILLS_MODEL
+  }
+  // Support both ORCHESTRATOR_TEMPERATURE and PRODUCT_AGENT_TEMPERATURE
+  const envTemp = toNumber(env.ORCHESTRATOR_TEMPERATURE ?? env.PRODUCT_AGENT_TEMPERATURE)
   if (envTemp !== undefined) {
     runtime.defaultTemperature = envTemp
   }
-  const envMaxTokens = toNumber(env.PRODUCT_AGENT_MAX_OUTPUT_TOKENS)
+  // Support both ORCHESTRATOR_MAX_TOKENS and PRODUCT_AGENT_MAX_OUTPUT_TOKENS
+  const envMaxTokens = toNumber(env.ORCHESTRATOR_MAX_TOKENS ?? env.PRODUCT_AGENT_MAX_OUTPUT_TOKENS)
   if (envMaxTokens !== undefined) {
     runtime.maxOutputTokens = envMaxTokens
   }

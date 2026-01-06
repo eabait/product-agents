@@ -62,15 +62,13 @@ StartRunPayload (apps/api):
     "temperature": 0.2,
     "maxTokens": 8000,
     "apiKey": "...",
-    "streaming": true,
-    "subAgentSettings": {
-      "persona.builder": { "model": "...", "temperature": 0.2, "maxTokens": 8000 }
-    }
+    "streaming": true
   },
   "contextPayload": { "...": "..." },
   "targetSections": ["targetUsers", "solution"]
 }
 ```
+Note: Subagent model overrides are configured via environment variables, not per-request.
 
 ### Frontend API routes (frontend/product-agent/app/api)
 - POST /api/runs: proxy to /runs.
@@ -83,16 +81,37 @@ StartRunPayload (apps/api):
 - POST /api/subagents/persona: direct persona subagent runner (can start from runId, artifact, or prompt).
 
 ## Configuration and Overrides
+
+### Centralized Configuration (env.example)
+All configuration is centralized in a single `.env` file at the project root. See `env.example` for the full template.
+
+**Core env vars:**
+- API Keys: `OPENROUTER_API_KEY`, `TAVILY_API_KEY`
+- Orchestrator: `ORCHESTRATOR_MODEL`, `ORCHESTRATOR_TEMPERATURE`, `ORCHESTRATOR_MAX_TOKENS`
+- Skills model override: `SKILLS_MODEL` (optional - uses ORCHESTRATOR_MODEL if empty)
+- Subagent models: `PERSONA_AGENT_MODEL`, `RESEARCH_AGENT_MODEL` (optional - inherit from orchestrator if empty)
+- Runtime: `STREAMING_ENABLED`, `LOG_LEVEL`
+- Backend URL: `PRD_AGENT_URL` (for frontend)
+
+### Legacy config (packages/product-agent)
 - Default config: packages/product-agent/src/config/product-agent.config.ts.
 - Planner strategy: intelligent (default) or legacy-prd.
-- Env overrides:
+- Additional env overrides:
   - Runtime: PRODUCT_AGENT_MODEL, PRODUCT_AGENT_TEMPERATURE, PRODUCT_AGENT_MAX_OUTPUT_TOKENS, PRODUCT_AGENT_ALLOW_STREAMING, PRODUCT_AGENT_FALLBACK_MODEL, PRODUCT_AGENT_RETRY_ATTEMPTS, PRODUCT_AGENT_RETRY_BACKOFF_MS
   - Workspace: PRODUCT_AGENT_WORKSPACE_ROOT, PRODUCT_AGENT_WORKSPACE_PERSIST, PRODUCT_AGENT_WORKSPACE_RETENTION_DAYS, PRODUCT_AGENT_WORKSPACE_TEMP_SUBDIR
   - Skills: PRODUCT_AGENT_SKILL_PACKS, PRODUCT_AGENT_ALLOW_DYNAMIC_SKILLS
   - Telemetry: PRODUCT_AGENT_TELEMETRY_STREAM, PRODUCT_AGENT_TELEMETRY_METRICS, PRODUCT_AGENT_TELEMETRY_LOG_LEVEL, PRODUCT_AGENT_TELEMETRY_THROTTLE_MS
   - Subagents: PRODUCT_AGENT_SUBAGENTS (JSON array of SubagentManifest entries)
   - Planner: PRODUCT_AGENT_PLANNER_STRATEGY
-- Per-run overrides (API payload): model, temperature, maxOutputTokens, skillPackId, additionalSkillPacks, workspaceRoot, logLevel.
+
+### Shared config schemas
+Centralized validation schemas are in `packages/shared/config-schemas/`. This package exports:
+- `SettingsSchema`, `MessageSchema`, `StartRunSchema` - API request validation
+- `EnvConfigSchema`, `parseEnvConfig`, `getResolvedConfig` - Environment parsing
+- Constants: `TEMPERATURE_MIN/MAX`, `MAX_TOKENS_MIN/MAX`, default values
+
+### Per-run overrides (API payload)
+model, temperature, maxOutputTokens, skillPackId, additionalSkillPacks, workspaceRoot, logLevel.
 
 ## Dev environment tips (commands)
 - Install dependencies: npm install

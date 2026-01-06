@@ -411,14 +411,21 @@ export class GraphController implements AgentController {
     const apiKey = this.resolveApiKey(context.runContext)
     const hasApiKey = typeof apiKey === 'string' && apiKey.trim().length > 0
     const provider = this.providerFactory(apiKey)
-    const model = hasApiKey
-      ? resolveOpenRouterModel(provider, this.config, context.runContext.settings.model)
-      : undefined
+
     const orderedSteps = topologicallySortPlan(context.plan)
 
     for (const stepId of orderedSteps) {
       const node = context.plan.nodes[stepId]
       const nodeKind = this.getPlanNodeKind(node)
+
+      // Use skillsModel for skill nodes if configured, otherwise use default model
+      const modelToUse = nodeKind === 'skill' && this.config.runtime.skillsModel
+        ? this.config.runtime.skillsModel
+        : context.runContext.settings.model
+
+      const model = hasApiKey
+        ? resolveOpenRouterModel(provider, this.config, modelToUse)
+        : undefined
       const toolName = `node_${node.id}`
 
       emitEvent(

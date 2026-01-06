@@ -118,12 +118,62 @@ export class ConstraintsSectionWriter extends BaseSectionWriter {
     const existingAssumptions = this.extractExistingList(input.context?.existingSection, 'assumptions')
 
     const prompt = this.createConstraintsPrompt(input, contextData, existingConstraints, existingAssumptions)
-    
-    const plan = await this.generateStructuredWithFallback({
-      schema: ConstraintsSectionPlanSchema,
-      prompt,
-      temperature: DEFAULT_TEMPERATURE
-    })
+
+    let plan: ConstraintsPlanInput
+    try {
+      plan = await this.generateStructuredWithFallback({
+        schema: ConstraintsSectionPlanSchema,
+        prompt,
+        temperature: DEFAULT_TEMPERATURE
+      })
+    } catch (error) {
+      const fallbackError = error instanceof Error ? error.message : String(error)
+      console.error(
+        '[ConstraintsSectionWriter] Failed to generate constraints plan; falling back to existing/context constraints.',
+        error
+      )
+
+      const fallbackConstraints = dedupeEntries(
+        sanitizeEntries([
+          ...existingConstraints,
+          ...(Array.isArray(contextData.constraints) ? contextData.constraints : [])
+        ])
+      )
+      const fallbackAssumptions = dedupeEntries(sanitizeEntries(existingAssumptions))
+
+      const finalSection: ConstraintsSection = {
+        constraints: fallbackConstraints,
+        assumptions: fallbackAssumptions
+      }
+
+      const validation = this.validateConstraintsSection(finalSection)
+
+      const confidenceAssessment = assessConfidence({
+        inputCompleteness: assessInputCompleteness(input.message, input.context?.contextPayload),
+        contextRichness: assessContextRichness(input.context?.contextPayload),
+        contentSpecificity: assessContentSpecificity(finalSection),
+        validationSuccess: validation.isValid,
+        hasErrors: true,
+        contentLength: JSON.stringify(finalSection).length
+      })
+
+      return {
+        name: this.getSectionName(),
+        content: finalSection,
+        confidence: confidenceAssessment,
+        metadata: this.composeMetadata({
+          constraints_count: finalSection.constraints.length,
+          assumptions_count: finalSection.assumptions.length,
+          validation_issues: validation.issues,
+          source_analyzers: ['contextAnalysis'],
+          plan_mode: 'fallback',
+          constraint_operations: 0,
+          assumption_operations: 0,
+          fallback_error: fallbackError
+        }),
+        shouldRegenerate: true
+      }
+    }
 
     const normalizedPlan: ConstraintsPlan = {
       mode: plan.mode ?? 'smart_merge',
