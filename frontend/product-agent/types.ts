@@ -50,7 +50,7 @@ export interface AgentProgressEvent {
   stepId?: string
   payload?: Record<string, unknown>
   message?: string
-  status?: 'pending' | 'running' | 'awaiting-input' | 'blocked' | 'failed' | 'completed'
+  status?: 'pending' | 'running' | 'awaiting-input' | 'blocked' | 'failed' | 'completed' | 'pending-approval'
 }
 
 export interface PlanNodeSummary {
@@ -72,7 +72,26 @@ export interface PlanGraphSummary {
   metadata?: Record<string, unknown>
 }
 
-export type RunProgressStatus = 'active' | 'completed' | 'failed' | 'awaiting-input'
+export interface PlanStepProposal {
+  id: string
+  toolId: string
+  toolType: 'skill' | 'subagent'
+  label: string
+  rationale: string
+  dependsOn: string[]
+  outputArtifact?: string
+}
+
+export interface PlanProposal {
+  targetArtifact: string
+  overallRationale: string
+  confidence: number
+  warnings?: string[]
+  suggestedClarifications?: string[]
+  steps: PlanStepProposal[]
+}
+
+export type RunProgressStatus = 'active' | 'completed' | 'failed' | 'awaiting-input' | 'pending-approval'
 
 export interface PlanNodeState {
   status: 'pending' | 'active' | 'complete' | 'error'
@@ -91,6 +110,8 @@ export interface RunProgressCard {
   completedAt?: string
   events: AgentProgressEvent[]
   plan?: PlanGraphSummary
+  approvalPlan?: PlanProposal
+  approvalUrl?: string
   nodeStates: Record<string, PlanNodeState>
 }
 

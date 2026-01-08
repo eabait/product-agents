@@ -40,8 +40,9 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
 
   const needsArtifactRefresh =
     Boolean(PRD_AGENT_URL) &&
-    (record.result === null || typeof record.result === 'undefined') &&
-    (record.status === 'awaiting-input' || record.status === 'completed')
+    (((record.result === null || typeof record.result === 'undefined') &&
+      (record.status === 'awaiting-input' || record.status === 'completed')) ||
+      (record.status === 'pending-approval' && !record.plan))
 
   if (needsArtifactRefresh && PRD_AGENT_URL) {
     try {
@@ -57,6 +58,9 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
           usage?: Record<string, unknown> | null
           result?: unknown
           clarification?: Record<string, unknown> | null
+          plan?: unknown
+          approvalUrl?: string
+          approvalMode?: 'auto' | 'manual'
           summary?: {
             status?: string
             metadata?: Record<string, unknown> | null
@@ -89,7 +93,13 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
           metadata: metadataFromPayload ?? record.metadata ?? null,
           usage: usageFromPayload ?? record.usage ?? null,
           result: artifactFromPayload ?? record.result ?? null,
-          clarification: payload.clarification ?? record.clarification ?? null
+          clarification: payload.clarification ?? record.clarification ?? null,
+          plan: payload.plan ?? record.plan ?? null,
+          approvalUrl:
+            payload.status === 'pending-approval' || payload.approvalUrl
+              ? `/api/runs/${record.id}/approve`
+              : record.approvalUrl ?? null,
+          approvalMode: payload.approvalMode ?? record.approvalMode
         })
 
         const updatedRecord = getRunRecord(record.id)

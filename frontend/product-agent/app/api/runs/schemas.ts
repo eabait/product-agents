@@ -22,7 +22,8 @@ export const StartRunSchema = z.object({
   messages: z.array(MessageSchema).min(1),
   settings: SettingsSchema.optional(),
   contextPayload: z.any().optional(),
-  targetSections: z.array(z.string()).optional()
+  targetSections: z.array(z.string()).optional(),
+  approvalMode: z.enum(['auto', 'manual']).default('manual')
 })
 
 export type StartRunPayload = z.infer<typeof StartRunSchema>

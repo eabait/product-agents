@@ -51,6 +51,14 @@ const handleEventForStore = (runId: string, eventType: string, data: any) => {
       })
       break
     }
+    case 'pending-approval': {
+      updateRunRecord(runId, {
+        status: 'pending-approval',
+        plan: data?.plan ?? null,
+        approvalUrl: `/api/runs/${runId}/approve`
+      })
+      break
+    }
     case 'error':
       updateRunRecord(runId, {
         status: 'failed',
@@ -132,7 +140,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     return new Response(JSON.stringify({ error: 'Backend response missing body' }), { status: 500 })
   }
 
-  updateRunRecord(record.id, { status: 'running', error: null })
+  if (record.status !== 'pending-approval') {
+    updateRunRecord(record.id, { status: 'running', error: null })
+  }
 
   const reader = backendResponse.body.getReader()
   const decoder = new TextDecoder()

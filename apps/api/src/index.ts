@@ -17,7 +17,11 @@ import {
   type ProgressEvent,
   type ProductAgentApiOverrides,
   type RunRequest,
-  SubagentRegistry
+  SubagentRegistry,
+  createLLMOrchestrator,
+  SkillCatalog,
+  type OrchestratorPlanProposal,
+  type PlanStepProposal
 } from '@product-agents/product-agent'
 import { personaAgentManifest } from '@product-agents/persona-agent'
 import { researchAgentManifest, createResearchAgentSubagent } from '@product-agents/research-agent'
@@ -46,7 +50,7 @@ loadEnvFiles()
 const PORT = parseInt(process.env.PRODUCT_AGENT_API_PORT ?? '3001', 10)
 const HOST = process.env.PRODUCT_AGENT_API_HOST ?? '0.0.0.0'
 
-type RunStatus = ControllerRunSummary['status'] | 'pending' | 'running' | 'blocked'
+type RunStatus = ControllerRunSummary['status'] | 'pending' | 'running' | 'blocked' | 'pending-approval'
 
 type RunMetadata = Record<string, unknown> & {
   intent?: ArtifactIntent
@@ -67,6 +71,8 @@ interface RunRecord {
   metadata?: RunMetadata | null
   result?: unknown
   usage?: Record<string, unknown> | null
+  proposedPlan?: OrchestratorPlanProposal
+  approvalMode?: 'auto' | 'manual'
 }
 
 const MAX_RUN_HISTORY = 50
@@ -108,6 +114,14 @@ if (!registeredSubagents.has(researchAgentManifest.id)) {
 }
 
 const controller = createPrdController({ config, subagentRegistry })
+
+// Create the Orchestrator for plan generation
+const skillCatalog = new SkillCatalog(config.skills.enabledPacks)
+const orchestrator = createLLMOrchestrator({
+  config,
+  skillCatalog,
+  subagentRegistry
+})
 const runRecords = new Map<string, RunRecord>()
 const streamSubscribers = new Map<string, Set<ServerResponse>>()
 const AGENT_CAPABILITIES = ['structured_output', 'streaming'] as const
@@ -136,7 +150,13 @@ const StartRunSchema = z.object({
   messages: z.array(MessageSchema).min(1),
   settings: SettingsSchema.optional(),
   contextPayload: z.any().optional(),
-  targetSections: z.array(z.string()).optional()
+  targetSections: z.array(z.string()).optional(),
+  approvalMode: z.enum(['auto', 'manual']).default('manual')
+})
+
+const ApproveRunSchema = z.object({
+  approved: z.boolean(),
+  feedback: z.string().optional()
 })
 
 type StartRunPayload = z.infer<typeof StartRunSchema>
@@ -165,6 +185,23 @@ const parseJson = async <T>(req: IncomingMessage): Promise<T> => {
 
 const buildConversationContext = (messages: StartRunPayload['messages']): string =>
   messages.map(message => `${message.role}: ${message.content}`).join('\n\n')
+
+const toPlanPayload = (proposal: OrchestratorPlanProposal) => ({
+  targetArtifact: proposal.targetArtifact,
+  overallRationale: proposal.overallRationale,
+  confidence: proposal.confidence,
+  warnings: proposal.warnings,
+  suggestedClarifications: proposal.suggestedClarifications,
+  steps: proposal.steps.map(step => ({
+    id: step.id,
+    toolId: step.toolId,
+    toolType: step.toolType,
+    label: step.label,
+    rationale: step.rationale,
+    dependsOn: step.dependsOn,
+    outputArtifact: step.outputArtifact
+  }))
+})
 
 const extractExistingArtifact = (messages: StartRunPayload['messages']): unknown => {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -341,7 +378,8 @@ const registerRun = (payload: StartRunPayload): RunRecord => {
     events: [],
     metadata: {},
     result: null,
-    usage: null
+    usage: null,
+    approvalMode: payload.approvalMode ?? 'manual'
   }
 
   runRecords.set(runId, record)
@@ -353,6 +391,50 @@ const registerRun = (payload: StartRunPayload): RunRecord => {
   }
 
   return record
+}
+
+/**
+ * Generate a plan using the Orchestrator without executing.
+ */
+const generatePlan = async (record: RunRecord): Promise<OrchestratorPlanProposal> => {
+  const existingArtifacts = new Map<ArtifactKind, Artifact[]>()
+
+  // Extract existing artifacts from conversation history
+  for (const message of record.request.messages) {
+    try {
+      const parsed = JSON.parse(message.content)
+      if (parsed && typeof parsed === 'object') {
+        const candidate = parsed as Record<string, unknown>
+        if (typeof candidate.problemStatement === 'string' || candidate.sections) {
+          const artifact: Artifact = {
+            id: `existing-prd-${record.id}`,
+            kind: 'prd',
+            version: '1.0.0',
+            label: 'Existing PRD',
+            data: parsed
+          }
+          const prdList = existingArtifacts.get('prd') ?? []
+          prdList.push(artifact)
+          existingArtifacts.set('prd', prdList)
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  const proposal = await orchestrator.propose({
+    message: buildConversationContext(record.request.messages),
+    existingArtifacts,
+    conversationHistory: record.request.messages.map(m => ({
+      role: m.role,
+      content: m.content
+    })),
+    contextPayload: record.request.contextPayload,
+    targetArtifact: record.artifactType as ArtifactKind
+  })
+
+  return proposal
 }
 
 const startRunExecution = async (record: RunRecord) => {
@@ -422,10 +504,15 @@ const startRunExecution = async (record: RunRecord) => {
 
   try {
     updateRunRecord(record.id, { status: 'running' })
+
+    // Pass the approved plan if available (from orchestrator)
+    const initialPlan = record.proposedPlan?.plan
+
     const summary = await controller.start(
       {
         runId: record.id,
-        request: runRequest
+        request: runRequest,
+        initialPlan
       },
       {
         emit(event) {
@@ -569,8 +656,10 @@ const server = http.createServer(async (req, res) => {
       return acc
     }, {})
 
+    const plannerName = controller.planner?.constructor.name ?? 'Orchestrator'
+
     const metadata = {
-      planner: controller.planner.constructor.name,
+      planner: plannerName,
       requiredCapabilities: [...AGENT_CAPABILITIES],
       skillPacks: config.skills.enabledPacks,
       subAgents: allSubagents
@@ -579,7 +668,7 @@ const server = http.createServer(async (req, res) => {
     writeJson(res, 200, {
       status: 'ok',
       controller: 'product-agent',
-      planner: controller.planner.constructor.name,
+      planner: plannerName,
       defaultSettings: {
         model: config.runtime.defaultModel,
         temperature: config.runtime.defaultTemperature,
@@ -607,16 +696,40 @@ const server = http.createServer(async (req, res) => {
         return
       }
       const record = registerRun(payload)
-      startRunExecution(record).catch(error => {
-        console.error('[product-agent/api] unhandled run error:', error)
-      })
 
-      writeJson(res, 202, {
-        runId: record.id,
-        status: record.status,
-        artifactType: record.artifactType,
-        streamUrl: `/runs/${record.id}/stream`
-      })
+      if (payload.approvalMode === 'manual') {
+        // Generate plan and wait for approval
+        try {
+          const proposal = await generatePlan(record)
+          record.proposedPlan = proposal
+          record.status = 'pending-approval'
+          record.updatedAt = new Date().toISOString()
+
+          writeJson(res, 200, {
+            runId: record.id,
+            status: 'pending-approval',
+            artifactType: record.artifactType,
+            approvalUrl: `/runs/${record.id}/approve`,
+            plan: toPlanPayload(proposal)
+          })
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Failed to generate plan'
+          updateRunRecord(record.id, { status: 'failed', error: message })
+          writeJson(res, 500, { error: message, runId: record.id })
+        }
+      } else {
+        // Auto mode: execute immediately
+        startRunExecution(record).catch(error => {
+          console.error('[product-agent/api] unhandled run error:', error)
+        })
+
+        writeJson(res, 202, {
+          runId: record.id,
+          status: record.status,
+          artifactType: record.artifactType,
+          streamUrl: `/runs/${record.id}/stream`
+        })
+      }
     } catch (error) {
       const message =
         error instanceof z.ZodError
@@ -634,7 +747,7 @@ const server = http.createServer(async (req, res) => {
     const record = findRunOrRespond(runId, res)
     if (!record) return
 
-    writeJson(res, 200, {
+    const response: Record<string, unknown> = {
       runId: record.id,
       status: record.status,
       artifactType: record.artifactType,
@@ -646,8 +759,17 @@ const server = http.createServer(async (req, res) => {
       events: record.events,
       metadata: record.metadata ?? null,
       result: record.result ?? null,
-      usage: record.usage ?? null
-    })
+      usage: record.usage ?? null,
+      approvalMode: record.approvalMode ?? 'auto'
+    }
+
+    // Include plan details if pending approval
+    if (record.status === 'pending-approval' && record.proposedPlan) {
+      response.plan = toPlanPayload(record.proposedPlan)
+      response.approvalUrl = `/runs/${record.id}/approve`
+    }
+
+    writeJson(res, 200, response)
     return
   }
 
@@ -668,6 +790,21 @@ const server = http.createServer(async (req, res) => {
     // Send buffered progress so the client catches up.
     for (const event of record.events) {
       sendSse(res, 'progress', event)
+    }
+
+    if (record.status === 'pending-approval') {
+      const planPayload = record.proposedPlan ? toPlanPayload(record.proposedPlan) : null
+      sendSse(res, 'pending-approval', {
+        type: 'pending-approval',
+        runId: record.id,
+        status: 'pending-approval',
+        timestamp: new Date().toISOString(),
+        message: 'Plan ready for approval',
+        approvalUrl: `/runs/${record.id}/approve`,
+        plan: planPayload
+      })
+      endSse(res)
+      return
     }
 
     if (record.status === 'failed' && record.error) {
@@ -696,10 +833,123 @@ const server = http.createServer(async (req, res) => {
     return
   }
 
+  // POST /runs/:runId/approve - Approve or reject a pending plan
+  if (req.method === 'POST' && /^\/runs\/[^/]+\/approve$/.test(url.pathname)) {
+    const runId = url.pathname.split('/')[2]
+    const record = findRunOrRespond(runId, res)
+    if (!record) return
+
+    if (record.status !== 'pending-approval') {
+      writeJson(res, 400, {
+        error: `Run is not pending approval. Current status: ${record.status}`,
+        runId: record.id,
+        status: record.status
+      })
+      return
+    }
+
+    try {
+      const payload = ApproveRunSchema.parse(await parseJson<unknown>(req))
+
+      if (payload.approved) {
+        // User approved the plan - start execution with the proposed plan
+        if (record.proposedPlan) {
+          // Execute with the approved plan
+          startRunExecution(record).catch(error => {
+            console.error('[product-agent/api] unhandled run error:', error)
+          })
+
+          writeJson(res, 202, {
+            runId: record.id,
+            status: 'running',
+            streamUrl: `/runs/${record.id}/stream`,
+            message: 'Plan approved. Execution started.'
+          })
+        } else {
+          writeJson(res, 400, {
+            error: 'No proposed plan available to execute',
+            runId: record.id
+          })
+        }
+      } else {
+        // User rejected the plan
+        if (payload.feedback) {
+          // Refine the plan based on feedback
+          try {
+            const refinedProposal = await orchestrator.refine({
+              currentPlan: record.proposedPlan!.plan,
+              currentSteps: record.proposedPlan!.steps,
+              feedback: payload.feedback,
+              originalInput: {
+                message: buildConversationContext(record.request.messages),
+                existingArtifacts: new Map(),
+                conversationHistory: record.request.messages.map(m => ({
+                  role: m.role,
+                  content: m.content
+                })),
+                targetArtifact: record.artifactType as ArtifactKind
+              }
+            })
+
+            record.proposedPlan = refinedProposal
+            record.updatedAt = new Date().toISOString()
+
+            writeJson(res, 200, {
+              runId: record.id,
+              status: 'pending-approval',
+              approvalUrl: `/runs/${record.id}/approve`,
+              message: 'Plan refined based on feedback. Please review the updated plan.',
+              plan: {
+                targetArtifact: refinedProposal.targetArtifact,
+                overallRationale: refinedProposal.overallRationale,
+                confidence: refinedProposal.confidence,
+                warnings: refinedProposal.warnings,
+                suggestedClarifications: refinedProposal.suggestedClarifications,
+                steps: refinedProposal.steps.map(step => ({
+                  id: step.id,
+                  toolId: step.toolId,
+                  toolType: step.toolType,
+                  label: step.label,
+                  rationale: step.rationale,
+                  dependsOn: step.dependsOn,
+                  outputArtifact: step.outputArtifact
+                }))
+              }
+            })
+          } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to refine plan'
+            writeJson(res, 500, { error: message, runId: record.id })
+          }
+        } else {
+          // No feedback - just reject
+          updateRunRecord(record.id, {
+            status: 'failed',
+            error: 'Plan rejected by user'
+          })
+
+          writeJson(res, 200, {
+            runId: record.id,
+            status: 'failed',
+            message: 'Plan rejected. Run cancelled.'
+          })
+        }
+      }
+    } catch (error) {
+      const message =
+        error instanceof z.ZodError
+          ? 'Invalid approval payload'
+          : error instanceof Error
+            ? error.message
+            : 'Unable to process approval'
+      writeJson(res, 400, { error: message })
+    }
+    return
+  }
+
   writeJson(res, 404, { error: 'Not found' })
 })
 
 server.listen(PORT, HOST, () => {
   console.log(`[product-agent/api] listening on http://${HOST}:${PORT}`)
-  console.log(`[product-agent/api] planner: ${controller.planner.constructor.name}`)
+  console.log(`[product-agent/api] orchestrator: ${orchestrator.constructor.name}`)
 })

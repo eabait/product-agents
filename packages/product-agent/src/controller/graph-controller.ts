@@ -158,7 +158,7 @@ const createWorkspaceEvent = (
 })
 
 export class GraphController implements AgentController {
-  readonly planner: Planner
+  readonly planner?: Planner
   readonly skillRunner: SkillRunner
   readonly verifier: Verifier
   readonly workspace: WorkspaceDAO
@@ -241,9 +241,14 @@ export class GraphController implements AgentController {
 
     const existingArtifacts = extractExistingArtifactsFromContext(runContext as unknown as RunContext<SectionRoutingRequest>)
 
-    const planDraft = input.initialPlan
-      ? { plan: input.initialPlan }
-      : await this.planner.createPlan(runContext)
+    let planDraft: { plan: PlanGraph }
+    if (input.initialPlan) {
+      planDraft = { plan: input.initialPlan }
+    } else if (this.planner) {
+      planDraft = await this.planner.createPlan(runContext)
+    } else {
+      throw new Error('No plan provided and no planner configured. Use the Orchestrator to generate a plan.')
+    }
 
     const plan = planDraft.plan
     if (runContext.metadata) {

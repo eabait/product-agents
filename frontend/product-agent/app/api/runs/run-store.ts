@@ -1,7 +1,10 @@
 import type { StartRunPayload } from './schemas'
 import type { UsageSummary } from '@product-agents/agent-core'
+import type { PlanProposal } from '@/types'
 
-export type RunStatus = 'pending' | 'running' | 'awaiting-input' | 'completed' | 'failed'
+export type ApprovalMode = 'auto' | 'manual'
+
+export type RunStatus = 'pending' | 'running' | 'awaiting-input' | 'completed' | 'failed' | 'pending-approval'
 
 export interface RunRecord {
   id: string
@@ -16,6 +19,9 @@ export interface RunRecord {
   result?: unknown
   error?: string | null
   clarification?: Record<string, unknown> | null
+  plan?: PlanProposal | null
+  approvalUrl?: string | null
+  approvalMode?: ApprovalMode
   subagentArtifacts?: Record<
     string,
     {
@@ -66,7 +72,8 @@ export const createRunRecord = (
     request,
     createdAt: timestamp,
     updatedAt: timestamp,
-    progress: []
+    progress: [],
+    approvalMode: request.approvalMode ?? 'manual'
   }
 
   runStore.set(runId, record)
@@ -104,6 +111,15 @@ export const updateRunRecord = (
   }
   if (updates.clarification !== undefined) {
     record.clarification = updates.clarification
+  }
+  if (updates.plan !== undefined) {
+    record.plan = updates.plan
+  }
+  if (updates.approvalUrl !== undefined) {
+    record.approvalUrl = updates.approvalUrl
+  }
+  if (updates.approvalMode !== undefined) {
+    record.approvalMode = updates.approvalMode
   }
   if (updates.progressAppend) {
     record.progress.push(updates.progressAppend)
@@ -149,6 +165,9 @@ export const serializeRunRecord = (record: RunRecord) => ({
   result: record.result ?? null,
   error: record.error ?? null,
   clarification: record.clarification ?? null,
+  plan: record.plan ?? null,
+  approvalUrl: record.approvalUrl ?? null,
+  approvalMode: record.approvalMode ?? null,
   progress: record.progress,
   subagentArtifacts: record.subagentArtifacts ?? null
 })

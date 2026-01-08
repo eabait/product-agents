@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 import { StartRunSchema } from './schemas'
-import { createRunRecord, serializeRunRecord } from './run-store'
+import { createRunRecord, serializeRunRecord, updateRunRecord } from './run-store'
 
 const PRD_AGENT_URL = process.env.PRD_AGENT_URL
 
@@ -73,6 +73,9 @@ export async function POST(request: NextRequest) {
       status?: string
       artifactType?: string
       streamUrl?: string
+      plan?: unknown
+      approvalUrl?: string
+      approvalMode?: 'auto' | 'manual'
     }
 
     if (!backendPayload?.runId) {
@@ -86,20 +89,50 @@ export async function POST(request: NextRequest) {
     }
 
     const artifactType = backendPayload.artifactType ?? parsed.data.artifactType ?? 'prd'
-    const runStatus = (backendPayload.status as 'pending' | 'running' | 'awaiting-input' | 'completed' | 'failed' | undefined) ?? 'pending'
+    const runStatus =
+      (backendPayload.status as
+        | 'pending'
+        | 'running'
+        | 'awaiting-input'
+        | 'completed'
+        | 'failed'
+        | 'pending-approval'
+        | undefined) ?? 'pending'
 
     const record = createRunRecord(backendPayload.runId, parsed.data, artifactType, runStatus)
+    const plan = backendPayload.plan ?? null
+    const approvalUrl =
+      runStatus === 'pending-approval'
+        ? `/api/runs/${record.id}/approve`
+        : null
+
+    if (plan || approvalUrl) {
+      updateRunRecord(record.id, {
+        plan,
+        approvalUrl,
+        approvalMode: parsed.data.approvalMode ?? 'manual'
+      })
+    }
 
     console.log(`[runs:${requestId}] run ${record.id} created (backend status: ${runStatus})`)
 
-    return NextResponse.json({
+    const responsePayload: Record<string, unknown> = {
       runId: record.id,
       status: runStatus,
       createdAt: record.createdAt,
       artifactType: record.artifactType,
       streamUrl: `/api/runs/${record.id}/stream`,
       summary: serializeRunRecord(record)
-    })
+    }
+
+    if (plan) {
+      responsePayload.plan = plan
+    }
+    if (approvalUrl) {
+      responsePayload.approvalUrl = approvalUrl
+    }
+
+    return NextResponse.json(responsePayload)
   } catch (error) {
     console.error(`[runs:${requestId}] failed to create run`, error)
     return NextResponse.json(

@@ -4,7 +4,6 @@ const workspaceRoot = path.resolve(__dirname, '..', '..')
 
 const packageAlias = {
   '@product-agents/skills-prd': path.join(workspaceRoot, 'packages/skills/prd/src'),
-  '@product-agents/skills-intent': path.join(workspaceRoot, 'packages/skills/intent/src'),
   '@product-agents/product-agent': path.join(workspaceRoot, 'packages/product-agent/src'),
   '@product-agents/prd-agent': path.join(workspaceRoot, 'packages/prd-agent/src'),
   '@product-agents/research-agent': path.join(workspaceRoot, 'packages/research-agent/src'),

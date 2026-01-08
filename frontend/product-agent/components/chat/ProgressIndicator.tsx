@@ -231,6 +231,17 @@ function normalizeEvents(events: AgentProgressEvent[], plan?: PlanGraphSummary):
         });
         break;
 
+      case 'pending-approval':
+        steps.push({
+          id: `approval-${event.timestamp}`,
+          type: 'status',
+          name: 'Awaiting approval',
+          message: event.message || 'Plan ready for approval',
+          status: 'complete',
+          timestamp: event.timestamp
+        });
+        break;
+
       case 'status':
         steps.push({
           id: `status-${event.timestamp}`,
@@ -299,6 +310,7 @@ function StatusDot({ status }: { status: ProgressStep['status'] }) {
 
 function getStatusIcon(status: RunProgressStatus | undefined, isActive: boolean) {
   if (status === 'failed') return <AlertCircle className="h-4 w-4 text-red-500" />;
+  if (status === 'pending-approval') return <Clock className="h-4 w-4 text-amber-500" />;
   if (status === 'completed') return <CheckCircle className="h-4 w-4 text-green-600" />;
   if (isActive) return <Loader className="h-4 w-4 text-blue-600 animate-spin" />;
   return <Clock className="h-4 w-4 text-gray-500" />;
@@ -310,6 +322,8 @@ function getStatusLabel(status: RunProgressStatus | undefined, isActive: boolean
       return 'Run failed';
     case 'awaiting-input':
       return 'Awaiting input';
+    case 'pending-approval':
+      return 'Awaiting approval';
     case 'completed':
       return 'Plan execution complete';
     default:
@@ -331,6 +345,8 @@ function formatRunStatus(status?: string): string {
   switch (status) {
     case 'running':
       return 'Run in progress';
+    case 'pending-approval':
+      return 'Awaiting approval';
     case 'awaiting-input':
       return 'Awaiting input';
     case 'failed':

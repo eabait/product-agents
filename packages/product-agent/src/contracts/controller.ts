@@ -6,7 +6,12 @@ import type { WorkspaceDAO, WorkspaceHandle } from './workspace'
 import type { SubagentLifecycle, SubagentRunSummary } from './subagent'
 
 export interface ControllerComposition {
-  planner: Planner
+  /**
+   * @deprecated Use initialPlan in ControllerStartRequest instead.
+   * The Orchestrator now generates plans before execution.
+   * This field is optional and only used for legacy compatibility.
+   */
+  planner?: Planner
   skillRunner: SkillRunner
   verifier: {
     primary: Verifier
@@ -45,7 +50,11 @@ export interface ControllerRunSummary<TArtifact = unknown> extends ControllerSte
 }
 
 export interface AgentController {
-  readonly planner: Planner
+  /**
+   * @deprecated Use the Orchestrator for planning.
+   * Plans are now generated externally and passed via initialPlan.
+   */
+  readonly planner?: Planner
   readonly skillRunner: SkillRunner
   readonly verifier: Verifier
   readonly workspace: WorkspaceDAO

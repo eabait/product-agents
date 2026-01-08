@@ -9,6 +9,7 @@ interface StartRunParams {
   targetSections?: string[]
   runId?: string
   artifactType?: ArtifactType
+  approvalMode?: 'auto' | 'manual'
 }
 
 interface StartRunResult {
@@ -19,6 +20,8 @@ interface StartRunResult {
   usage?: Record<string, unknown> | null
   streamUrl?: string
   artifact?: unknown
+  plan?: unknown
+  approvalUrl?: string
 }
 
 export const startRun = async (params: StartRunParams): Promise<StartRunResult> => {
@@ -61,7 +64,8 @@ export const startRun = async (params: StartRunParams): Promise<StartRunResult> 
       settings: params.settings,
       contextPayload: params.contextPayload,
       targetSections: params.targetSections,
-      artifactType: params.artifactType
+      artifactType: params.artifactType,
+      approvalMode: params.approvalMode ?? 'manual'
     })
   })
 
@@ -75,7 +79,9 @@ export const startRun = async (params: StartRunParams): Promise<StartRunResult> 
     runId: payload.runId,
     status: payload.status,
     streamUrl: payload.streamUrl,
-    artifact: payload.artifact ?? null
+    artifact: payload.artifact ?? null,
+    plan: payload.plan ?? null,
+    approvalUrl: payload.approvalUrl ?? null
   }
 }
 
@@ -109,6 +115,27 @@ export const streamRun = async (
   }
 
   return response
+}
+
+export const submitRunApproval = async (
+  runId: string,
+  payload: {
+    approved: boolean
+    feedback?: string
+  }
+) => {
+  const response = await fetch(`/api/runs/${runId}/approve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  })
+
+  if (!response.ok) {
+    const errorPayload = await response.json().catch(() => ({}))
+    throw new Error(errorPayload?.error ?? `Approval request failed (${response.status})`)
+  }
+
+  return response.json()
 }
 
 export type { StartRunParams, ArtifactType }

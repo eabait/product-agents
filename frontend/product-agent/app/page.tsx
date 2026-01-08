@@ -31,7 +31,8 @@ import {
   type AgentProgressEvent,
   type RunProgressStatus,
   type PlanGraphSummary,
-  type PlanNodeState
+  type PlanNodeState,
+  type PlanProposal
 } from "@/types";
 import { NewPRD, isNewPRD, isFlattenedPRD } from "@/lib/prd-schema";
 import { ContextPanel } from "@/components/context";
@@ -39,7 +40,7 @@ import { ContextUsageIndicator } from "@/components/context/ContextUsageIndicato
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { contextStorage } from "@/lib/context-storage";
 import { buildEnhancedContextPayload, getContextSummary } from "@/lib/context-utils";
-import { getRun, startRun, streamRun, type ArtifactType } from "@/lib/run-client";
+import { getRun, startRun, streamRun, submitRunApproval, type ArtifactType } from "@/lib/run-client";
 import { 
   UI_DIMENSIONS, 
   VALIDATION_LIMITS, 
@@ -124,6 +125,8 @@ function PRDAgentPageContent() {
   const progressCardRunMap = useRef(new Map<string, string>());
   const progressCardConversationMap = useRef(new Map<string, string>());
   const activeProgressCardRef = useRef<string | null>(null);
+  const [approvalLoadingByRun, setApprovalLoadingByRun] = useState<Record<string, boolean>>({});
+  const [approvalErrorsByRun, setApprovalErrorsByRun] = useState<Record<string, string | null>>({});
 
   const isStreamingEnabled = settings.streaming !== false;
   const activeProgressCards = useMemo(() => {
@@ -469,11 +472,32 @@ function PRDAgentPageContent() {
     return planCandidate as PlanGraphSummary;
   };
 
+  const extractApprovalPlanFromEvent = (
+    event: AgentProgressEvent
+  ): { plan?: PlanProposal; approvalUrl?: string } => {
+    const eventData = event as unknown as Record<string, unknown>;
+    const planCandidate = eventData.plan;
+    const approvalCandidate = eventData.approvalUrl;
+
+    const plan =
+      planCandidate && typeof planCandidate === 'object'
+        ? (planCandidate as PlanProposal)
+        : undefined;
+    const approvalUrl =
+      typeof approvalCandidate === 'string' && approvalCandidate.length > 0
+        ? approvalCandidate
+        : undefined;
+
+    return { plan, approvalUrl };
+  };
+
   const appendProgressEventToCard = (cardId: string, event: AgentProgressEvent) => {
     updateProgressCard(cardId, card => {
       const payload = event.payload as Record<string, unknown> | undefined;
       let planUpdate = card.plan;
       let nodeStates = card.nodeStates ?? {};
+      let approvalPlan = card.approvalPlan;
+      let approvalUrl = card.approvalUrl;
 
       if (event.type === 'plan.created') {
         const resolvedPlan = extractPlanFromPayload(payload) ?? card.plan;
@@ -483,13 +507,25 @@ function PRDAgentPageContent() {
         }
       }
 
+      if (event.type === 'pending-approval') {
+        const approval = extractApprovalPlanFromEvent(event);
+        if (approval.plan) {
+          approvalPlan = approval.plan;
+        }
+        if (approval.approvalUrl) {
+          approvalUrl = approval.approvalUrl;
+        }
+      }
+
       const updatedNodeStates = applyNodeStateEvent(event, nodeStates);
 
       return {
         ...card,
         events: [...card.events, event],
         plan: planUpdate,
-        nodeStates: updatedNodeStates
+        nodeStates: updatedNodeStates,
+        approvalPlan,
+        approvalUrl
       };
     });
   };
@@ -528,9 +564,16 @@ function PRDAgentPageContent() {
 
     appendProgressEventToCard(targetCardId, event);
 
+    if (event.type === 'pending-approval') {
+      finalizeProgressCard(targetCardId, 'pending-approval');
+      return;
+    }
+
     if (event.type === 'run.status' && event.status) {
       if (event.status === 'failed') {
         finalizeProgressCard(targetCardId, 'failed');
+      } else if (event.status === 'pending-approval') {
+        finalizeProgressCard(targetCardId, 'pending-approval');
       } else if (event.status === 'awaiting-input') {
         finalizeProgressCard(targetCardId, 'awaiting-input');
       } else if (event.status === 'completed') {
@@ -1237,6 +1280,56 @@ function PRDAgentPageContent() {
     }
   };
 
+  const handlePlanApproval = async (params: {
+    runId: string;
+    cardId: string;
+    approved: boolean;
+    feedback?: string;
+  }) => {
+    const { runId, cardId, approved, feedback } = params;
+    setApprovalLoadingByRun(prev => ({ ...prev, [runId]: true }));
+    setApprovalErrorsByRun(prev => ({ ...prev, [runId]: null }));
+
+    try {
+      const response = await submitRunApproval(runId, { approved, feedback });
+
+      if (approved) {
+        const titleSeedMessage = [...activeMessages].reverse().find(message => message.role === 'user');
+        progressCardRunMap.current.set(runId, cardId);
+        updateProgressCard(cardId, card => ({
+          ...card,
+          status: 'active',
+          completedAt: undefined
+        }));
+        activeProgressCardRef.current = cardId;
+        setIsChatLoading(true);
+        await streamRunExecution({
+          runId,
+          fallbackCardId: cardId,
+          titleSeedMessage: titleSeedMessage ?? undefined
+        });
+      } else {
+        if (response?.plan) {
+          updateProgressCard(cardId, card => ({
+            ...card,
+            approvalPlan: response.plan as PlanProposal
+          }));
+        }
+        if (response?.status === 'failed') {
+          finalizeProgressCard(cardId, 'failed');
+        } else {
+          finalizeProgressCard(cardId, 'pending-approval');
+        }
+      }
+    } catch (error) {
+      console.error('Plan approval error:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to process approval';
+      setApprovalErrorsByRun(prev => ({ ...prev, [runId]: errorMessage }));
+    } finally {
+      setApprovalLoadingByRun(prev => ({ ...prev, [runId]: false }));
+    }
+  };
+
   const handleCopy = async (content: string, messageId: string) => {
     await navigator.clipboard.writeText(content);
     setCopied(messageId);
@@ -1349,31 +1442,34 @@ function PRDAgentPageContent() {
     }
   };
 
-  // Streaming submission handler with proper cleanup and error handling
-  const handleStreamingSubmit = async (
-    newMessages: Message[],
-    contextPayload: any,
-    userMessage: Message,
-    progressCardId?: string | null
-  ) => {
+  const streamRunExecution = async (options: {
+    runId: string;
+    fallbackCardId?: string | null;
+    titleSeedMessage?: Message;
+  }) => {
+    const { runId, fallbackCardId, titleSeedMessage } = options;
     let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
     let timeoutId: NodeJS.Timeout | null = null;
     let hasFinalArtifact = false;
-    let runId: string | null = null;
     let streamedUsageSummary: any = null;
     let streamedMetadata: any = null;
     let streamedModel: string | null = settings.model ?? null;
     let streamStatus: RunProgressStatus | null = null;
-    const fallbackCardId = progressCardId ?? null;
     const appendedSubagentIds = new Set<string>();
 
     const pushAssistantMessage = (message: Message) => {
       updateActiveConversation(conv => {
+        if (!titleSeedMessage) {
+          return {
+            ...conv,
+            messages: [...conv.messages, message]
+          };
+        }
         const shouldUpdateTitle = conv.title === 'New PRD' && conv.messages.length <= 1;
         return {
           ...conv,
           messages: [...conv.messages, message],
-          title: shouldUpdateTitle ? generateTitleFromMessage(userMessage.content) : conv.title
+          title: shouldUpdateTitle ? generateTitleFromMessage(titleSeedMessage.content) : conv.title
         };
       });
     };
@@ -1397,7 +1493,6 @@ function PRDAgentPageContent() {
 
       let messageContent: string;
       if (artifactKind === 'persona' || artifactKind === 'research') {
-        // Preserve wrapper so the persona/research renderer can detect kind + metadata
         messageContent = JSON.stringify(payload, null, 2);
       } else if (typeof artifactData === 'string') {
         messageContent = artifactData;
@@ -1469,35 +1564,12 @@ function PRDAgentPageContent() {
       });
     };
 
-    const artifactType = detectArtifactType(newMessages);
-
     try {
-      const run = await startRun({
-        messages: newMessages,
-        settings,
-        contextPayload,
-        artifactType,
-      });
+      const response = await streamRun(runId);
 
-      if (!run.runId) {
-        throw new Error("Run was created without an id");
-      }
-
-      runId = run.runId;
-      if (fallbackCardId && runId) {
-        progressCardRunMap.current.set(runId, fallbackCardId);
-        updateProgressCard(fallbackCardId, card => ({
-          ...card,
-          runId
-        }));
-      }
-
-      const response = await streamRun(run.runId);
-
-      // Create EventSource-like interface from the response stream
       reader = response.body?.getReader();
       if (!reader) {
-        throw new Error("No response stream available");
+        throw new Error('No response stream available');
       }
 
       const decoder = new TextDecoder();
@@ -1519,7 +1591,7 @@ function PRDAgentPageContent() {
                 timestamp: new Date().toISOString(),
                 message: `Stream timeout after ${STREAM_TIMEOUT_MS / 1000 / 60} minutes`,
                 status: 'failed',
-                runId: runId ?? undefined
+                runId
               },
               fallbackCardId
             );
@@ -1536,23 +1608,21 @@ function PRDAgentPageContent() {
 
         refreshTimeout();
         buffer += decoder.decode(value, { stream: true });
-        
-        // Process complete lines from buffer
+
         const lines = buffer.split('\n');
-        buffer = lines.pop() || ''; // Keep incomplete line in buffer
-        
+        buffer = lines.pop() || '';
+
         for (const line of lines) {
           if (line.trim() === '') continue;
-          
+
           if (line.startsWith('event:')) {
-            // const eventType = line.substring(6).trim();
             continue;
           }
-          
+
           if (line.startsWith('data:')) {
             const dataStr = line.substring(5).trim();
             if (dataStr === '') continue;
-            
+
             try {
               const eventData = JSON.parse(dataStr);
               if (eventData.metadata) {
@@ -1577,8 +1647,21 @@ function PRDAgentPageContent() {
               if (typeof eventData.model === 'string') {
                 streamedModel = eventData.model;
               }
-              
-              // Handle different event types
+
+              if (eventData.type === 'pending-approval') {
+                streamStatus = 'pending-approval';
+              } else if (eventData.type === 'run.status' && eventData.status) {
+                if (eventData.status === 'failed') {
+                  streamStatus = 'failed';
+                } else if (eventData.status === 'awaiting-input') {
+                  streamStatus = 'awaiting-input';
+                } else if (eventData.status === 'completed') {
+                  streamStatus = 'completed';
+                } else if (eventData.status === 'pending-approval') {
+                  streamStatus = 'pending-approval';
+                }
+              }
+
               if (eventData.type) {
                 routeProgressEvent(eventData as AgentProgressEvent, fallbackCardId);
               } else if (eventData.error) {
@@ -1644,7 +1727,6 @@ function PRDAgentPageContent() {
                   finalizeProgressCard(fallbackCardId, 'completed');
                 }
               } else if (eventData.needsClarification) {
-                // Handle clarification/guidance requests for any artifact
                 const questions = Array.isArray(eventData.questions)
                   ? eventData.questions.filter((q: string) => typeof q === 'string' && q.trim())
                   : [];
@@ -1674,11 +1756,11 @@ function PRDAgentPageContent() {
                   streamedModel,
                   streamedMetadata || eventData.metadata || (eventData.confidence ? { overall_confidence: eventData.confidence } : undefined)
                 );
-                
+
                 const assistantMessage: Message = {
                   id: assistantMessageId,
-                  role: "assistant",
-                  content: content,
+                  role: 'assistant',
+                  content,
                   timestamp: new Date(),
                   ...(assistantMetadata ? { metadata: assistantMetadata } : {})
                 };
@@ -1701,15 +1783,12 @@ function PRDAgentPageContent() {
       streamStatus = 'failed';
       throw error;
     } finally {
-      // Reset loading state
       setIsChatLoading(false);
-      
-      // Clear timeout
+
       if (timeoutId) {
         clearTimeout(timeoutId);
       }
-      
-      // Clean up reader
+
       if (reader) {
         try {
           reader.releaseLock();
@@ -1724,6 +1803,14 @@ function PRDAgentPageContent() {
           const artifactPayload = (runSummary?.result as Record<string, unknown> | undefined) ??
             (runSummary?.summary?.artifact as Record<string, unknown> | undefined) ?? null;
 
+          if (runSummary?.plan && fallbackCardId) {
+            updateProgressCard(fallbackCardId, card => ({
+              ...card,
+              approvalPlan: runSummary.plan as PlanProposal,
+              approvalUrl: runSummary.approvalUrl ?? card.approvalUrl
+            }));
+          }
+
           if (artifactPayload) {
             const assistantMessage = buildMessageFromArtifact(
               artifactPayload,
@@ -1733,6 +1820,12 @@ function PRDAgentPageContent() {
             );
             pushAssistantMessage(assistantMessage);
             streamStatus = 'completed';
+          } else if (runSummary?.status === 'awaiting-input') {
+            streamStatus = streamStatus ?? 'awaiting-input';
+          } else if (runSummary?.status === 'pending-approval') {
+            streamStatus = streamStatus ?? 'pending-approval';
+          } else if (runSummary?.status === 'failed') {
+            streamStatus = streamStatus ?? 'failed';
           }
 
           if (runSummary?.summary?.subagents) {
@@ -1757,6 +1850,57 @@ function PRDAgentPageContent() {
         finalizeProgressCard(fallbackCardId, finalStatus);
       }
     }
+  };
+
+  // Streaming submission handler with proper cleanup and error handling
+  const handleStreamingSubmit = async (
+    newMessages: Message[],
+    contextPayload: any,
+    userMessage: Message,
+    progressCardId?: string | null
+  ) => {
+    const fallbackCardId = progressCardId ?? null;
+    let runId: string | null = null;
+
+    const artifactType = detectArtifactType(newMessages);
+
+    try {
+      const run = await startRun({
+        messages: newMessages,
+        settings,
+        contextPayload,
+        artifactType,
+        approvalMode: 'manual'
+      });
+
+      if (!run.runId) {
+        throw new Error("Run was created without an id");
+      }
+
+      runId = run.runId;
+      if (fallbackCardId) {
+        progressCardRunMap.current.set(runId, fallbackCardId);
+        updateProgressCard(fallbackCardId, card => ({
+          ...card,
+          runId
+        }));
+      }
+
+    } catch (error) {
+      setIsChatLoading(false);
+      if (fallbackCardId) {
+        finalizeProgressCard(fallbackCardId, 'failed');
+      }
+      throw error;
+    }
+    if (!runId) {
+      return;
+    }
+    await streamRunExecution({
+      runId,
+      fallbackCardId,
+      titleSeedMessage: userMessage
+    });
   };
 
   // Non-streaming submission handler (original logic)
@@ -2082,6 +2226,9 @@ function PRDAgentPageContent() {
                   onCopy={handleCopy}
                   onPRDUpdate={handlePRDUpdate}
                   onResearchPlanAction={handleResearchPlanAction}
+                  onPlanApproval={handlePlanApproval}
+                  approvalLoadingByRun={approvalLoadingByRun}
+                  approvalErrorsByRun={approvalErrorsByRun}
                   progressCards={activeProgressCards}
                   isStreaming={isChatLoading && isStreamingEnabled}
                 />

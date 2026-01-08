@@ -8,7 +8,7 @@ import {
   type SubagentRegistry
 } from '@product-agents/product-agent'
 import { createPersonaAgentSubagent } from '@product-agents/persona-agent'
-import { createPrdPlanner, createPrdSkillRunner, createPrdVerifier } from '../adapters'
+import { createPrdSkillRunner, createPrdVerifier } from '../adapters'
 
 interface CreatePrdControllerOptions {
   config?: ProductAgentConfig
@@ -34,12 +34,6 @@ export const createPrdController = (options?: CreatePrdControllerOptions): Agent
 
   const subagents = [createPersonaAgentSubagent({ clock: options?.clock })]
 
-  const planner = createPrdPlanner({
-    config,
-    clock: options?.clock,
-    subagentRegistry: options?.subagentRegistry,
-    subagents
-  })
   const skillRunner = createPrdSkillRunner({
     fallbackModel: config.runtime.fallbackModel,
     clock: options?.clock
@@ -55,7 +49,6 @@ export const createPrdController = (options?: CreatePrdControllerOptions): Agent
 
   return new GraphController(
     {
-      planner,
       skillRunner,
       verifier: {
         primary: verifier,

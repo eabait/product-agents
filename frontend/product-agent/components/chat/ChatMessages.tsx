@@ -5,6 +5,7 @@ import { ProgressIndicator } from './ProgressIndicator';
 import { NewPRD } from '@/lib/prd-schema';
 import { Message, type RunProgressCard } from '../../types';
 import { useState, useEffect, useMemo } from 'react';
+import { PlanReview } from '@/components/plan-review';
 
 interface ChatMessagesProps {
   messages: Message[];
@@ -13,6 +14,14 @@ interface ChatMessagesProps {
   onCopy: (_content: string, _messageId: string) => void;
   onPRDUpdate?: (_messageId: string, _updatedPRD: NewPRD) => void;
   onResearchPlanAction?: (_action: 'approve' | 'reject', _plan: any) => void;
+  onPlanApproval?: (_params: {
+    runId: string;
+    cardId: string;
+    approved: boolean;
+    feedback?: string;
+  }) => void;
+  approvalLoadingByRun?: Record<string, boolean>;
+  approvalErrorsByRun?: Record<string, string | null>;
   progressCards?: RunProgressCard[];
   isStreaming?: boolean;
 }
@@ -24,6 +33,9 @@ export function ChatMessages({
   onCopy,
   onPRDUpdate,
   onResearchPlanAction,
+  onPlanApproval,
+  approvalLoadingByRun = {},
+  approvalErrorsByRun = {},
   progressCards = [],
   isStreaming = false,
 }: ChatMessagesProps) {
@@ -126,6 +138,29 @@ export function ChatMessages({
                 startedAt={card.startedAt}
                 completedAt={card.completedAt}
               />
+              {card.status === 'pending-approval' && card.approvalPlan && card.runId && (() => {
+                const runId = card.runId;
+                return (
+                  <div className="mt-4">
+                    <PlanReview
+                      plan={card.approvalPlan}
+                      onApprove={() =>
+                        onPlanApproval?.({ runId, cardId: card.id, approved: true })
+                      }
+                      onReject={feedback =>
+                        onPlanApproval?.({
+                          runId,
+                          cardId: card.id,
+                          approved: false,
+                          feedback
+                        })
+                      }
+                      isLoading={Boolean(approvalLoadingByRun[runId])}
+                      error={approvalErrorsByRun[runId] ?? undefined}
+                    />
+                  </div>
+                );
+              })()}
             </motion.div>
           ))}
         </div>
@@ -139,7 +174,7 @@ export function ChatMessages({
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3 }}
         >
-          <ProgressIndicator 
+          <ProgressIndicator
             events={card.events}
             plan={card.plan}
             nodeStates={card.nodeStates}
@@ -148,6 +183,29 @@ export function ChatMessages({
             startedAt={card.startedAt}
             completedAt={card.completedAt}
           />
+          {card.status === 'pending-approval' && card.approvalPlan && card.runId && (() => {
+            const runId = card.runId;
+            return (
+              <div className="mt-4">
+                <PlanReview
+                  plan={card.approvalPlan}
+                  onApprove={() =>
+                    onPlanApproval?.({ runId, cardId: card.id, approved: true })
+                  }
+                  onReject={feedback =>
+                    onPlanApproval?.({
+                      runId,
+                      cardId: card.id,
+                      approved: false,
+                      feedback
+                    })
+                  }
+                  isLoading={Boolean(approvalLoadingByRun[runId])}
+                  error={approvalErrorsByRun[runId] ?? undefined}
+                />
+              </div>
+            );
+          })()}
         </motion.div>
       ))}
 

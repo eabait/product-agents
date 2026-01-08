@@ -250,7 +250,7 @@ test('graph controller stops early when clarification is required', async () => 
   }
 })
 
-test('graph controller persona run promotes persona artifact via intelligent planner', async () => {
+test('graph controller persona run promotes persona artifact via subagent', async () => {
   const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'product-agent-int-persona-'))
   const config = getDefaultProductAgentConfig()
   config.workspace.storageRoot = workspaceRoot
@@ -272,7 +272,39 @@ test('graph controller persona run promotes persona artifact via intelligent pla
       }
     ])
   })
-  const planner = createPrdPlanner({ clock: fixedClock, subagents: [personaSubagent] })
+
+  // Create a pre-generated plan that calls the persona subagent
+  const personaPlan = {
+    id: 'plan-run-persona-int',
+    artifactKind: 'persona' as const,
+    entryId: 'persona-step',
+    createdAt: fixedClock(),
+    version: '1.0.0',
+    nodes: {
+      'persona-step': {
+        id: 'persona-step',
+        label: 'Generate personas',
+        task: {
+          kind: 'subagent' as const,
+          agentId: 'persona.builder'
+        },
+        status: 'pending' as const,
+        dependsOn: [],
+        metadata: {
+          kind: 'subagent',
+          toolId: 'persona.builder',
+          rationale: 'Generate user personas',
+          subagentId: 'persona.builder',
+          artifactKind: 'persona' as const
+        }
+      }
+    },
+    metadata: {
+      orchestrator: 'test',
+      confidence: 1.0,
+      overallRationale: 'Test persona generation'
+    }
+  }
 
   const skillRunner = createPrdSkillRunner({
     clock: fixedClock,
@@ -308,7 +340,6 @@ test('graph controller persona run promotes persona artifact via intelligent pla
 
   const controller = new GraphController(
     {
-      planner,
       skillRunner,
       verifier: { primary: verifier, registry: { prd: verifier } },
       workspace,
@@ -328,23 +359,23 @@ test('graph controller persona run promotes persona artifact via intelligent pla
   }
 
   try {
-    const summary = await controller.start({ request: runRequest })
+    const summary = await controller.start({
+      request: runRequest,
+      initialPlan: personaPlan
+    })
 
-    if (summary.status === 'completed') {
-      assert.ok(summary.artifact)
-      assert.equal(summary.artifact?.kind, 'persona')
-      assert.ok(summary.subagents)
-      assert.equal(summary.subagents?.length, 1)
-      assert.equal(summary.subagents?.[0].artifact.kind, 'persona')
+    assert.equal(summary.status, 'completed')
+    assert.ok(summary.artifact)
+    assert.equal(summary.artifact?.kind, 'persona')
+    assert.ok(summary.subagents)
+    assert.equal(summary.subagents?.length, 1)
+    assert.equal(summary.subagents?.[0].artifact.kind, 'persona')
 
-      const artifacts = await workspace.listArtifacts(summary.runId)
-      assert.equal(artifacts.length, 2)
-      const personaArtifact = artifacts.find(entry => entry.kind === 'persona')
-      assert.ok(personaArtifact)
-    } else {
-      assert.equal(summary.status, 'awaiting-input')
-      assert.ok(!summary.artifact)
-    }
+    const artifacts = await workspace.listArtifacts(summary.runId)
+    // The persona subagent creates one artifact which becomes the final artifact
+    assert.equal(artifacts.length, 1)
+    const personaArtifact = artifacts.find(entry => entry.kind === 'persona')
+    assert.ok(personaArtifact)
   } finally {
     await workspace.teardown('run-persona-int').catch(() => {})
     await fs.rm(workspaceRoot, { recursive: true, force: true })
