@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -53,20 +53,7 @@ export function ContextPanel({ isOpen, onClose }: ContextPanelProps) {
   const [editingItem, setEditingItem] = useState<CategorizedContextItem | null>(null)
   const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null)
 
-  // Load context items on mount and when panel opens
-  useEffect(() => {
-    if (isOpen) {
-      loadContextItems()
-    }
-  }, [isOpen])
-
-  const loadContextItems = () => {
-    const items = contextStorage.getCategorizedContext()
-    setContextItems(items)
-    updateContextUsage()
-  }
-
-  const updateContextUsage = () => {
+  const updateContextUsage = useCallback(() => {
     try {
       // Build context payload to calculate current usage
       const contextPayload = buildEnhancedContextPayload([], undefined)
@@ -76,7 +63,20 @@ export function ContextPanel({ isOpen, onClose }: ContextPanelProps) {
       console.error('Error calculating context usage:', error)
       setContextUsage(null)
     }
-  }
+  }, [])
+
+  const loadContextItems = useCallback(() => {
+    const items = contextStorage.getCategorizedContext()
+    setContextItems(items)
+    updateContextUsage()
+  }, [updateContextUsage])
+
+  // Load context items on mount and when panel opens
+  useEffect(() => {
+    if (isOpen) {
+      loadContextItems()
+    }
+  }, [isOpen, loadContextItems])
 
   const filteredItems = contextItems.filter(item => {
     const matchesSearch = !searchQuery || 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
@@ -31,8 +31,8 @@ export function ConstraintsSection({
   // eslint-disable-next-line no-unused-vars
   const [editingAssumption, setEditingAssumption] = useState<number | null>(null);
   
-  const constraints = section?.constraints || [];
-  const assumptions = section?.assumptions || [];
+  const constraints = useMemo(() => section?.constraints || [], [section?.constraints]);
+  const assumptions = useMemo(() => section?.assumptions || [], [section?.assumptions]);
 
   const updateConstraint = useCallback((index: number, value: string) => {
     const updated = [...constraints];

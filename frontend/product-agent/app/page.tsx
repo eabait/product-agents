@@ -710,7 +710,7 @@ function PRDAgentPageContent() {
       entries,
       hasEstimated: entries.some(entry => entry.source === 'estimated')
     };
-  }, [activeConversation?.messages, pricingByModel, settings.model]);
+  }, [activeConversation, pricingByModel, settings.model]);
 
   const formattedConversationCost = React.useMemo(() => {
     if (!conversationCost) {
@@ -880,7 +880,7 @@ function PRDAgentPageContent() {
   // Helper function to extract provider from model ID
 
   // Fetch agent defaults from backend
-  const pruneInvalidOverrides = useCallback((availableModels: string[]) => {
+  const pruneInvalidOverrides = useCallback((_availableModels: string[]) => {
     // No longer need to filter subAgentSettings - they're configured via env
   }, []);
 
@@ -1055,7 +1055,6 @@ function PRDAgentPageContent() {
 
       const defaultsPayload = await fetchAgentDefaults();
       const defaultSettings = defaultsPayload?.settings as (AgentSettingsState | undefined);
-      const metadata = defaultsPayload?.metadata || null;
 
       const baseSettings = initialSettingsRef.current;
 

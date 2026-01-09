@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
@@ -29,7 +29,7 @@ export function TargetUsersSection({
   // eslint-disable-next-line no-unused-vars
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   
-  const targetUsers = section?.targetUsers || [];
+  const targetUsers = useMemo(() => section?.targetUsers || [], [section?.targetUsers]);
 
   const updateTargetUser = useCallback((index: number, value: string) => {
     const updated = [...targetUsers];

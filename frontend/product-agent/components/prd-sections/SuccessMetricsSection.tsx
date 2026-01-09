@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
@@ -29,7 +29,7 @@ export function SuccessMetricsSection({
   // eslint-disable-next-line no-unused-vars
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   
-  const successMetrics = section?.successMetrics || [];
+  const successMetrics = useMemo(() => section?.successMetrics || [], [section?.successMetrics]);
 
   const updateSuccessMetric = useCallback((index: number, field: keyof SuccessMetric, value: string) => {
     const updated = [...successMetrics];

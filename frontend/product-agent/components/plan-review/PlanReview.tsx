@@ -11,7 +11,7 @@ import type { PlanProposal, PlanStepProposal } from '@/types';
 export interface PlanReviewProps {
   plan: PlanProposal;
   onApprove: () => void;
-  onReject: (feedback?: string) => void;
+  onReject: (_feedback?: string) => void;
   isLoading?: boolean;
   error?: string;
 }

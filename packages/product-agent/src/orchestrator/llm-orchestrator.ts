@@ -15,7 +15,7 @@ import type { SubagentRegistry } from '../subagents/subagent-registry'
 
 import { ToolDiscovery, createToolDiscovery } from './tool-discovery'
 import { PromptBuilder, createPromptBuilder } from './prompt-builder'
-import { PlanTranslator, createPlanTranslator } from './plan-translator'
+import { createPlanTranslator } from './plan-translator'
 import {
   createOpenRouterProvider,
   resolveOpenRouterModel,
@@ -119,9 +119,6 @@ export class LLMOrchestrator implements Orchestrator {
     // Build prompts
     const systemPrompt = this.promptBuilder.buildSystemPrompt(tools)
     const userPrompt = this.promptBuilder.buildUserPrompt(input)
-
-    console.log('System Prompt:', systemPrompt)
-    console.log('User Prompt:', userPrompt)
 
     // Get API key from context or environment
     const apiKey = this.resolveApiKey(context)

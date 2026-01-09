@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import {
@@ -99,7 +99,7 @@ const SETTINGS_GROUP_IDS = new Set<SettingsGroupId>(SETTINGS_GROUPS.map(group =>
 const isSettingsGroupId = (value: string): value is SettingsGroupId =>
   SETTINGS_GROUP_IDS.has(value as SettingsGroupId)
 
-export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsChange }: SettingsPanelProps) {
+export function SettingsPanel({ isOpen, onClose, metadata: _metadata, settings, onSettingsChange }: SettingsPanelProps) {
   const [models, setModels] = useState<Model[]>([])
   const [modelsLoading, setModelsLoading] = useState(false)
   const [modelsError, setModelsError] = useState<string | null>(null)
@@ -155,7 +155,7 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
     onSettingsChange(updater({ ...settings }))
   }
 
-  const fetchModels = async (apiKey?: string): Promise<boolean> => {
+  const fetchModels = useCallback(async (apiKey?: string): Promise<boolean> => {
     let didSucceed = false
     try {
       setModelsLoading(true)
@@ -192,7 +192,7 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
       setModelsLoading(false)
     }
     return didSucceed
-  }
+  }, [setModelContextModels])
 
   // Fetch models when panel opens or settings change
   useEffect(() => {
@@ -200,7 +200,7 @@ export function SettingsPanel({ isOpen, onClose, metadata, settings, onSettingsC
       setLastFetchAction('refresh')
       fetchModels(settings.apiKey)
     }
-  }, [isOpen, settings.apiKey])
+  }, [isOpen, settings.apiKey, fetchModels])
 
   // Update provider when model changes
   useEffect(() => {
