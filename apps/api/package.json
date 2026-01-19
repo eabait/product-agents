@@ -9,6 +9,9 @@
     "build": "tsup --config tsup.config.ts",
     "dev": "tsup --config tsup.config.ts --watch",
     "start": "node dist/index.js",
+    "langfuse:start": "docker-compose -f ../../infra/langfuse/docker-compose.yml up -d",
+    "langfuse:stop": "docker-compose -f ../../infra/langfuse/docker-compose.yml down",
+    "langfuse:restart": "docker-compose -f ../../infra/langfuse/docker-compose.yml down && docker-compose -f ../../infra/langfuse/docker-compose.yml up -d",
     "clean": "rm -rf dist",
     "lint": "eslint \"src/**/*.ts\"",
     "lint:fix": "eslint \"src/**/*.{ts,tsx}\" --fix"
