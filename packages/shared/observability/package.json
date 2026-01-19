@@ -1,0 +1,37 @@
+{
+  "name": "@product-agents/observability",
+  "version": "0.1.0",
+  "description": "Observability utilities with Langfuse integration",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts",
+    "dev": "tsup src/index.ts --format esm,cjs --dts --watch",
+    "clean": "rm -rf dist",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@langfuse/core": "^4.5.1",
+    "@langfuse/otel": "^4.5.1",
+    "@langfuse/tracing": "^4.5.1",
+    "@opentelemetry/sdk-node": "^0.209.0",
+    "ai": "^5.0.0"
+  },
+  "devDependencies": {
+    "tsup": "^7.2.0",
+    "typescript": "^5.0.0",
+    "vitest": "^1.6.0"
+  },
+  "peerDependencies": {
+    "ai": "^5.0.0"
+  }
+}

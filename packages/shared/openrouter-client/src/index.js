@@ -79,6 +79,53 @@ async function resolveMaybePromise(value) {
     }
     return value;
 }
+let observabilityModulePromise = null;
+const shouldRecordIngestion = () => {
+    if (process.env.OBSERVABILITY_ENABLED === 'false')
+        return false;
+    return (process.env.OBSERVABILITY_TRANSPORT ?? 'ingestion') === 'ingestion';
+};
+const getObservabilityModule = () => {
+    if (!observabilityModulePromise) {
+        observabilityModulePromise = import('@product-agents/observability');
+    }
+    return observabilityModulePromise;
+};
+const recordLangfuseGeneration = async (payload) => {
+    if (!shouldRecordIngestion())
+        return;
+    try {
+        const mod = await getObservabilityModule();
+        if (typeof mod.recordGeneration === 'function') {
+            await mod.recordGeneration(payload);
+        }
+    }
+    catch {
+        // Ignore observability failures to avoid breaking core flows.
+    }
+};
+const buildUsagePayload = (usage) => {
+    if (!usage)
+        return undefined;
+    return {
+        promptTokens: usage.promptTokens,
+        completionTokens: usage.completionTokens,
+        totalTokens: usage.totalTokens
+    };
+};
+const buildCostDetails = (usage) => {
+    if (!usage)
+        return undefined;
+    const { promptCost, completionCost, totalCost } = usage;
+    if (promptCost === undefined && completionCost === undefined && totalCost === undefined) {
+        return undefined;
+    }
+    return {
+        ...(promptCost !== undefined ? { promptCost } : {}),
+        ...(completionCost !== undefined ? { completionCost } : {}),
+        ...(totalCost !== undefined ? { totalCost } : {})
+    };
+};
 /**
  * OpenRouter client for AI model interactions with streaming support
  * Provides structured generation, text generation, and streaming capabilities
@@ -113,6 +160,20 @@ export class OpenRouterClient {
     }
     resetUsage() {
         this.lastUsage = undefined;
+    }
+    getTelemetrySettings(model) {
+        const enabled = process.env.OBSERVABILITY_ENABLED !== 'false';
+        const transport = process.env.OBSERVABILITY_TRANSPORT ?? 'ingestion';
+        if (!enabled || transport !== 'otel') {
+            return { isEnabled: false };
+        }
+        return {
+            isEnabled: true,
+            metadata: {
+                modelId: model,
+                provider: 'openrouter'
+            }
+        };
     }
     captureUsage(requestedModel, usage, resp, providerMetadata) {
         if (!usage) {
@@ -205,16 +266,34 @@ export class OpenRouterClient {
     async generateStructured(params) {
         this.resetUsage();
         try {
+            const startTime = new Date().toISOString();
             const response = await generateObject({
                 model: this.getModel(params.model),
                 schema: params.schema,
                 prompt: params.prompt,
                 temperature: params.temperature || 0.3,
-                maxTokens: params.maxTokens || 8000
+                maxTokens: params.maxTokens || 8000,
+                experimental_telemetry: this.getTelemetrySettings(params.model)
             });
+            const endTime = new Date().toISOString();
             const resp = await resolveMaybePromise(response?.response);
             const providerMetadata = await resolveMaybePromise(response?.providerMetadata);
             this.captureUsage(params.model, response.usage, resp, providerMetadata);
+            const usage = this.getLastUsage();
+            void recordLangfuseGeneration({
+                name: 'openrouter.generateStructured',
+                model: params.model,
+                input: { prompt: params.prompt },
+                output: response.object,
+                startTime,
+                endTime,
+                usage: buildUsagePayload(usage),
+                modelParameters: {
+                    temperature: params.temperature || 0.3,
+                    maxTokens: params.maxTokens || 8000
+                },
+                costDetails: buildCostDetails(usage)
+            });
             return response.object;
         }
         catch (error) {
@@ -466,32 +545,69 @@ export class OpenRouterClient {
     }
     async generateText(params) {
         this.resetUsage();
+        const startTime = new Date().toISOString();
         const response = await generateText({
             model: this.getModel(params.model),
             prompt: params.prompt,
             temperature: params.temperature || 0.7,
-            maxTokens: params.maxTokens || 2000
+            maxTokens: params.maxTokens || 2000,
+            experimental_telemetry: this.getTelemetrySettings(params.model)
         });
+        const endTime = new Date().toISOString();
         const resp = await resolveMaybePromise(response?.response);
         const providerMetadata = await resolveMaybePromise(response?.providerMetadata);
         this.captureUsage(params.model, response.usage, resp, providerMetadata);
+        const usage = this.getLastUsage();
+        void recordLangfuseGeneration({
+            name: 'openrouter.generateText',
+            model: params.model,
+            input: { prompt: params.prompt },
+            output: response.text,
+            startTime,
+            endTime,
+            usage: buildUsagePayload(usage),
+            modelParameters: {
+                temperature: params.temperature || 0.7,
+                maxTokens: params.maxTokens || 2000
+            },
+            costDetails: buildCostDetails(usage)
+        });
         return response.text;
     }
     async *streamText(params) {
         this.resetUsage();
+        const startTime = new Date().toISOString();
         const stream = await streamText({
             model: this.getModel(params.model),
             prompt: params.prompt,
-            temperature: params.temperature || 0.7
+            temperature: params.temperature || 0.7,
+            experimental_telemetry: this.getTelemetrySettings(params.model)
         });
         const respPromise = resolveMaybePromise(stream?.response);
         const usagePromise = resolveMaybePromise(stream?.usage);
         const providerMetadataPromise = resolveMaybePromise(stream?.providerMetadata);
+        let output = '';
         for await (const chunk of stream.textStream) {
+            output += chunk;
             yield chunk;
         }
         const [usage, providerMetadata, resp] = await Promise.all([usagePromise, providerMetadataPromise, respPromise]);
         this.captureUsage(params.model, usage, resp, providerMetadata);
+        const endTime = new Date().toISOString();
+        const lastUsage = this.getLastUsage();
+        void recordLangfuseGeneration({
+            name: 'openrouter.streamText',
+            model: params.model,
+            input: { prompt: params.prompt },
+            output,
+            startTime,
+            endTime,
+            usage: buildUsagePayload(lastUsage),
+            modelParameters: {
+                temperature: params.temperature || 0.7
+            },
+            costDetails: buildCostDetails(lastUsage)
+        });
     }
     /**
      * Stream structured data generation with progress callbacks
@@ -508,12 +624,14 @@ export class OpenRouterClient {
     async *streamStructured(params) {
         try {
             this.resetUsage();
+            const startTime = new Date().toISOString();
             const stream = await streamObject({
                 model: this.getModel(params.model),
                 schema: params.schema,
                 prompt: params.prompt,
                 temperature: params.temperature || 0.3,
-                maxTokens: params.maxTokens || 8000
+                maxTokens: params.maxTokens || 8000,
+                experimental_telemetry: this.getTelemetrySettings(params.model)
             });
             const respPromise = resolveMaybePromise(stream?.response);
             const usagePromise = resolveMaybePromise(stream?.usage);
@@ -534,6 +652,22 @@ export class OpenRouterClient {
             const finalResult = await stream.object;
             const [usage, providerMetadata, resp] = await Promise.all([usagePromise, providerMetadataPromise, respPromise]);
             this.captureUsage(params.model, usage, resp, providerMetadata);
+            const endTime = new Date().toISOString();
+            const lastUsage = this.getLastUsage();
+            void recordLangfuseGeneration({
+                name: 'openrouter.streamStructured',
+                model: params.model,
+                input: { prompt: params.prompt },
+                output: finalResult,
+                startTime,
+                endTime,
+                usage: buildUsagePayload(lastUsage),
+                modelParameters: {
+                    temperature: params.temperature || 0.3,
+                    maxTokens: params.maxTokens || 8000
+                },
+                costDetails: buildCostDetails(lastUsage)
+            });
             const finalItem = {
                 type: 'complete',
                 object: finalResult

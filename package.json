@@ -23,7 +23,11 @@
     "test": "turbo run test",
     "lint": "turbo run lint",
     "lint:fix": "turbo run lint:fix",
-    "clean": "turbo run clean"
+    "clean": "turbo run clean",
+    "langfuse:up": "docker-compose -f infra/langfuse/docker-compose.yml up -d",
+    "langfuse:down": "docker-compose -f infra/langfuse/docker-compose.yml down",
+    "langfuse:logs": "docker-compose -f infra/langfuse/docker-compose.yml logs -f langfuse",
+    "langfuse:reset": "docker-compose -f infra/langfuse/docker-compose.yml down -v && docker-compose -f infra/langfuse/docker-compose.yml up -d"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

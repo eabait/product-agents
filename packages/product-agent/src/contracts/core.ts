@@ -87,6 +87,8 @@ export type ProgressEventType =
   | 'subagent.progress'
   | 'subagent.completed'
   | 'subagent.failed'
+  | 'subagent.approval-required'
+  | 'subagent.approved'
 
 export interface ProgressEvent<TPayload = unknown> {
   type: ProgressEventType

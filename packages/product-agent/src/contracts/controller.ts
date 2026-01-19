@@ -68,4 +68,15 @@ export interface AgentController {
     runId: RunId,
     options?: ControllerStartOptions
   ): Promise<ControllerRunSummary<TArtifact>>
+
+  /**
+   * Resume a run that was blocked waiting for subagent approval.
+   * Re-executes the blocked subagent step with the approved plan, then continues execution.
+   */
+  resumeSubagent<TArtifact = unknown>(
+    runId: RunId,
+    stepId: string,
+    approvedPlan: unknown,
+    options?: ControllerStartOptions
+  ): Promise<ControllerRunSummary<TArtifact>>
 }

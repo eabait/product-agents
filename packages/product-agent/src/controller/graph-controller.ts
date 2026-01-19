@@ -172,6 +172,7 @@ export class GraphController implements AgentController {
   private readonly verifierGroup: ControllerComposition['verifier']
   private readonly verifierRegistry?: Record<ArtifactKind, Verifier>
   private readonly runSummaries = new Map<string, ControllerRunSummary>()
+  private readonly executionContexts = new Map<string, ExecutionContext>()
   private readonly providerFactory: NonNullable<GraphControllerOptions['providerFactory']>
   private readonly toolInvoker: NonNullable<GraphControllerOptions['toolInvoker']>
 
@@ -291,6 +292,9 @@ export class GraphController implements AgentController {
       artifactsByKind: new Map(existingArtifacts.artifactsByKind)
     }
 
+    // Store context for potential resumption (e.g., subagent approval)
+    this.executionContexts.set(runId, executionContext)
+
     try {
       await this.executePlanWithAiTools(executionContext, options)
 
@@ -352,6 +356,11 @@ export class GraphController implements AgentController {
     const summary = this.toSummary<TArtifact>(executionContext, completionTime)
     this.runSummaries.set(runId, summary)
 
+    // Clean up execution context if run is fully completed (not awaiting input)
+    if (executionContext.status === STATUS_COMPLETED) {
+      this.executionContexts.delete(runId)
+    }
+
     await this.workspace.appendEvent(
       runId,
       createWorkspaceEvent(runId, 'system', {
@@ -381,6 +390,435 @@ export class GraphController implements AgentController {
       throw new Error(`Run ${runId} cannot be resumed because no prior state was recorded`)
     }
     return summary as ControllerRunSummary<TArtifact>
+  }
+
+  /**
+   * Resume a run that was blocked waiting for subagent approval.
+   * Re-executes the blocked subagent step with the approved plan, then continues execution.
+   */
+  async resumeSubagent<TArtifact>(
+    runId: string,
+    stepId: string,
+    approvedPlan: unknown,
+    options?: ControllerStartOptions
+  ): Promise<ControllerRunSummary<TArtifact>> {
+    // eslint-disable-next-line no-console
+    console.log(`[graph-controller] resumeSubagent called for run ${runId}, step ${stepId}`)
+    // eslint-disable-next-line no-console
+    console.log(`[graph-controller]   - stored contexts count: ${this.executionContexts.size}`)
+    // eslint-disable-next-line no-console
+    console.log(`[graph-controller]   - stored context keys: [${[...this.executionContexts.keys()].join(', ')}]`)
+
+    // Retrieve context from in-memory store
+    const storedContext = this.executionContexts.get(runId)
+    if (!storedContext) {
+      // eslint-disable-next-line no-console
+      console.error(`[graph-controller] CRITICAL: No execution context found for run ${runId}`)
+      throw new Error(`Run ${runId} cannot be resumed - no execution context found`)
+    }
+
+    const context = storedContext as ExecutionContext
+    // eslint-disable-next-line no-console
+    console.log(`[graph-controller]   - context status: ${context.status}`)
+    // eslint-disable-next-line no-console
+    console.log(`[graph-controller]   - plan nodes: [${Object.keys(context.plan.nodes).join(', ')}]`)
+
+    // Verify we're blocked on the expected step
+    const blockedSubagent = context.runContext.metadata?.blockedSubagent as
+      | { stepId: string; subagentId: string; status: string; plan: unknown }
+      | undefined
+
+    // eslint-disable-next-line no-console
+    console.log(`[graph-controller]   - blockedSubagent: ${blockedSubagent ? `stepId=${blockedSubagent.stepId}, subagentId=${blockedSubagent.subagentId}` : 'none'}`)
+
+    if (!blockedSubagent || blockedSubagent.stepId !== stepId) {
+      // eslint-disable-next-line no-console
+      console.error(`[graph-controller] CRITICAL: Run ${runId} is not blocked on step ${stepId}`)
+      throw new Error(
+        `Run ${runId} is not blocked on step ${stepId}. Current blocked step: ${blockedSubagent?.stepId ?? 'none'}`
+      )
+    }
+
+    // Clear blocked state
+    context.status = STATUS_RUNNING
+    delete context.runContext.metadata?.blockedSubagent
+
+    // eslint-disable-next-line no-console
+    console.log(`[graph-controller] emitting subagent.approved event for run ${runId}`)
+
+    // Emit approval event
+    emitEvent(
+      options,
+      toProgressEvent({
+        type: 'subagent.approved',
+        runId: context.runContext.runId,
+        stepId,
+        payload: {
+          subagentId: blockedSubagent.subagentId,
+          approvedPlan
+        },
+        message: 'Subagent plan approved, resuming execution'
+      })
+    )
+
+    // Record approval in workspace
+    await this.workspace.appendEvent(
+      runId,
+      createWorkspaceEvent(runId, 'subagent', {
+        action: 'approved',
+        stepId,
+        subagentId: blockedSubagent.subagentId,
+        approvedPlan
+      })
+    )
+
+    // Get the node and lifecycle for re-execution
+    const node = context.plan.nodes[stepId]
+    if (!node) {
+      // eslint-disable-next-line no-console
+      console.error(`[graph-controller] CRITICAL: Step ${stepId} not found in plan for run ${runId}`)
+      throw new Error(`Step ${stepId} not found in plan`)
+    }
+
+    const subagentId = (node.metadata?.subagentId as string) ?? blockedSubagent.subagentId
+    // eslint-disable-next-line no-console
+    console.log(`[graph-controller] getting lifecycle for subagent ${subagentId}`)
+    const lifecycle = await this.getSubagentLifecycle(subagentId)
+    // eslint-disable-next-line no-console
+    console.log(`[graph-controller] lifecycle loaded: ${lifecycle.metadata.label ?? lifecycle.metadata.id}`)
+
+    // Re-execute the subagent with approved plan
+    emitEvent(
+      options,
+      toProgressEvent({
+        type: 'subagent.started',
+        runId,
+        stepId,
+        payload: {
+          subagentId: lifecycle.metadata.id,
+          artifactKind: lifecycle.metadata.artifactKind,
+          label: lifecycle.metadata.label,
+          resumed: true
+        },
+        message: `Resuming ${lifecycle.metadata.label ?? lifecycle.metadata.id}`
+      })
+    )
+
+    // Build subagent request with approved plan
+    const sourceArtifact = this.resolveSubagentSourceArtifact(lifecycle, node, context)
+    // eslint-disable-next-line no-console
+    console.log(`[graph-controller] building subagent request with approved plan`)
+    // eslint-disable-next-line no-console
+    console.log(`[graph-controller]   - sourceArtifact: ${sourceArtifact?.kind ?? 'none'}`)
+    // eslint-disable-next-line no-console
+    console.log(`[graph-controller]   - requirePlanConfirmation: false`)
+
+    const subagentRequest = {
+      params: {
+        ...(node.inputs ?? {}),
+        approvedPlan,
+        requirePlanConfirmation: false // Don't ask for confirmation again
+      },
+      run: context.runContext,
+      sourceArtifact,
+      emit: (event: ProgressEvent) => {
+        emitEvent(
+          options,
+          toProgressEvent({
+            type: 'subagent.progress',
+            runId,
+            stepId,
+            payload: { subagentId: lifecycle.metadata.id, event }
+          })
+        )
+      }
+    }
+
+    try {
+      // eslint-disable-next-line no-console
+      console.log(`[graph-controller] executing subagent ${lifecycle.metadata.id} for run ${runId}`)
+      const result = await lifecycle.execute(subagentRequest)
+      // eslint-disable-next-line no-console
+      console.log(`[graph-controller] subagent ${lifecycle.metadata.id} execution completed for run ${runId}`)
+      // eslint-disable-next-line no-console
+      console.log(`[graph-controller]   - result artifact: ${result.artifact?.kind ?? 'none'}`)
+      // eslint-disable-next-line no-console
+      console.log(`[graph-controller]   - result status: ${(result.metadata as any)?.status ?? 'N/A'}`)
+
+      // Handle the result - this time it should be completed
+      await this.handleSubagentToolResult({
+        result: {
+          status: 'completed',
+          nodeId: node.id,
+          subagentId: lifecycle.metadata.id,
+          artifact: result.artifact,
+          metadata: result.metadata
+        },
+        node,
+        lifecycle,
+        context,
+        options
+      })
+    } catch (error) {
+      emitEvent(
+        options,
+        toProgressEvent({
+          type: 'subagent.failed',
+          runId,
+          stepId,
+          payload: {
+            subagentId: lifecycle.metadata.id,
+            error: error instanceof Error ? error.message : String(error)
+          },
+          message: `${lifecycle.metadata.label ?? lifecycle.metadata.id} failed`
+        })
+      )
+      throw error
+    }
+
+    // If execution paused again (another approval needed), return early
+    if (context.status === STATUS_AWAITING_INPUT) {
+      // eslint-disable-next-line no-console
+      console.log(`[graph-controller] resumeSubagent: context still awaiting input after subagent execution`)
+      return this.toSummary<TArtifact>(context, this.clock())
+    }
+
+    // Continue with remaining steps
+    // eslint-disable-next-line no-console
+    console.log(`[graph-controller] continuing from step ${stepId} for run ${runId}`)
+    await this.continueFromStep(context, stepId, options)
+    // eslint-disable-next-line no-console
+    console.log(`[graph-controller] continueFromStep completed, status: ${context.status}`)
+
+    // Run verification if needed
+    const verifier = this.resolveVerifier(context.plan.artifactKind)
+    if (context.status === STATUS_COMPLETED && context.artifact && verifier) {
+      // eslint-disable-next-line no-console
+      console.log(`[graph-controller] running verification for run ${runId}`)
+      await this.runVerification(context, verifier, options)
+    }
+
+    // Run any remaining subagents
+    if (context.status === STATUS_COMPLETED) {
+      // eslint-disable-next-line no-console
+      console.log(`[graph-controller] running remaining subagents for run ${runId}`)
+      await this.runSubagents(context, options)
+    }
+
+    // eslint-disable-next-line no-console
+    console.log(`[graph-controller] resumeSubagent completed for run ${runId}, final status: ${context.status}`)
+    const summary = this.toSummary<TArtifact>(context, this.clock())
+    this.runSummaries.set(runId, summary)
+
+    return summary
+  }
+
+  /**
+   * Continue plan execution from a specific step (skipping already completed steps).
+   */
+  private async continueFromStep(
+    context: ExecutionContext,
+    completedStepId: string,
+    options?: ControllerStartOptions
+  ): Promise<void> {
+    const orderedSteps = topologicallySortPlan(context.plan)
+    const completedIndex = orderedSteps.indexOf(completedStepId)
+
+    if (completedIndex === -1 || completedIndex >= orderedSteps.length - 1) {
+      // No more steps to execute
+      context.status = STATUS_COMPLETED
+      return
+    }
+
+    // Execute remaining steps
+    for (let i = completedIndex + 1; i < orderedSteps.length; i++) {
+      if (context.status === STATUS_AWAITING_INPUT || context.status === STATUS_FAILED) {
+        break
+      }
+
+      const stepId = orderedSteps[i]
+      const node = context.plan.nodes[stepId]
+
+      // Skip already completed steps
+      if (context.artifactsByStep.has(stepId)) {
+        continue
+      }
+
+      // Execute this step
+      await this.executeStep(node, context, options)
+    }
+
+    if (context.status !== STATUS_AWAITING_INPUT && context.status !== STATUS_FAILED) {
+      context.status = STATUS_COMPLETED
+    }
+  }
+
+  /**
+   * Execute a single step (skill or subagent).
+   */
+  private async executeStep(
+    node: PlanNode,
+    context: ExecutionContext,
+    options?: ControllerStartOptions
+  ): Promise<void> {
+    const nodeKind = node.metadata?.kind === 'subagent' ? 'subagent' : 'skill'
+    const subagentId =
+      (node.task as { agentId?: string })?.agentId ?? (node.metadata?.subagentId as string | undefined)
+
+    emitEvent(
+      options,
+      toProgressEvent({
+        type: 'step.started',
+        runId: context.runContext.runId,
+        stepId: node.id,
+        payload: {
+          label: node.label,
+          kind: nodeKind,
+          subagentId
+        }
+      })
+    )
+
+    if (nodeKind === 'subagent' && subagentId) {
+      await this.executeSubagentStep(node, subagentId, context, options)
+    } else {
+      await this.executeSkillStep(node, context, options)
+    }
+  }
+
+  /**
+   * Execute a subagent step.
+   */
+  private async executeSubagentStep(
+    node: PlanNode,
+    subagentId: string,
+    context: ExecutionContext,
+    options?: ControllerStartOptions
+  ): Promise<void> {
+    const lifecycle = await this.getSubagentLifecycle(subagentId)
+    const sourceArtifact = this.resolveSubagentSourceArtifact(lifecycle, node, context)
+
+    emitEvent(
+      options,
+      toProgressEvent({
+        type: 'subagent.started',
+        runId: context.runContext.runId,
+        stepId: node.id,
+        payload: {
+          subagentId: lifecycle.metadata.id,
+          artifactKind: lifecycle.metadata.artifactKind,
+          label: lifecycle.metadata.label
+        },
+        message: `Starting ${lifecycle.metadata.label ?? lifecycle.metadata.id}`
+      })
+    )
+
+    const subagentRequest = {
+      params: node.inputs ?? {},
+      run: context.runContext,
+      sourceArtifact,
+      emit: (event: ProgressEvent) => {
+        emitEvent(
+          options,
+          toProgressEvent({
+            type: 'subagent.progress',
+            runId: context.runContext.runId,
+            stepId: node.id,
+            payload: { subagentId: lifecycle.metadata.id, event }
+          })
+        )
+      }
+    }
+
+    try {
+      const result = await lifecycle.execute(subagentRequest)
+      await this.handleSubagentToolResult({
+        result: {
+          status: 'completed',
+          nodeId: node.id,
+          subagentId: lifecycle.metadata.id,
+          artifact: result.artifact,
+          metadata: result.metadata
+        },
+        node,
+        lifecycle,
+        context,
+        options
+      })
+    } catch (error) {
+      context.status = STATUS_FAILED
+      emitEvent(
+        options,
+        toProgressEvent({
+          type: 'subagent.failed',
+          runId: context.runContext.runId,
+          stepId: node.id,
+          payload: {
+            subagentId: lifecycle.metadata.id,
+            error: error instanceof Error ? error.message : String(error)
+          },
+          message: `${lifecycle.metadata.label ?? lifecycle.metadata.id} failed`
+        })
+      )
+      throw error
+    }
+  }
+
+  /**
+   * Execute a skill step using the existing tool invocation logic.
+   */
+  private async executeSkillStep(
+    node: PlanNode,
+    context: ExecutionContext,
+    options?: ControllerStartOptions
+  ): Promise<void> {
+    const apiKey = this.resolveApiKey(context.runContext)
+    const hasApiKey = typeof apiKey === 'string' && apiKey.trim().length > 0
+    const provider = this.providerFactory(apiKey)
+    const toolName = `node_${node.id}`
+
+    // Use skillsModel for skill nodes if configured, otherwise use default model (same as executePlanWithAiTools)
+    const modelToUse = this.config.runtime.skillsModel
+      ? this.config.runtime.skillsModel
+      : context.runContext.settings.model
+    const model = hasApiKey ? resolveOpenRouterModel(provider, this.config, modelToUse) : undefined
+
+    const skillTool = createSkillTool({
+      node,
+      runContext: context.runContext,
+      skillRunner: this.skillRunner
+    })
+
+    try {
+      const result = await this.invokeToolWithModel({
+        toolName,
+        tool: skillTool,
+        model,
+        node,
+        context,
+        options,
+        hasApiKey
+      })
+      await this.handleSkillToolResult({
+        result,
+        node,
+        stepId: node.id,
+        context,
+        options
+      })
+    } catch (error) {
+      context.status = STATUS_FAILED
+      emitEvent(
+        options,
+        toProgressEvent({
+          type: 'step.failed',
+          runId: context.runContext.runId,
+          stepId: node.id,
+          payload: { error: error instanceof Error ? error.message : String(error) }
+        })
+      )
+      throw error
+    }
   }
 
   private resolveApiKey(runContext: RunContext): string | undefined {
@@ -538,6 +976,10 @@ export class GraphController implements AgentController {
             context,
             options
           })
+          // Check if subagent is blocked on approval - stop execution if so
+          if (context.status === STATUS_AWAITING_INPUT) {
+            break
+          }
         } else {
           await this.handleSkillToolResult({
             result: toolResult,
@@ -817,6 +1259,62 @@ export class GraphController implements AgentController {
     const artifact = result.artifact
     if (!artifact) {
       throw new Error(`Subagent "${lifecycle.metadata.id}" did not return an artifact`)
+    }
+
+    // Check for pending approval status from subagent
+    const subagentStatus =
+      (artifact.metadata?.extras?.status as string | undefined) ||
+      (result.metadata?.status as string | undefined)
+
+    if (subagentStatus === 'awaiting-plan-confirmation' || subagentStatus === 'awaiting-clarification') {
+      const subagentPlan = artifact.metadata?.extras?.plan || result.metadata?.plan
+
+      // Emit approval-required event
+      emitEvent(
+        options,
+        toProgressEvent({
+          type: 'subagent.approval-required',
+          runId: context.runContext.runId,
+          stepId: node.id,
+          payload: {
+            subagentId: lifecycle.metadata.id,
+            artifactKind: lifecycle.metadata.artifactKind,
+            status: subagentStatus,
+            plan: subagentPlan,
+            approvalUrl: `/runs/${context.runContext.runId}/subagent/${node.id}/approve`
+          },
+          message: `${lifecycle.metadata.label ?? lifecycle.metadata.id} requires approval`
+        })
+      )
+
+      // Set context to awaiting state
+      context.status = STATUS_AWAITING_INPUT
+      if (!context.runContext.metadata) {
+        context.runContext.metadata = {}
+      }
+      context.runContext.metadata.blockedSubagent = {
+        stepId: node.id,
+        subagentId: lifecycle.metadata.id,
+        status: subagentStatus,
+        plan: subagentPlan
+      }
+
+      // Store partial artifact for later continuation
+      this.trackArtifactForContext(node.id, artifact, context)
+
+      // Record in workspace for recovery
+      await this.workspace.appendEvent(
+        context.runContext.runId,
+        createWorkspaceEvent(context.runContext.runId, 'subagent', {
+          action: 'awaiting-approval',
+          stepId: node.id,
+          subagentId: lifecycle.metadata.id,
+          status: subagentStatus,
+          plan: subagentPlan
+        })
+      )
+
+      return // Don't continue execution - wait for approval
     }
 
     const transitionPayload = this.buildTransitionPayload(node, artifact, context)

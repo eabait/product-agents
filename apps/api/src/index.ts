@@ -7,6 +7,12 @@ import { z } from 'zod'
 import { config as loadEnv } from 'dotenv'
 import { expand as expandEnv } from 'dotenv-expand'
 
+import {
+  initObservability,
+  shutdownObservability,
+  withTrace
+} from '@product-agents/observability'
+
 import { createPrdController } from '@product-agents/prd-agent'
 import {
   loadProductAgentConfig,
@@ -47,14 +53,25 @@ const loadEnvFiles = () => {
 
 loadEnvFiles()
 
+// Initialize observability (Langfuse) after env is loaded
+const observabilityState = initObservability()
+
 const PORT = parseInt(process.env.PRODUCT_AGENT_API_PORT ?? '3001', 10)
 const HOST = process.env.PRODUCT_AGENT_API_HOST ?? '0.0.0.0'
 
-type RunStatus = ControllerRunSummary['status'] | 'pending' | 'running' | 'blocked' | 'pending-approval'
+type RunStatus = ControllerRunSummary['status'] | 'pending' | 'running' | 'blocked' | 'pending-approval' | 'blocked-subagent'
 
 type RunMetadata = Record<string, unknown> & {
   intent?: ArtifactIntent
   previewArtifacts?: Array<Record<string, unknown>>
+}
+
+interface BlockedSubagentInfo {
+  stepId: string
+  subagentId: string
+  artifactKind: string
+  plan: unknown
+  requestedAt: string
 }
 
 interface RunRecord {
@@ -73,6 +90,7 @@ interface RunRecord {
   usage?: Record<string, unknown> | null
   proposedPlan?: OrchestratorPlanProposal
   approvalMode?: 'auto' | 'manual'
+  blockedSubagent?: BlockedSubagentInfo
 }
 
 const MAX_RUN_HISTORY = 50
@@ -298,8 +316,15 @@ const getSubscriberSet = (runId: string): Set<ServerResponse> => {
 const broadcastEvent = (runId: string, eventType: string, data: unknown) => {
   const subscribers = streamSubscribers.get(runId)
   if (!subscribers || subscribers.size === 0) {
+    // Log when there are no subscribers - this is a potential issue indicator
+    const eventSummary = typeof data === 'object' && data !== null
+      ? `type=${(data as any).type ?? eventType}`
+      : eventType
+    console.warn(`[product-agent/api] broadcastEvent: NO SUBSCRIBERS for run ${runId}, event: ${eventSummary}`)
     return
   }
+
+  console.log(`[product-agent/api] broadcastEvent: ${eventType} to ${subscribers.size} subscribers for run ${runId}`)
 
   for (const subscriber of [...subscribers]) {
     try {
@@ -438,134 +463,195 @@ const generatePlan = async (record: RunRecord): Promise<OrchestratorPlanProposal
 }
 
 const startRunExecution = async (record: RunRecord) => {
-  const sectionRequest = toSectionRoutingRequest(record.request)
-  const overrides = toApiOverrides(record.request)
+  // Wrap the entire run execution in a Langfuse trace
+  return withTrace(
+    {
+      runId: record.id,
+      artifactType: record.artifactType,
+      model: record.request.settings?.model,
+      metadata: {
+        approvalMode: record.approvalMode
+      }
+    },
+    async () => {
+      const sectionRequest = toSectionRoutingRequest(record.request)
+      const overrides = toApiOverrides(record.request)
 
-  const attributes: Record<string, unknown> = {
-    source: 'apps/api',
-    conversationHistory: record.request.messages
-  }
+      const attributes: Record<string, unknown> = {
+        source: 'apps/api',
+        conversationHistory: record.request.messages
+      }
 
-  if (overrides) {
-    attributes.apiOverrides = overrides
-  }
+      if (overrides) {
+        attributes.apiOverrides = overrides
+      }
 
-  const runRequest: RunRequest<SectionRoutingRequest> = {
-    artifactKind: record.artifactType,
-    input: sectionRequest,
-    createdBy: 'apps/api',
-    attributes
-  }
+      const runRequest: RunRequest<SectionRoutingRequest> = {
+        artifactKind: record.artifactType,
+        input: sectionRequest,
+        createdBy: 'apps/api',
+        attributes
+      }
 
-  const ensureRecordMetadata = (): RunMetadata => {
-    if (!record.metadata || typeof record.metadata !== 'object') {
-      record.metadata = {}
-    }
-    return record.metadata as RunMetadata
-  }
+      const ensureRecordMetadata = (): RunMetadata => {
+        if (!record.metadata || typeof record.metadata !== 'object') {
+          record.metadata = {}
+        }
+        return record.metadata as RunMetadata
+      }
 
-  const enrichProgressEvent = (event: ProgressEvent): ProgressEvent => {
-    const payload = (event.payload ?? {}) as Record<string, unknown>
+      const enrichProgressEvent = (event: ProgressEvent): ProgressEvent => {
+        const payload = (event.payload ?? {}) as Record<string, unknown>
 
-    if (event.type === 'plan.created') {
-      const plan = payload.plan as { metadata?: Record<string, unknown> } | undefined
-      const intentMetadata = plan?.metadata?.intent as ArtifactIntent | undefined
-      if (intentMetadata) {
-        const metadata = ensureRecordMetadata()
-        metadata.intent = intentMetadata
-        return {
-          ...event,
-          payload: {
-            ...payload,
-            intent: intentMetadata
+        if (event.type === 'plan.created') {
+          const plan = payload.plan as { metadata?: Record<string, unknown> } | undefined
+          const intentMetadata = plan?.metadata?.intent as ArtifactIntent | undefined
+          if (intentMetadata) {
+            const metadata = ensureRecordMetadata()
+            metadata.intent = intentMetadata
+            return {
+              ...event,
+              payload: {
+                ...payload,
+                intent: intentMetadata
+              }
+            }
           }
+          return event
         }
-      }
-      return event
-    }
 
-    if (event.type === 'artifact.delivered') {
-      const artifactPreview = payload.artifact as Record<string, unknown> | undefined
-      if (artifactPreview) {
-        const metadata = ensureRecordMetadata()
-        metadata.previewArtifacts = metadata.previewArtifacts ?? []
-        metadata.previewArtifacts?.push({
-          id: artifactPreview.id,
-          kind: artifactPreview.artifactKind ?? artifactPreview.kind,
-          label: artifactPreview.label,
-          transition: payload.transition
+        if (event.type === 'artifact.delivered') {
+          const artifactPreview = payload.artifact as Record<string, unknown> | undefined
+          if (artifactPreview) {
+            const metadata = ensureRecordMetadata()
+            metadata.previewArtifacts = metadata.previewArtifacts ?? []
+            metadata.previewArtifacts?.push({
+              id: artifactPreview.id,
+              kind: artifactPreview.artifactKind ?? artifactPreview.kind,
+              label: artifactPreview.label,
+              transition: payload.transition
+            })
+          }
+          return event
+        }
+
+        // Handle subagent approval-required event
+        if (event.type === 'subagent.approval-required') {
+          updateRunRecord(record.id, {
+            status: 'blocked-subagent',
+            blockedSubagent: {
+              stepId: (payload.stepId ?? event.stepId) as string,
+              subagentId: payload.subagentId as string,
+              artifactKind: payload.artifactKind as string,
+              plan: payload.plan,
+              requestedAt: new Date().toISOString()
+            }
+          })
+          return event
+        }
+
+        return event
+      }
+
+      try {
+        updateRunRecord(record.id, { status: 'running' })
+
+        // Pass the approved plan if available (from orchestrator)
+        const initialPlan = record.proposedPlan?.plan
+
+        const summary = await controller.start(
+          {
+            runId: record.id,
+            request: runRequest,
+            initialPlan
+          },
+          {
+            emit(event) {
+              const enriched = enrichProgressEvent(event)
+              appendProgressEvent(record.id, enriched)
+              broadcastEvent(record.id, 'progress', enriched)
+            }
+          }
+        )
+
+        const artifact = summary.artifact ?? null
+        const metadataSnapshot = ensureRecordMetadata()
+        const mergedMetadata =
+          summary.metadata && typeof summary.metadata === 'object'
+            ? ({ ...summary.metadata, ...metadataSnapshot } as RunMetadata)
+            : metadataSnapshot
+        record.metadata = mergedMetadata
+
+        // Check if the record is already blocked-subagent (set by enrichProgressEvent)
+        // If so, don't overwrite the status - this prevents a race condition
+        const currentRecord = runRecords.get(record.id)
+        const isAlreadyBlockedSubagent = currentRecord?.status === 'blocked-subagent'
+
+        if (isAlreadyBlockedSubagent) {
+          console.log(`[product-agent/api] preserving blocked-subagent status for run ${record.id}`)
+          // Only update non-status fields
+          updateRunRecord(record.id, {
+            summary,
+            error: undefined,
+            result: artifact,
+            metadata: mergedMetadata,
+            usage: (summary.metadata?.usage as Record<string, unknown> | undefined) ?? null
+          })
+          // Don't close subscribers - stream will receive events from resumeSubagent
+          return
+        }
+
+        updateRunRecord(record.id, {
+          status: summary.status,
+          summary,
+          clarification: summary.status === 'awaiting-input' ? summary.metadata?.clarification ?? null : null,
+          error: undefined,
+          result: artifact,
+          metadata: mergedMetadata,
+          usage: (summary.metadata?.usage as Record<string, unknown> | undefined) ?? null
         })
-      }
-      return event
-    }
 
-    return event
-  }
+        if (summary.status === 'awaiting-input') {
+          // Check if this is a blocked-subagent case (vs regular clarification)
+          const blockedSubagent = summary.metadata?.blockedSubagent as Record<string, unknown> | undefined
+          if (blockedSubagent) {
+            // For blocked subagent, update status but keep stream open for resumption
+            updateRunRecord(record.id, {
+              status: 'blocked-subagent',
+              blockedSubagent: blockedSubagent as unknown as BlockedSubagentInfo
+            })
+            // Don't close subscribers - stream will receive events from resumeSubagent
+            return
+          }
 
-  try {
-    updateRunRecord(record.id, { status: 'running' })
-
-    // Pass the approved plan if available (from orchestrator)
-    const initialPlan = record.proposedPlan?.plan
-
-    const summary = await controller.start(
-      {
-        runId: record.id,
-        request: runRequest,
-        initialPlan
-      },
-      {
-        emit(event) {
-          const enriched = enrichProgressEvent(event)
-          appendProgressEvent(record.id, enriched)
-          broadcastEvent(record.id, 'progress', enriched)
+          // Regular clarification case - close stream
+          const clarification = summary.metadata?.clarification ?? null
+          broadcastEvent(record.id, 'clarification', clarification)
+          closeSubscribers(record.id)
+          return
         }
+
+        broadcastEvent(record.id, 'complete', {
+          artifact,
+          metadata: mergedMetadata ?? null,
+          usage: summary.metadata?.usage ?? null,
+          status: summary.status,
+          intent: mergedMetadata.intent ?? null,
+          previews: mergedMetadata.previewArtifacts ?? [],
+          subagents: summary.subagents ?? []
+        })
+        closeSubscribers(record.id)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Run execution failed'
+        updateRunRecord(record.id, {
+          status: 'failed',
+          error: message
+        })
+        broadcastEvent(record.id, 'error', { error: message })
+        closeSubscribers(record.id)
       }
-    )
-
-    const artifact = summary.artifact ?? null
-    const metadataSnapshot = ensureRecordMetadata()
-    const mergedMetadata =
-      summary.metadata && typeof summary.metadata === 'object'
-        ? ({ ...summary.metadata, ...metadataSnapshot } as RunMetadata)
-        : metadataSnapshot
-    record.metadata = mergedMetadata
-    updateRunRecord(record.id, {
-      status: summary.status,
-      summary,
-      clarification: summary.status === 'awaiting-input' ? summary.metadata?.clarification ?? null : null,
-      error: undefined,
-      result: artifact,
-      metadata: mergedMetadata,
-      usage: (summary.metadata?.usage as Record<string, unknown> | undefined) ?? null
-    })
-
-    if (summary.status === 'awaiting-input') {
-      const clarification = summary.metadata?.clarification ?? null
-      broadcastEvent(record.id, 'clarification', clarification)
-      closeSubscribers(record.id)
-      return
     }
-
-    broadcastEvent(record.id, 'complete', {
-      artifact,
-      metadata: mergedMetadata ?? null,
-      usage: summary.metadata?.usage ?? null,
-      status: summary.status,
-      intent: mergedMetadata.intent ?? null,
-      previews: mergedMetadata.previewArtifacts ?? [],
-      subagents: summary.subagents ?? []
-    })
-    closeSubscribers(record.id)
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Run execution failed'
-    updateRunRecord(record.id, {
-      status: 'failed',
-      error: message
-    })
-    broadcastEvent(record.id, 'error', { error: message })
-    closeSubscribers(record.id)
-  }
+  )
 }
 
 const handleCorsPreflight = (req: IncomingMessage, res: ServerResponse): boolean => {
@@ -699,11 +785,13 @@ const server = http.createServer(async (req, res) => {
 
       if (payload.approvalMode === 'manual') {
         // Generate plan and wait for approval
+        console.log(`[product-agent/api] run ${record.id} created with approvalMode: manual, generating plan...`)
         try {
           const proposal = await generatePlan(record)
           record.proposedPlan = proposal
           record.status = 'pending-approval'
           record.updatedAt = new Date().toISOString()
+          console.log(`[product-agent/api] run ${record.id} plan generated, status set to pending-approval`)
 
           writeJson(res, 200, {
             runId: record.id,
@@ -719,6 +807,7 @@ const server = http.createServer(async (req, res) => {
         }
       } else {
         // Auto mode: execute immediately
+        console.log(`[product-agent/api] run ${record.id} created with approvalMode: auto, executing immediately`)
         startRunExecution(record).catch(error => {
           console.error('[product-agent/api] unhandled run error:', error)
         })
@@ -839,7 +928,10 @@ const server = http.createServer(async (req, res) => {
     const record = findRunOrRespond(runId, res)
     if (!record) return
 
+    console.log(`[product-agent/api] approve request for run ${runId}, current status: ${record.status}`)
+
     if (record.status !== 'pending-approval') {
+      console.warn(`[product-agent/api] approval rejected: run ${runId} status is ${record.status}, not pending-approval`)
       writeJson(res, 400, {
         error: `Run is not pending approval. Current status: ${record.status}`,
         runId: record.id,
@@ -854,6 +946,10 @@ const server = http.createServer(async (req, res) => {
       if (payload.approved) {
         // User approved the plan - start execution with the proposed plan
         if (record.proposedPlan) {
+          // Immediately update status to prevent duplicate approvals (race condition)
+          console.log(`[product-agent/api] run ${record.id} approved, setting status to running`)
+          updateRunRecord(record.id, { status: 'running' })
+
           // Execute with the approved plan
           startRunExecution(record).catch(error => {
             console.error('[product-agent/api] unhandled run error:', error)
@@ -946,10 +1042,143 @@ const server = http.createServer(async (req, res) => {
     return
   }
 
+  // POST /runs/:runId/subagent/:stepId/approve - Approve subagent plan
+  if (req.method === 'POST' && /^\/runs\/[^/]+\/subagent\/[^/]+\/approve$/.test(url.pathname)) {
+    const pathParts = url.pathname.split('/')
+    const runId = pathParts[2]
+    const stepId = pathParts[4]
+
+    const record = findRunOrRespond(runId, res)
+    if (!record) return
+
+    // Enhanced logging for debugging approval flow
+    const subscribers = streamSubscribers.get(runId)
+    console.log(`[product-agent/api] subagent approve request for run ${runId}, step ${stepId}`)
+    console.log(`[product-agent/api]   - current status: ${record.status}`)
+    console.log(`[product-agent/api]   - blockedSubagent: ${JSON.stringify(record.blockedSubagent)}`)
+    console.log(`[product-agent/api]   - active stream subscribers: ${subscribers?.size ?? 0}`)
+
+    // Verify run is blocked on this subagent step
+    if (record.status !== 'blocked-subagent' || record.blockedSubagent?.stepId !== stepId) {
+      console.warn(`[product-agent/api] subagent approval rejected: run ${runId} is not blocked on step ${stepId}`)
+      writeJson(res, 400, {
+        error: `Run is not waiting for approval on step ${stepId}`,
+        currentStatus: record.status,
+        blockedStep: record.blockedSubagent?.stepId ?? null
+      })
+      return
+    }
+
+    try {
+      const payload = ApproveRunSchema.parse(await parseJson<unknown>(req))
+
+      if (payload.approved) {
+        const approvedPlan = record.blockedSubagent?.plan
+        const subagentId = record.blockedSubagent?.subagentId
+
+        // Update status immediately to prevent duplicate approvals
+        console.log(`[product-agent/api] subagent ${subagentId} approved for run ${runId}, resuming execution`)
+        console.log(`[product-agent/api]   - approvedPlan exists: ${!!approvedPlan}`)
+        console.log(`[product-agent/api]   - approvedPlan id: ${(approvedPlan as any)?.id ?? 'N/A'}`)
+        updateRunRecord(runId, {
+          status: 'running',
+          blockedSubagent: undefined
+        })
+
+        // Resume execution with approved plan
+        console.log(`[product-agent/api] calling controller.resumeSubagent for run ${runId}, step ${stepId}`)
+        controller.resumeSubagent(runId, stepId, approvedPlan, {
+          emit(event: ProgressEvent) {
+            console.log(`[product-agent/api] resumeSubagent emit: ${event.type}`, event.stepId ? `(step: ${event.stepId})` : '')
+            appendProgressEvent(runId, event)
+            broadcastEvent(runId, 'progress', event)
+          }
+        }).then((summary: ControllerRunSummary) => {
+          // Handle completion
+          console.log(`[product-agent/api] resumeSubagent completed for run ${runId}`)
+          console.log(`[product-agent/api]   - summary status: ${summary.status}`)
+          console.log(`[product-agent/api]   - artifact exists: ${!!summary.artifact}`)
+          console.log(`[product-agent/api]   - subagents count: ${summary.subagents?.length ?? 0}`)
+          updateRunRecord(runId, {
+            status: summary.status,
+            summary,
+            result: summary.artifact ?? null
+          })
+          const subscribersAtComplete = streamSubscribers.get(runId)
+          console.log(`[product-agent/api]   - broadcasting complete to ${subscribersAtComplete?.size ?? 0} subscribers`)
+          broadcastEvent(runId, 'complete', {
+            artifact: summary.artifact ?? null,
+            metadata: summary.metadata ?? null,
+            status: summary.status,
+            subagents: summary.subagents ?? []
+          })
+          closeSubscribers(runId)
+        }).catch((error: unknown) => {
+          const errorMessage = error instanceof Error ? error.message : 'Subagent execution failed'
+          console.error(`[product-agent/api] resumeSubagent FAILED for run ${runId}:`, errorMessage)
+          console.error(`[product-agent/api]   - full error:`, error)
+          updateRunRecord(runId, {
+            status: 'failed',
+            error: errorMessage
+          })
+          const subscribersAtError = streamSubscribers.get(runId)
+          console.log(`[product-agent/api]   - broadcasting error to ${subscribersAtError?.size ?? 0} subscribers`)
+          broadcastEvent(runId, 'error', { error: errorMessage })
+          closeSubscribers(runId)
+        })
+
+        writeJson(res, 202, {
+          runId,
+          stepId,
+          subagentId,
+          status: 'running',
+          message: 'Subagent approved. Resuming execution.',
+          streamUrl: `/runs/${runId}/stream`
+        })
+      } else {
+        // Rejection - fail the run
+        const errorMessage = payload.feedback || 'Subagent plan rejected by user'
+        updateRunRecord(runId, {
+          status: 'failed',
+          error: errorMessage,
+          blockedSubagent: undefined
+        })
+
+        writeJson(res, 200, {
+          runId,
+          stepId,
+          status: 'failed',
+          message: 'Subagent plan rejected. Run cancelled.'
+        })
+      }
+    } catch (error) {
+      const message =
+        error instanceof z.ZodError
+          ? 'Invalid approval payload'
+          : error instanceof Error
+            ? error.message
+            : 'Unable to process subagent approval'
+      writeJson(res, 400, { error: message })
+    }
+    return
+  }
+
   writeJson(res, 404, { error: 'Not found' })
 })
 
 server.listen(PORT, HOST, () => {
   console.log(`[product-agent/api] listening on http://${HOST}:${PORT}`)
   console.log(`[product-agent/api] orchestrator: ${orchestrator.constructor.name}`)
+  console.log(`[product-agent/api] observability: ${observabilityState.enabled ? 'enabled' : 'disabled'}`)
 })
+
+// Graceful shutdown handlers
+const gracefulShutdown = async (signal: string) => {
+  console.log(`[product-agent/api] Received ${signal}, shutting down gracefully...`)
+  server.close()
+  await shutdownObservability()
+  process.exit(0)
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'))
+process.on('SIGINT', () => gracefulShutdown('SIGINT'))
