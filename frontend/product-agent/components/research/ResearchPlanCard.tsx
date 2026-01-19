@@ -43,6 +43,19 @@ export function ResearchPlanCard({
   onReject,
   isProcessing = false
 }: ResearchPlanCardProps) {
+  // Validate plan data with safe defaults
+  const safePlan = {
+    id: plan?.id ?? 'unknown',
+    topic: plan?.topic ?? 'Research Plan',
+    scope: plan?.scope ?? '',
+    objectives: Array.isArray(plan?.objectives) ? safePlan.objectives : [],
+    steps: Array.isArray(plan?.steps) ? safePlan.steps : [],
+    estimatedSources: typeof plan?.estimatedSources === 'number' ? safePlan.estimatedSources : undefined,
+    estimatedDuration: typeof plan?.estimatedDuration === 'string' ? safePlan.estimatedDuration : undefined,
+    depth: plan?.depth as 'quick' | 'standard' | 'comprehensive' | undefined,
+    createdAt: plan?.createdAt ?? new Date().toISOString(),
+  };
+
   const getDepthBadgeColor = (depth?: string) => {
     switch (depth) {
       case 'quick':
@@ -87,22 +100,22 @@ export function ResearchPlanCard({
               <h3 className="text-lg font-semibold text-blue-900">Research Plan</h3>
               {getStatusBadge()}
             </div>
-            <h4 className="text-xl font-bold text-gray-900 mb-2">{plan.topic}</h4>
-            <p className="text-sm text-gray-700">{plan.scope}</p>
+            <h4 className="text-xl font-bold text-gray-900 mb-2">{safePlan.topic}</h4>
+            <p className="text-sm text-gray-700">{safePlan.scope}</p>
           </div>
-          {plan.depth && (
-            <Badge className={getDepthBadgeColor(plan.depth)}>
-              {plan.depth}
+          {safePlan.depth && (
+            <Badge className={getDepthBadgeColor(safePlan.depth)}>
+              {safePlan.depth}
             </Badge>
           )}
         </div>
 
         {/* Objectives */}
-        {plan.objectives && plan.objectives.length > 0 && (
+        {safePlan.objectives && safePlan.objectives.length > 0 && (
           <div>
             <h5 className="text-sm font-semibold text-gray-900 mb-2">Objectives:</h5>
             <ul className="space-y-1">
-              {plan.objectives.map((objective, index) => (
+              {safePlan.objectives.map((objective, index) => (
                 <li key={index} className="flex items-start gap-2 text-sm text-gray-700">
                   <CheckCircle2 className="w-4 h-4 text-green-600 mt-0.5 flex-shrink-0" />
                   <span>{objective}</span>
@@ -114,9 +127,9 @@ export function ResearchPlanCard({
 
         {/* Research Steps */}
         <div>
-          <h5 className="text-sm font-semibold text-gray-900 mb-3">Research Steps ({plan.steps.length}):</h5>
+          <h5 className="text-sm font-semibold text-gray-900 mb-3">Research Steps ({safePlan.steps.length}):</h5>
           <div className="space-y-3">
-            {plan.steps.map((step, index) => (
+            {safePlan.steps.map((step, index) => (
               <div
                 key={step.id}
                 className="bg-white/70 rounded-lg p-3 border border-blue-100"
@@ -153,18 +166,18 @@ export function ResearchPlanCard({
         </div>
 
         {/* Metadata */}
-        {(plan.estimatedSources || plan.estimatedDuration) && (
+        {(safePlan.estimatedSources || safePlan.estimatedDuration) && (
           <div className="flex flex-wrap gap-4 text-xs text-gray-600 pt-3 border-t border-blue-200">
-            {plan.estimatedSources && (
+            {safePlan.estimatedSources && (
               <div className="flex items-center gap-1">
                 <Search className="w-3 h-3" />
-                <span>Est. sources: <strong>{plan.estimatedSources}</strong></span>
+                <span>Est. sources: <strong>{safePlan.estimatedSources}</strong></span>
               </div>
             )}
-            {plan.estimatedDuration && (
+            {safePlan.estimatedDuration && (
               <div className="flex items-center gap-1">
                 <Clock className="w-3 h-3" />
-                <span>Est. duration: <strong>{plan.estimatedDuration}</strong></span>
+                <span>Est. duration: <strong>{safePlan.estimatedDuration}</strong></span>
               </div>
             )}
           </div>

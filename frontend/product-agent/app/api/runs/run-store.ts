@@ -4,7 +4,7 @@ import type { PlanProposal } from '@/types'
 
 export type ApprovalMode = 'auto' | 'manual'
 
-export type RunStatus = 'pending' | 'running' | 'awaiting-input' | 'completed' | 'failed' | 'pending-approval'
+export type RunStatus = 'pending' | 'running' | 'awaiting-input' | 'completed' | 'failed' | 'pending-approval' | 'blocked-subagent'
 
 export interface RunRecord {
   id: string

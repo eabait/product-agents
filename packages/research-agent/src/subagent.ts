@@ -204,6 +204,15 @@ export const createResearchAgentSubagent = (
       const emit = request.emit ?? (() => {})
       const runId = request.run.runId
 
+      // eslint-disable-next-line no-console
+      console.log(`[research-agent] execute called for run ${runId}`)
+      // eslint-disable-next-line no-console
+      console.log(`[research-agent]   - requirePlanConfirmation: ${params.requirePlanConfirmation}`)
+      // eslint-disable-next-line no-console
+      console.log(`[research-agent]   - approvedPlan exists: ${!!(params as ResearchBuilderParamsWithPlan).approvedPlan}`)
+      // eslint-disable-next-line no-console
+      console.log(`[research-agent]   - approvedPlan id: ${((params as ResearchBuilderParamsWithPlan).approvedPlan as any)?.id ?? 'N/A'}`)
+
       const query = extractQueryFromRequest(request)
       const existingContext = extractContextFromRequest(request)
 
@@ -263,7 +272,18 @@ export const createResearchAgentSubagent = (
       const requirePlanConfirmation = params.requirePlanConfirmation ?? true
       const approvedPlan = (params as ResearchBuilderParamsWithPlan).approvedPlan
 
+      // eslint-disable-next-line no-console
+      console.log(`[research-agent] checking approval requirement for run ${runId}`)
+      // eslint-disable-next-line no-console
+      console.log(`[research-agent]   - requirePlanConfirmation (resolved): ${requirePlanConfirmation}`)
+      // eslint-disable-next-line no-console
+      console.log(`[research-agent]   - approvedPlan (resolved): ${approvedPlan ? 'present' : 'absent'}`)
+      // eslint-disable-next-line no-console
+      console.log(`[research-agent]   - will block for approval: ${requirePlanConfirmation && !approvedPlan}`)
+
       if (requirePlanConfirmation && !approvedPlan) {
+        // eslint-disable-next-line no-console
+        console.log(`[research-agent] BLOCKING: returning awaiting-plan-confirmation for run ${runId}`)
         emit(
           createProgressEvent(
             'research.plan.created',
@@ -291,7 +311,11 @@ export const createResearchAgentSubagent = (
         }
       }
 
+      // eslint-disable-next-line no-console
+      console.log(`[research-agent] PROCEEDING with research execution for run ${runId}`)
       const plan: ResearchPlan = approvedPlan ?? planResult.plan
+      // eslint-disable-next-line no-console
+      console.log(`[research-agent]   - using plan: ${plan.id}`)
 
       emit(
         createProgressEvent(

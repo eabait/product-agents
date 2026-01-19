@@ -91,13 +91,21 @@ export interface PlanProposal {
   steps: PlanStepProposal[]
 }
 
-export type RunProgressStatus = 'active' | 'completed' | 'failed' | 'awaiting-input' | 'pending-approval'
+export type RunProgressStatus = 'active' | 'completed' | 'failed' | 'awaiting-input' | 'pending-approval' | 'blocked-subagent'
 
 export interface PlanNodeState {
   status: 'pending' | 'active' | 'complete' | 'error'
   startedAt?: string
   completedAt?: string
   message?: string
+}
+
+export interface BlockedSubagentInfo {
+  stepId: string
+  subagentId: string
+  artifactKind: string
+  plan: unknown
+  approvalUrl: string
 }
 
 export interface RunProgressCard {
@@ -113,6 +121,7 @@ export interface RunProgressCard {
   approvalPlan?: PlanProposal
   approvalUrl?: string
   nodeStates: Record<string, PlanNodeState>
+  blockedSubagent?: BlockedSubagentInfo
 }
 
 // PRD-specific types

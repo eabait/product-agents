@@ -25,6 +25,14 @@ const handleEventForStore = (runId: string, eventType: string, data: any) => {
       if (data?.metadata?.usage) {
         updateRunRecord(runId, { usage: data.metadata.usage as any })
       }
+      // Handle subagent approval-required events to update status
+      if (data?.type === 'subagent.approval-required') {
+        updateRunRecord(runId, { status: 'blocked-subagent' })
+      }
+      // Handle run.status events
+      if (data?.type === 'run.status' && data?.status === 'awaiting-input') {
+        updateRunRecord(runId, { status: 'awaiting-input' })
+      }
       break
     case 'clarification':
       updateRunRecord(runId, {
@@ -84,10 +92,16 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
   const abortHandler = () => {
     upstreamController.abort()
-    updateRunRecord(record.id, {
-      status: 'failed',
-      error: 'Run stream aborted by client'
-    })
+    // Only fail the run if it's in a state that requires the stream
+    // Don't fail runs waiting for approval - they can be resumed later
+    const current = getRunRecord(record.id)
+    const safeStatuses = ['blocked-subagent', 'pending-approval', 'awaiting-input', 'completed', 'failed']
+    if (current && !safeStatuses.includes(current.status)) {
+      updateRunRecord(record.id, {
+        status: 'failed',
+        error: 'Run stream aborted by client'
+      })
+    }
   }
 
   if (request.signal.aborted) {
@@ -233,8 +247,11 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     },
     cancel(reason) {
       reader.cancel(reason as string)
+      // Only fail the run if it's in a state that requires the stream
+      // Don't fail runs waiting for approval - they can be resumed later
       const current = getRunRecord(record.id)
-      if (current?.status === 'completed') {
+      const safeStatuses = ['blocked-subagent', 'pending-approval', 'awaiting-input', 'completed', 'failed']
+      if (current && safeStatuses.includes(current.status)) {
         return
       }
       updateRunRecord(record.id, {

@@ -311,6 +311,7 @@ function StatusDot({ status }: { status: ProgressStep['status'] }) {
 function getStatusIcon(status: RunProgressStatus | undefined, isActive: boolean) {
   if (status === 'failed') return <AlertCircle className="h-4 w-4 text-red-500" />;
   if (status === 'pending-approval') return <Clock className="h-4 w-4 text-amber-500" />;
+  if (status === 'blocked-subagent') return <Clock className="h-4 w-4 text-purple-500" />;
   if (status === 'completed') return <CheckCircle className="h-4 w-4 text-green-600" />;
   if (isActive) return <Loader className="h-4 w-4 text-blue-600 animate-spin" />;
   return <Clock className="h-4 w-4 text-gray-500" />;
@@ -324,6 +325,8 @@ function getStatusLabel(status: RunProgressStatus | undefined, isActive: boolean
       return 'Awaiting input';
     case 'pending-approval':
       return 'Awaiting approval';
+    case 'blocked-subagent':
+      return 'Subagent awaiting approval';
     case 'completed':
       return 'Plan execution complete';
     default:

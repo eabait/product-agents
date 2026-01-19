@@ -51,6 +51,10 @@ import {
 const STREAM_TIMEOUT_MS = 300000; // 5 minutes
 // const STREAM_RETRY_COUNT = 3; // Reserved for future retry implementation
 // const STREAM_RETRY_DELAY_MS = 1000; // Reserved for future retry implementation
+
+// Debug logging flag - set to true for verbose frontend logging
+const DEBUG_FRONTEND = process.env.NODE_ENV === 'development' && process.env.NEXT_PUBLIC_DEBUG_FRONTEND === '1';
+
 // Enhanced model interface from OpenRouter
 
 const coerceNumber = (value: unknown): number | undefined => {
@@ -125,6 +129,8 @@ function PRDAgentPageContent() {
   const progressCardRunMap = useRef(new Map<string, string>());
   const progressCardConversationMap = useRef(new Map<string, string>());
   const activeProgressCardRef = useRef<string | null>(null);
+  // Track cards that are blocked on subagent approval (ref for synchronous access in event handlers)
+  const blockedSubagentCardsRef = useRef(new Set<string>());
   const [approvalLoadingByRun, setApprovalLoadingByRun] = useState<Record<string, boolean>>({});
   const [approvalErrorsByRun, setApprovalErrorsByRun] = useState<Record<string, string | null>>({});
 
@@ -569,7 +575,48 @@ function PRDAgentPageContent() {
       return;
     }
 
+    // Handle subagent approval-required event BEFORE run.status to prevent race condition
+    // where run.status: awaiting-input overwrites the blocked-subagent status
+    if (event.type === 'subagent.approval-required') {
+      const payload = event.payload as Record<string, unknown>;
+      DEBUG_FRONTEND && console.log('[frontend] subagent.approval-required event received:', {
+        runId: event.runId,
+        stepId: payload.stepId ?? event.stepId,
+        subagentId: payload.subagentId,
+        targetCardId,
+        hasPlan: !!payload.plan
+      });
+      // Mark card as blocked in ref (synchronous, not affected by React batching)
+      blockedSubagentCardsRef.current.add(targetCardId);
+      updateProgressCard(targetCardId, card => {
+        DEBUG_FRONTEND && console.log('[frontend] updating card to blocked-subagent:', {
+          cardId: card.id,
+          previousStatus: card.status,
+          newStatus: 'blocked-subagent'
+        });
+        return {
+          ...card,
+          status: 'blocked-subagent' as RunProgressStatus,
+          blockedSubagent: {
+            stepId: (payload.stepId ?? event.stepId) as string,
+            subagentId: payload.subagentId as string,
+            artifactKind: payload.artifactKind as string,
+            plan: payload.plan,
+            approvalUrl: payload.approvalUrl as string
+          }
+        };
+      });
+      return; // Don't process run.status events that might follow
+    }
+
     if (event.type === 'run.status' && event.status) {
+      // Don't let run.status: awaiting-input override blocked-subagent
+      // Use ref for synchronous check (not affected by React state batching)
+      if (event.status === 'awaiting-input' && blockedSubagentCardsRef.current.has(targetCardId)) {
+        DEBUG_FRONTEND && console.log('[frontend] Ignoring run.status: awaiting-input because card is blocked-subagent (ref check)');
+        return;
+      }
+
       if (event.status === 'failed') {
         finalizeProgressCard(targetCardId, 'failed');
       } else if (event.status === 'pending-approval') {
@@ -577,6 +624,8 @@ function PRDAgentPageContent() {
       } else if (event.status === 'awaiting-input') {
         finalizeProgressCard(targetCardId, 'awaiting-input');
       } else if (event.status === 'completed') {
+        // Clear blocked status when completed
+        blockedSubagentCardsRef.current.delete(targetCardId);
         finalizeProgressCard(targetCardId, 'completed');
       }
     }
@@ -886,7 +935,7 @@ function PRDAgentPageContent() {
 
   const fetchAgentDefaults = useCallback(async () => {
     try {
-      console.log("Fetching agent defaults...");
+      DEBUG_FRONTEND && console.log("Fetching agent defaults...");
       const response = await fetch("/api/agent-defaults");
       
       if (!response.ok) {
@@ -894,7 +943,7 @@ function PRDAgentPageContent() {
       }
       
       const payload = await response.json();
-      console.log("Agent defaults received:", payload);
+      DEBUG_FRONTEND && console.log("Agent defaults received:", payload);
       setAgentMetadata(payload.metadata || null);
       return payload;
     } catch (error) {
@@ -978,7 +1027,7 @@ function PRDAgentPageContent() {
     let isMounted = true;
 
     const initializeStorage = () => {
-      console.log("Initializing from localStorage...");
+      DEBUG_FRONTEND && console.log("Initializing from localStorage...");
 
       try {
         const rawConversations = localStorage.getItem("prd-agent-conversations");
@@ -989,7 +1038,7 @@ function PRDAgentPageContent() {
           try {
             const parsed = JSON.parse(rawSettings) as AgentSettingsState;
             savedSettings = parsed;
-            console.log("Loaded settings from localStorage:", parsed);
+            DEBUG_FRONTEND && console.log("Loaded settings from localStorage:", parsed);
           } catch (parseErr) {
             console.warn("Failed to parse settings from localStorage:", parseErr);
           }
@@ -1107,7 +1156,7 @@ function PRDAgentPageContent() {
 
   useEffect(() => {
     if (!isInitializedRef.current) {
-      console.log("Skipping save - not initialized yet");
+      DEBUG_FRONTEND && console.log("Skipping save - not initialized yet");
       return;
     }
 
@@ -1132,12 +1181,12 @@ function PRDAgentPageContent() {
     }
 
     try {
-      console.log("Saving conversations to localStorage:", conversations.length);
+      DEBUG_FRONTEND && console.log("Saving conversations to localStorage:", conversations.length);
       localStorage.setItem("prd-agent-conversations", JSON.stringify(conversations));
       
       if (activeId) {
         localStorage.setItem("prd-agent-active-conversation", JSON.stringify(activeId));
-        console.log("Saved active conversation ID:", activeId);
+        DEBUG_FRONTEND && console.log("Saved active conversation ID:", activeId);
       }
     } catch (err) {
       console.error("Error saving conversations to localStorage:", err);
@@ -1147,20 +1196,27 @@ function PRDAgentPageContent() {
   // Save settings to localStorage
   useEffect(() => {
     if (!isInitializedRef.current) {
-      console.log("Skipping settings save - not initialized yet");
+      DEBUG_FRONTEND && console.log("Skipping settings save - not initialized yet");
       return;
     }
 
     try {
-      console.log("Saving settings to localStorage:", settings);
+      DEBUG_FRONTEND && console.log("Saving settings to localStorage:", settings);
       localStorage.setItem("prd-agent-settings", JSON.stringify(settings));
     } catch (err) {
       console.error("Error saving settings to localStorage:", err);
     }
   }, [settings]);
 
-
-
+  // Cleanup refs on component unmount to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      blockedSubagentCardsRef.current.clear();
+      progressCardRunMap.current.clear();
+      progressCardConversationMap.current.clear();
+      activeProgressCardRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -1301,6 +1357,9 @@ function PRDAgentPageContent() {
           completedAt: undefined
         }));
         activeProgressCardRef.current = cardId;
+        // Reset loading state BEFORE starting stream - the stream may pause for subagent approval
+        // and we don't want the loading state to block the subagent approval button
+        setApprovalLoadingByRun(prev => ({ ...prev, [runId]: false }));
         setIsChatLoading(true);
         await streamRunExecution({
           runId,
@@ -1323,6 +1382,74 @@ function PRDAgentPageContent() {
     } catch (error) {
       console.error('Plan approval error:', error);
       const errorMessage = error instanceof Error ? error.message : 'Failed to process approval';
+      setApprovalErrorsByRun(prev => ({ ...prev, [runId]: errorMessage }));
+    } finally {
+      setApprovalLoadingByRun(prev => ({ ...prev, [runId]: false }));
+    }
+  };
+
+  const handleSubagentApproval = async (params: {
+    runId: string;
+    cardId: string;
+    stepId: string;
+    subagentId: string;
+    approved: boolean;
+    feedback?: string;
+  }) => {
+    const { runId, cardId, stepId, approved, feedback } = params;
+
+    DEBUG_FRONTEND && console.log('[frontend] handleSubagentApproval called:', {
+      runId,
+      cardId,
+      stepId,
+      subagentId: params.subagentId,
+      approved
+    });
+
+    setApprovalLoadingByRun(prev => ({ ...prev, [runId]: true }));
+    setApprovalErrorsByRun(prev => ({ ...prev, [runId]: null }));
+
+    try {
+      DEBUG_FRONTEND && console.log('[frontend] sending approval request to:', `/api/runs/${runId}/subagent/${stepId}/approve`);
+      const response = await fetch(`/api/runs/${runId}/subagent/${stepId}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ approved, feedback })
+      });
+      DEBUG_FRONTEND && console.log('[frontend] approval response status:', response.status);
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Approval failed: ${response.statusText}`);
+      }
+
+      if (approved) {
+        // Clear blocked status from ref
+        blockedSubagentCardsRef.current.delete(cardId);
+        // Update card to show resumed execution
+        updateProgressCard(cardId, card => ({
+          ...card,
+          blockedSubagent: undefined,
+          status: 'active' as RunProgressStatus
+        }));
+
+        // Reconnect to stream to receive remaining events
+        // The original stream may have been disconnected (browser backgrounded tab, device sleep, etc.)
+        // This is safe even if the original stream is still active - the backend handles multiple subscribers
+        setIsChatLoading(true);
+        await streamRunExecution({
+          runId,
+          fallbackCardId: cardId,
+          titleSeedMessage: undefined
+        });
+      } else {
+        // Clear blocked status from ref and mark run as failed
+        blockedSubagentCardsRef.current.delete(cardId);
+        finalizeProgressCard(cardId, 'failed');
+      }
+    } catch (error) {
+      console.error('Subagent approval error:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to process subagent approval';
       setApprovalErrorsByRun(prev => ({ ...prev, [runId]: errorMessage }));
     } finally {
       setApprovalLoadingByRun(prev => ({ ...prev, [runId]: false }));
@@ -2226,6 +2353,7 @@ function PRDAgentPageContent() {
                   onPRDUpdate={handlePRDUpdate}
                   onResearchPlanAction={handleResearchPlanAction}
                   onPlanApproval={handlePlanApproval}
+                  onSubagentApproval={handleSubagentApproval}
                   approvalLoadingByRun={approvalLoadingByRun}
                   approvalErrorsByRun={approvalErrorsByRun}
                   progressCards={activeProgressCards}

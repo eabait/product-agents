@@ -6,6 +6,7 @@ import { NewPRD } from '@/lib/prd-schema';
 import { Message, type RunProgressCard } from '../../types';
 import { useState, useEffect, useMemo } from 'react';
 import { PlanReview } from '@/components/plan-review';
+import { ResearchPlanCard } from '@/components/research/ResearchPlanCard';
 
 interface ChatMessagesProps {
   messages: Message[];
@@ -17,6 +18,14 @@ interface ChatMessagesProps {
   onPlanApproval?: (_params: {
     runId: string;
     cardId: string;
+    approved: boolean;
+    feedback?: string;
+  }) => void;
+  onSubagentApproval?: (_params: {
+    runId: string;
+    cardId: string;
+    stepId: string;
+    subagentId: string;
     approved: boolean;
     feedback?: string;
   }) => void;
@@ -34,6 +43,7 @@ export function ChatMessages({
   onPRDUpdate,
   onResearchPlanAction,
   onPlanApproval,
+  onSubagentApproval,
   approvalLoadingByRun = {},
   approvalErrorsByRun = {},
   progressCards = [],
@@ -161,6 +171,37 @@ export function ChatMessages({
                   </div>
                 );
               })()}
+              {card.status === 'blocked-subagent' && card.blockedSubagent && card.runId && (() => {
+                const runId = card.runId;
+                const blocked = card.blockedSubagent;
+                return (
+                  <div className="mt-4">
+                    <ResearchPlanCard
+                      plan={blocked.plan as any}
+                      status="awaiting-plan-confirmation"
+                      onApprove={() => {
+                        onSubagentApproval?.({
+                          runId,
+                          cardId: card.id,
+                          stepId: blocked.stepId,
+                          subagentId: blocked.subagentId,
+                          approved: true
+                        });
+                      }}
+                      onReject={() => {
+                        onSubagentApproval?.({
+                          runId,
+                          cardId: card.id,
+                          stepId: blocked.stepId,
+                          subagentId: blocked.subagentId,
+                          approved: false
+                        });
+                      }}
+                      isProcessing={Boolean(approvalLoadingByRun[runId])}
+                    />
+                  </div>
+                );
+              })()}
             </motion.div>
           ))}
         </div>
@@ -202,6 +243,37 @@ export function ChatMessages({
                   }
                   isLoading={Boolean(approvalLoadingByRun[runId])}
                   error={approvalErrorsByRun[runId] ?? undefined}
+                />
+              </div>
+            );
+          })()}
+          {card.status === 'blocked-subagent' && card.blockedSubagent && card.runId && (() => {
+            const runId = card.runId;
+            const blocked = card.blockedSubagent;
+            return (
+              <div className="mt-4">
+                <ResearchPlanCard
+                  plan={blocked.plan as any}
+                  status="awaiting-plan-confirmation"
+                  onApprove={() => {
+                    onSubagentApproval?.({
+                      runId,
+                      cardId: card.id,
+                      stepId: blocked.stepId,
+                      subagentId: blocked.subagentId,
+                      approved: true
+                    });
+                  }}
+                  onReject={() => {
+                    onSubagentApproval?.({
+                      runId,
+                      cardId: card.id,
+                      stepId: blocked.stepId,
+                      subagentId: blocked.subagentId,
+                      approved: false
+                    });
+                  }}
+                  isProcessing={Boolean(approvalLoadingByRun[runId])}
                 />
               </div>
             );
