@@ -1,4 +1,10 @@
 import { generateText } from 'ai'
+import {
+  withSpan,
+  createPlanSpan,
+  isObservabilityEnabled,
+  getObservabilityTransport
+} from '@product-agents/observability'
 
 import type { RunContext } from '../contracts/core'
 import type {
@@ -113,103 +119,113 @@ export class LLMOrchestrator implements Orchestrator {
     input: OrchestratorInput,
     context?: RunContext
   ): Promise<OrchestratorPlanProposal> {
-    const tools = await this.discoverTools()
     const runId = context?.runId ?? `run-${Date.now()}`
 
-    // Build prompts
-    const systemPrompt = this.promptBuilder.buildSystemPrompt(tools)
-    const userPrompt = this.promptBuilder.buildUserPrompt(input)
+    return withSpan(createPlanSpan({ action: 'propose', runId }), async () => {
+      const tools = await this.discoverTools()
 
-    // Get API key from context or environment
-    const apiKey = this.resolveApiKey(context)
-    const provider = this.providerFactory(apiKey)
-    const model = resolveOpenRouterModel(
-      provider,
-      this.productConfig,
-      this.orchestratorConfig.model
-    )
+      // Build prompts
+      const systemPrompt = this.promptBuilder.buildSystemPrompt(tools)
+      const userPrompt = this.promptBuilder.buildUserPrompt(input)
 
-    // Generate plan using LLM
-    const response = await this.textGenerator({
-      model: model as any,
-      system: systemPrompt,
-      prompt: userPrompt,
-      maxTokens: this.orchestratorConfig.maxTokens,
-      temperature: this.orchestratorConfig.temperature
+      // Get API key from context or environment
+      const apiKey = this.resolveApiKey(context)
+      const provider = this.providerFactory(apiKey)
+      const model = resolveOpenRouterModel(
+        provider,
+        this.productConfig,
+        this.orchestratorConfig.model
+      )
+
+      // Generate plan using LLM with tracing (telemetry enabled for OTEL transport)
+      const telemetryEnabled = isObservabilityEnabled() && getObservabilityTransport() === 'otel'
+      const response = await this.textGenerator({
+        model: model as any,
+        system: systemPrompt,
+        prompt: userPrompt,
+        maxTokens: this.orchestratorConfig.maxTokens,
+        temperature: this.orchestratorConfig.temperature,
+        experimental_telemetry: { isEnabled: telemetryEnabled }
+      })
+
+      // Parse and translate the response
+      const translator = createPlanTranslator({
+        tools,
+        runId,
+        clock: this.clock
+      })
+
+      const rawOutput = translator.parseOutput(response.text)
+      const proposal = translator.translate(rawOutput)
+
+      return proposal
     })
-
-    // Parse and translate the response
-    const translator = createPlanTranslator({
-      tools,
-      runId,
-      clock: this.clock
-    })
-
-    const rawOutput = translator.parseOutput(response.text)
-    const proposal = translator.translate(rawOutput)
-
-    return proposal
   }
 
   /**
    * Refine an existing plan based on user feedback.
    */
   async refine(input: OrchestratorRefineInput): Promise<OrchestratorPlanProposal> {
-    const tools = await this.discoverTools()
     const runId = input.currentPlan.id.replace('plan-', '') || `run-${Date.now()}`
 
-    // Build prompts
-    const systemPrompt = this.promptBuilder.buildSystemPrompt(tools)
-    const currentPlanJson = JSON.stringify({
-      targetArtifact: input.currentPlan.artifactKind,
-      overallRationale: (input.currentPlan.metadata as any)?.overallRationale ?? '',
-      confidence: (input.currentPlan.metadata as any)?.confidence ?? 0.5,
-      steps: input.currentSteps.map(step => ({
-        id: step.id,
-        toolId: step.toolId,
-        toolType: step.toolType,
-        label: step.label,
-        rationale: step.rationale,
-        dependsOn: step.dependsOn,
-        outputArtifact: step.outputArtifact
-      }))
-    }, null, 2)
+    return withSpan(createPlanSpan({ action: 'refine', runId }), async () => {
+      const tools = await this.discoverTools()
 
-    const refinementPrompt = this.promptBuilder.buildRefinementPrompt(
-      input.originalInput,
-      currentPlanJson,
-      input.feedback
-    )
+      // Build prompts
+      const systemPrompt = this.promptBuilder.buildSystemPrompt(tools)
+      const currentPlanJson = JSON.stringify({
+        targetArtifact: input.currentPlan.artifactKind,
+        overallRationale: (input.currentPlan.metadata as any)?.overallRationale ?? '',
+        confidence: (input.currentPlan.metadata as any)?.confidence ?? 0.5,
+        steps: input.currentSteps.map(step => ({
+          id: step.id,
+          toolId: step.toolId,
+          toolType: step.toolType,
+          label: step.label,
+          rationale: step.rationale,
+          dependsOn: step.dependsOn,
+          outputArtifact: step.outputArtifact
+        }))
+      }, null, 2)
 
-    // Get API key from environment
-    const apiKey = process.env.OPENROUTER_API_KEY
-    const provider = this.providerFactory(apiKey)
-    const model = resolveOpenRouterModel(
-      provider,
-      this.productConfig,
-      this.orchestratorConfig.model
-    )
+      const refinementPrompt = this.promptBuilder.buildRefinementPrompt(
+        input.originalInput,
+        currentPlanJson,
+        input.feedback
+      )
 
-    // Generate refined plan using LLM
-    const response = await this.textGenerator({
-      model: model as any,
-      system: systemPrompt,
-      prompt: refinementPrompt,
-      maxTokens: this.orchestratorConfig.maxTokens,
-      temperature: this.orchestratorConfig.temperature
+      // Get API key from environment
+      const apiKey = process.env.OPENROUTER_API_KEY
+      const provider = this.providerFactory(apiKey)
+      const model = resolveOpenRouterModel(
+        provider,
+        this.productConfig,
+        this.orchestratorConfig.model
+      )
+
+      // Generate refined plan using LLM with tracing (telemetry enabled for OTEL transport)
+      const telemetryEnabled = isObservabilityEnabled() && getObservabilityTransport() === 'otel'
+      const response = await this.textGenerator({
+        model: model as any,
+        system: systemPrompt,
+        prompt: refinementPrompt,
+        maxTokens: this.orchestratorConfig.maxTokens,
+        temperature: this.orchestratorConfig.temperature,
+        experimental_telemetry: { isEnabled: telemetryEnabled }
+      })
+
+      // Parse and translate the response
+      const translator = createPlanTranslator({
+        tools,
+        runId,
+        clock: this.clock
+      })
+
+      const rawOutput = translator.parseOutput(response.text)
+      const proposal = translator.translate(rawOutput)
+
+      return proposal
     })
-
-    // Parse and translate the response
-    const translator = createPlanTranslator({
-      tools,
-      runId,
-      clock: this.clock
-    })
-
-    const rawOutput = translator.parseOutput(response.text)
-    const proposal = translator.translate(rawOutput)
-
-    return proposal
   }
 
   /**

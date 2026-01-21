@@ -14,6 +14,13 @@ export interface WebSearchOptions {
   excludeDomains?: string[]
   includeAnswer?: boolean
   includeRawContent?: boolean
+  runId?: string
+  traceId?: string
+  stepId?: string
+  stepLabel?: string
+  stepType?: string
+  queryIndex?: number
+  queryCount?: number
 }
 
 export interface WebSearchAdapter {

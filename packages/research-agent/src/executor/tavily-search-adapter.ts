@@ -4,6 +4,7 @@ import type {
   WebSearchOptions,
   TavilySearchResponse
 } from './web-search-types'
+import { createSkillSpan, withSpan } from '@product-agents/observability'
 
 export interface TavilySearchAdapterOptions {
   apiKey: string
@@ -36,54 +37,77 @@ export class TavilySearchAdapter implements WebSearchAdapter {
       return []
     }
 
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), this.timeout)
+    const executeSearch = async () => {
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), this.timeout)
 
-    try {
-      const requestBody = {
-        api_key: this.apiKey,
-        query: query.trim(),
-        search_depth: options?.searchDepth ?? this.defaultSearchDepth,
-        max_results: options?.maxResults ?? this.defaultMaxResults,
-        include_answer: options?.includeAnswer ?? false,
-        include_raw_content: options?.includeRawContent ?? false,
-        ...(options?.includeDomains?.length && { include_domains: options.includeDomains }),
-        ...(options?.excludeDomains?.length && { exclude_domains: options.excludeDomains })
+      try {
+        const requestBody = {
+          api_key: this.apiKey,
+          query: query.trim(),
+          search_depth: options?.searchDepth ?? this.defaultSearchDepth,
+          max_results: options?.maxResults ?? this.defaultMaxResults,
+          include_answer: options?.includeAnswer ?? false,
+          include_raw_content: options?.includeRawContent ?? false,
+          ...(options?.includeDomains?.length && { include_domains: options.includeDomains }),
+          ...(options?.excludeDomains?.length && { exclude_domains: options.excludeDomains })
+        }
+
+        const response = await fetch(this.baseUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(requestBody),
+          signal: controller.signal
+        })
+
+        if (!response.ok) {
+          const errorText = await response.text().catch(() => 'Unknown error')
+          throw new Error(`Tavily API error (${response.status}): ${errorText}`)
+        }
+
+        const data = (await response.json()) as TavilySearchResponse
+        const retrievedAt = new Date().toISOString()
+
+        return (data.results ?? []).map(result => ({
+          url: result.url,
+          title: result.title,
+          content: result.content,
+          score: result.score,
+          publishedDate: result.published_date,
+          retrievedAt
+        }))
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          throw new Error(`Tavily search timed out after ${this.timeout}ms`)
+        }
+        throw error
+      } finally {
+        clearTimeout(timeoutId)
       }
-
-      const response = await fetch(this.baseUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(requestBody),
-        signal: controller.signal
-      })
-
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => 'Unknown error')
-        throw new Error(`Tavily API error (${response.status}): ${errorText}`)
-      }
-
-      const data = (await response.json()) as TavilySearchResponse
-      const retrievedAt = new Date().toISOString()
-
-      return (data.results ?? []).map(result => ({
-        url: result.url,
-        title: result.title,
-        content: result.content,
-        score: result.score,
-        publishedDate: result.published_date,
-        retrievedAt
-      }))
-    } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError') {
-        throw new Error(`Tavily search timed out after ${this.timeout}ms`)
-      }
-      throw error
-    } finally {
-      clearTimeout(timeoutId)
     }
+
+    return withSpan(
+      createSkillSpan('tavily.search', {
+        query: query.trim(),
+        provider: 'tavily',
+        maxResults: options?.maxResults ?? this.defaultMaxResults,
+        searchDepth: options?.searchDepth ?? this.defaultSearchDepth,
+        includeAnswer: options?.includeAnswer ?? false,
+        includeRawContent: options?.includeRawContent ?? false,
+        includeDomains: options?.includeDomains,
+        excludeDomains: options?.excludeDomains,
+        runId: options?.runId,
+        traceId: options?.traceId,
+        stepId: options?.stepId,
+        stepLabel: options?.stepLabel,
+        stepType: options?.stepType,
+        queryIndex: options?.queryIndex,
+        queryCount: options?.queryCount
+      }),
+      executeSearch
+    )
   }
 
   getProviderName(): string {

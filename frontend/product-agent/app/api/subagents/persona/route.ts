@@ -8,11 +8,13 @@ import {
   resolveRunSettings
 } from '@product-agents/product-agent/config/product-agent.config'
 import type { Artifact, RunContext, WorkspaceHandle } from '@product-agents/product-agent/contracts'
+import { initObservability, withTrace } from '@product-agents/observability'
 import { createPersonaAgentSubagent } from '@product-agents/persona-agent'
 import type { SectionRoutingRequest, SectionRoutingResponse } from '@product-agents/prd-shared'
 import { attachSubagentArtifact, getRunRecord } from '../../runs/run-store'
 
 const PRD_AGENT_URL = process.env.PRD_AGENT_URL
+initObservability()
 
 const ArtifactSchema = z.object({
   id: z.string().min(1).optional(),
@@ -276,20 +278,34 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const result = await subagent.execute({
-      params: personaInput
-        ? {
-            targetUsers: personaInput.targetUsers,
-            keyFeatures: personaInput.keyFeatures,
-            constraints: personaInput.constraints,
-            successMetrics: personaInput.successMetrics,
-            contextPayload: personaInput.contextPayload,
-            description: personaInput.description ?? personaInput.message
-          }
-        : undefined,
-      run: runContext,
-      sourceArtifact: sourceArtifact ?? undefined
-    })
+    const executePersona = () =>
+      subagent.execute({
+        params: personaInput
+          ? {
+              targetUsers: personaInput.targetUsers,
+              keyFeatures: personaInput.keyFeatures,
+              constraints: personaInput.constraints,
+              successMetrics: personaInput.successMetrics,
+              contextPayload: personaInput.contextPayload,
+              description: personaInput.description ?? personaInput.message
+            }
+          : undefined,
+        run: runContext,
+        sourceArtifact: sourceArtifact ?? undefined
+      })
+
+    const result = await withTrace(
+      {
+        runId: personaRunId,
+        artifactType: subagent.metadata.artifactKind,
+        model: settings.model,
+        metadata: {
+          parentRunId: runId ?? null,
+          trigger: 'persona-builder'
+        }
+      },
+      executePersona
+    )
 
     if (runId && sourceArtifact) {
       attachSubagentArtifact(runId, subagent.metadata.id, result.artifact, result.metadata ?? null)

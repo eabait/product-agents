@@ -22,6 +22,8 @@ export interface ResearchExecutionResult {
 export interface ExecutionOptions {
   maxSourcesPerStep?: number
   maxTotalSources?: number
+  runId?: string
+  traceId?: string
   onStepStarted?: (step: ResearchStep) => void
   onStepProgress?: (step: ResearchStep, progress: number, sourcesFound: number) => void
   onStepCompleted?: (step: ResearchStep, result: StepExecutionResult) => void
@@ -64,6 +66,8 @@ export class ResearchExecutor {
 
       const stepResult = await this.executeStep(step, {
         maxSources: maxForThisStep,
+        runId: options?.runId,
+        traceId: options?.traceId,
         onProgress: (progress, sourcesFound) => {
           options?.onStepProgress?.(step, progress, sourcesFound)
         }
@@ -94,6 +98,8 @@ export class ResearchExecutor {
     step: ResearchStep,
     options: {
       maxSources: number
+      runId?: string
+      traceId?: string
       onProgress?: (progress: number, sourcesFound: number) => void
     }
   ): Promise<StepExecutionResult> {
@@ -111,7 +117,14 @@ export class ResearchExecutor {
       try {
         const results = await this.webSearch.search(query, {
           maxResults: sourcesPerQuery,
-          searchDepth: 'advanced'
+          searchDepth: 'advanced',
+          runId: options.runId,
+          traceId: options.traceId,
+          stepId: step.id,
+          stepLabel: step.label,
+          stepType: step.type,
+          queryIndex: i,
+          queryCount: queries.length
         })
 
         allStepSources.push(...results)

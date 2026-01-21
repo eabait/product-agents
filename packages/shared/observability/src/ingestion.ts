@@ -15,6 +15,10 @@ type TraceStore = {
   traceId: string;
 };
 
+type SpanStore = {
+  spanId: string;
+};
+
 export type GenerationRecord = {
   traceId?: string;
   name?: string;
@@ -34,6 +38,7 @@ export type GenerationRecord = {
 };
 
 const traceStorage = new AsyncLocalStorage<TraceStore>();
+const spanStorage = new AsyncLocalStorage<SpanStore>();
 let ingestionClient: LangfuseAPIClient | null = null;
 
 const isIngestionEnabled = () => {
@@ -79,6 +84,17 @@ export const getActiveTraceId = (): string | undefined => {
   return traceStorage.getStore()?.traceId;
 };
 
+export const getActiveSpanId = (): string | undefined => {
+  return spanStorage.getStore()?.spanId;
+};
+
+export const runWithSpanContext = async <T>(
+  spanId: string,
+  fn: () => Promise<T>
+): Promise<T> => {
+  return spanStorage.run({ spanId }, fn);
+};
+
 export const ingestTraceCreate = async (
   context: TraceContext
 ): Promise<void> => {
@@ -104,6 +120,96 @@ export const ingestTraceCreate = async (
   await ingestBatch([event]);
 };
 
+export type SpanRecord = {
+  traceId?: string;
+  parentObservationId?: string;
+  name: string;
+  startTime?: string;
+  endTime?: string;
+  input?: unknown;
+  output?: unknown;
+  metadata?: Record<string, unknown>;
+  tags?: string[];
+};
+
+/**
+ * Create a span in Langfuse via ingestion API.
+ * Returns the span ID for use as parentObservationId in nested spans.
+ * Automatically nests under the current active span if no parent is specified.
+ */
+export const ingestSpanCreate = async (
+  record: SpanRecord
+): Promise<string | undefined> => {
+  if (!isIngestionEnabled()) return undefined;
+
+  const traceId = record.traceId ?? getActiveTraceId();
+
+  if (!traceId) {
+    // Cannot create a span without a trace
+    console.warn("[observability] Cannot create span without active trace");
+    return undefined;
+  }
+
+  // Auto-nest under current span if no parent specified
+  const parentSpanId = record.parentObservationId ?? getActiveSpanId();
+
+  const spanId = randomUUID();
+  const now = new Date().toISOString();
+  const event = {
+    type: "span-create",
+    id: randomUUID(),
+    timestamp: now,
+    body: {
+      id: spanId,
+      traceId,
+      parentObservationId: parentSpanId,
+      name: record.name,
+      startTime: record.startTime ?? now,
+      endTime: record.endTime,
+      input: record.input,
+      output: record.output,
+      metadata: record.metadata,
+      tags: record.tags,
+    },
+  };
+
+  try {
+    await ingestBatch([event]);
+  } catch (err) {
+    console.error("[observability] Failed to create span:", err);
+    return undefined;
+  }
+  return spanId;
+};
+
+/**
+ * Update a span in Langfuse via ingestion API.
+ */
+export const ingestSpanUpdate = async (
+  spanId: string,
+  update: Partial<Omit<SpanRecord, "traceId" | "parentObservationId">>
+): Promise<void> => {
+  if (!isIngestionEnabled()) return;
+
+  const traceId = getActiveTraceId();
+  if (!traceId) return;
+
+  const now = new Date().toISOString();
+  const event = {
+    type: "span-update",
+    id: randomUUID(),
+    timestamp: now,
+    body: {
+      id: spanId,
+      traceId,
+      ...update,
+      endTime: update.endTime ?? now,
+    },
+  };
+
+  await ingestBatch([event]);
+};
+
 export const recordGeneration = async (
   record: GenerationRecord
 ): Promise<void> => {
@@ -123,6 +229,9 @@ export const recordGeneration = async (
     });
   }
 
+  // Link generation to current span if available
+  const parentSpanId = getActiveSpanId();
+
   const now = new Date().toISOString();
   const event = {
     type: "generation-create",
@@ -131,6 +240,7 @@ export const recordGeneration = async (
     body: {
       id: randomUUID(),
       traceId,
+      parentObservationId: parentSpanId,
       name: record.name ?? record.model,
       startTime: record.startTime ?? now,
       endTime: record.endTime ?? now,

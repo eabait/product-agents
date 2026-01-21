@@ -36,6 +36,7 @@ export {
   initObservability,
   shutdownObservability,
   isObservabilityEnabled,
+  getObservabilityTransport,
 } from "./init.js";
 
 // Configuration
@@ -65,7 +66,16 @@ export {
 } from "./llm.js";
 
 // Ingestion helpers
-export { recordGeneration } from "./ingestion.js";
+export {
+  recordGeneration,
+  runWithTraceContext,
+  ingestSpanCreate,
+  ingestSpanUpdate,
+  getActiveTraceId,
+  getActiveSpanId,
+  runWithSpanContext,
+  type SpanRecord,
+} from "./ingestion.js";
 
 // Types
 export type {

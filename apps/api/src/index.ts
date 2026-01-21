@@ -10,7 +10,10 @@ import { expand as expandEnv } from 'dotenv-expand'
 import {
   initObservability,
   shutdownObservability,
-  withTrace
+  withTrace,
+  getObservabilityConfig,
+  isObservabilityEnabled,
+  runWithTraceContext
 } from '@product-agents/observability'
 
 import { createPrdController } from '@product-agents/prd-agent'
@@ -1087,13 +1090,39 @@ const server = http.createServer(async (req, res) => {
 
         // Resume execution with approved plan
         console.log(`[product-agent/api] calling controller.resumeSubagent for run ${runId}, step ${stepId}`)
-        controller.resumeSubagent(runId, stepId, approvedPlan, {
-          emit(event: ProgressEvent) {
-            console.log(`[product-agent/api] resumeSubagent emit: ${event.type}`, event.stepId ? `(step: ${event.stepId})` : '')
-            appendProgressEvent(runId, event)
-            broadcastEvent(runId, 'progress', event)
+        const resumeExecution = () =>
+          controller.resumeSubagent(runId, stepId, approvedPlan, {
+            emit(event: ProgressEvent) {
+              console.log(`[product-agent/api] resumeSubagent emit: ${event.type}`, event.stepId ? `(step: ${event.stepId})` : '')
+              appendProgressEvent(runId, event)
+              broadcastEvent(runId, 'progress', event)
+            }
+          })
+
+        const resumeWithTracing = () => {
+          if (!isObservabilityEnabled()) {
+            return resumeExecution()
           }
-        }).then((summary: ControllerRunSummary) => {
+          const transport = getObservabilityConfig().transport
+          if (transport === 'ingestion') {
+            return runWithTraceContext(runId, resumeExecution)
+          }
+          return withTrace(
+            {
+              runId,
+              artifactType: record.artifactType,
+              model: record.request.settings?.model,
+              metadata: {
+                approvalMode: record.approvalMode,
+                resumed: true,
+                stepId
+              }
+            },
+            resumeExecution
+          )
+        }
+
+        resumeWithTracing().then((summary: ControllerRunSummary) => {
           // Handle completion
           console.log(`[product-agent/api] resumeSubagent completed for run ${runId}`)
           console.log(`[product-agent/api]   - summary status: ${summary.status}`)

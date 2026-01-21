@@ -1,5 +1,14 @@
 import { randomUUID } from 'node:crypto'
 import { generateText } from 'ai'
+import {
+  withSpan,
+  createStepSpan,
+  createSubagentSpan,
+  createVerificationSpan,
+  getObservabilityTransport,
+  isObservabilityEnabled,
+  recordGeneration
+} from '@product-agents/observability'
 
 import type {
   AgentController,
@@ -55,6 +64,72 @@ const STATUS_RUNNING: RunStatus = 'running'
 const STATUS_FAILED: RunStatus = 'failed'
 const STATUS_COMPLETED: RunStatus = 'completed'
 const STATUS_AWAITING_INPUT: RunStatus = 'awaiting-input'
+
+const coerceNumber = (value: unknown): number | undefined => {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : undefined
+  }
+  if (typeof value === 'string') {
+    const parsed = parseFloat(value)
+    return Number.isFinite(parsed) ? parsed : undefined
+  }
+  return undefined
+}
+
+const normalizeUsage = (usage: unknown): { promptTokens?: number; completionTokens?: number; totalTokens?: number } | undefined => {
+  if (!usage || typeof usage !== 'object') {
+    return undefined
+  }
+  const payload = usage as Record<string, unknown>
+  const promptTokens = coerceNumber(
+    payload.promptTokens ??
+      payload.prompt_tokens ??
+      payload.inputTokens ??
+      payload.input_tokens ??
+      payload.inputTextTokens ??
+      payload.input_text_tokens
+  )
+  const completionTokens = coerceNumber(
+    payload.completionTokens ??
+      payload.completion_tokens ??
+      payload.outputTokens ??
+      payload.output_tokens ??
+      payload.outputTextTokens ??
+      payload.output_text_tokens
+  )
+  let totalTokens = coerceNumber(
+    payload.totalTokens ?? payload.total_tokens ?? payload.tokens ?? payload.token_count
+  )
+  if (totalTokens === undefined && (promptTokens !== undefined || completionTokens !== undefined)) {
+    totalTokens = (promptTokens ?? 0) + (completionTokens ?? 0)
+  }
+  if (promptTokens === undefined && completionTokens === undefined && totalTokens === undefined) {
+    return undefined
+  }
+  return { promptTokens, completionTokens, totalTokens }
+}
+
+const resolveModelId = (model: unknown): string | undefined => {
+  if (typeof model === 'string') {
+    return model
+  }
+  if (!model || typeof model !== 'object') {
+    return undefined
+  }
+  const candidate = (model as { modelId?: unknown; id?: unknown; modelName?: unknown })
+  const modelId =
+    (typeof candidate.modelId === 'string' && candidate.modelId) ||
+    (typeof candidate.id === 'string' && candidate.id) ||
+    (typeof candidate.modelName === 'string' && candidate.modelName) ||
+    undefined
+  return modelId
+}
+
+const isIngestionTelemetryEnabled = (): boolean =>
+  isObservabilityEnabled() && getObservabilityTransport() === 'ingestion'
+
+const isOtelTelemetryEnabled = (): boolean =>
+  isObservabilityEnabled() && getObservabilityTransport() === 'otel'
 
 const emitEvent = (options: ControllerStartOptions | undefined, event: ProgressEvent): void => {
   if (typeof options?.emit === 'function') {
@@ -537,7 +612,16 @@ export class GraphController implements AgentController {
     try {
       // eslint-disable-next-line no-console
       console.log(`[graph-controller] executing subagent ${lifecycle.metadata.id} for run ${runId}`)
-      const result = await lifecycle.execute(subagentRequest)
+      const result = await withSpan(
+        createSubagentSpan(lifecycle.metadata.id, lifecycle.metadata.artifactKind, {
+          nodeId: node.id,
+          stepId,
+          subagentId: lifecycle.metadata.id,
+          mode: 'resume',
+          runId
+        }),
+        async () => lifecycle.execute(subagentRequest)
+      )
       // eslint-disable-next-line no-console
       console.log(`[graph-controller] subagent ${lifecycle.metadata.id} execution completed for run ${runId}`)
       // eslint-disable-next-line no-console
@@ -696,72 +780,81 @@ export class GraphController implements AgentController {
     options?: ControllerStartOptions
   ): Promise<void> {
     const lifecycle = await this.getSubagentLifecycle(subagentId)
-    const sourceArtifact = this.resolveSubagentSourceArtifact(lifecycle, node, context)
 
-    emitEvent(
-      options,
-      toProgressEvent({
-        type: 'subagent.started',
-        runId: context.runContext.runId,
-        stepId: node.id,
-        payload: {
-          subagentId: lifecycle.metadata.id,
-          artifactKind: lifecycle.metadata.artifactKind,
-          label: lifecycle.metadata.label
-        },
-        message: `Starting ${lifecycle.metadata.label ?? lifecycle.metadata.id}`
-      })
-    )
+    return withSpan(
+      createSubagentSpan(subagentId, lifecycle.metadata.artifactKind, {
+        nodeId: node.id,
+        runId: context.runContext.runId
+      }),
+      async () => {
+        const sourceArtifact = this.resolveSubagentSourceArtifact(lifecycle, node, context)
 
-    const subagentRequest = {
-      params: node.inputs ?? {},
-      run: context.runContext,
-      sourceArtifact,
-      emit: (event: ProgressEvent) => {
         emitEvent(
           options,
           toProgressEvent({
-            type: 'subagent.progress',
+            type: 'subagent.started',
             runId: context.runContext.runId,
             stepId: node.id,
-            payload: { subagentId: lifecycle.metadata.id, event }
+            payload: {
+              subagentId: lifecycle.metadata.id,
+              artifactKind: lifecycle.metadata.artifactKind,
+              label: lifecycle.metadata.label
+            },
+            message: `Starting ${lifecycle.metadata.label ?? lifecycle.metadata.id}`
           })
         )
-      }
-    }
 
-    try {
-      const result = await lifecycle.execute(subagentRequest)
-      await this.handleSubagentToolResult({
-        result: {
-          status: 'completed',
-          nodeId: node.id,
-          subagentId: lifecycle.metadata.id,
-          artifact: result.artifact,
-          metadata: result.metadata
-        },
-        node,
-        lifecycle,
-        context,
-        options
-      })
-    } catch (error) {
-      context.status = STATUS_FAILED
-      emitEvent(
-        options,
-        toProgressEvent({
-          type: 'subagent.failed',
-          runId: context.runContext.runId,
-          stepId: node.id,
-          payload: {
-            subagentId: lifecycle.metadata.id,
-            error: error instanceof Error ? error.message : String(error)
-          },
-          message: `${lifecycle.metadata.label ?? lifecycle.metadata.id} failed`
-        })
-      )
-      throw error
-    }
+        const subagentRequest = {
+          params: node.inputs ?? {},
+          run: context.runContext,
+          sourceArtifact,
+          emit: (event: ProgressEvent) => {
+            emitEvent(
+              options,
+              toProgressEvent({
+                type: 'subagent.progress',
+                runId: context.runContext.runId,
+                stepId: node.id,
+                payload: { subagentId: lifecycle.metadata.id, event }
+              })
+            )
+          }
+        }
+
+        try {
+          const result = await lifecycle.execute(subagentRequest)
+          await this.handleSubagentToolResult({
+            result: {
+              status: 'completed',
+              nodeId: node.id,
+              subagentId: lifecycle.metadata.id,
+              artifact: result.artifact,
+              metadata: result.metadata
+            },
+            node,
+            lifecycle,
+            context,
+            options
+          })
+        } catch (error) {
+          context.status = STATUS_FAILED
+          emitEvent(
+            options,
+            toProgressEvent({
+              type: 'subagent.failed',
+              runId: context.runContext.runId,
+              stepId: node.id,
+              payload: {
+                subagentId: lifecycle.metadata.id,
+                error: error instanceof Error ? error.message : String(error)
+              },
+              message: `${lifecycle.metadata.label ?? lifecycle.metadata.id} failed`
+            })
+          )
+          throw error
+        }
+      }
+    )
   }
 
   /**
@@ -772,53 +865,61 @@ export class GraphController implements AgentController {
     context: ExecutionContext,
     options?: ControllerStartOptions
   ): Promise<void> {
-    const apiKey = this.resolveApiKey(context.runContext)
-    const hasApiKey = typeof apiKey === 'string' && apiKey.trim().length > 0
-    const provider = this.providerFactory(apiKey)
-    const toolName = `node_${node.id}`
+    return withSpan(
+      createStepSpan(node.id, node.label, {
+        skillId: node.metadata?.skillId,
+        runId: context.runContext.runId
+      }),
+      async () => {
+        const apiKey = this.resolveApiKey(context.runContext)
+        const hasApiKey = typeof apiKey === 'string' && apiKey.trim().length > 0
+        const provider = this.providerFactory(apiKey)
+        const toolName = `node_${node.id}`
 
-    // Use skillsModel for skill nodes if configured, otherwise use default model (same as executePlanWithAiTools)
-    const modelToUse = this.config.runtime.skillsModel
-      ? this.config.runtime.skillsModel
-      : context.runContext.settings.model
-    const model = hasApiKey ? resolveOpenRouterModel(provider, this.config, modelToUse) : undefined
+        // Use skillsModel for skill nodes if configured, otherwise use default model (same as executePlanWithAiTools)
+        const modelToUse = this.config.runtime.skillsModel
+          ? this.config.runtime.skillsModel
+          : context.runContext.settings.model
+        const model = hasApiKey ? resolveOpenRouterModel(provider, this.config, modelToUse) : undefined
 
-    const skillTool = createSkillTool({
-      node,
-      runContext: context.runContext,
-      skillRunner: this.skillRunner
-    })
-
-    try {
-      const result = await this.invokeToolWithModel({
-        toolName,
-        tool: skillTool,
-        model,
-        node,
-        context,
-        options,
-        hasApiKey
-      })
-      await this.handleSkillToolResult({
-        result,
-        node,
-        stepId: node.id,
-        context,
-        options
-      })
-    } catch (error) {
-      context.status = STATUS_FAILED
-      emitEvent(
-        options,
-        toProgressEvent({
-          type: 'step.failed',
-          runId: context.runContext.runId,
-          stepId: node.id,
-          payload: { error: error instanceof Error ? error.message : String(error) }
+        const skillTool = createSkillTool({
+          node,
+          runContext: context.runContext,
+          skillRunner: this.skillRunner
         })
-      )
-      throw error
-    }
+
+        try {
+          const result = await this.invokeToolWithModel({
+            toolName,
+            tool: skillTool,
+            model,
+            node,
+            context,
+            options,
+            hasApiKey
+          })
+          await this.handleSkillToolResult({
+            result,
+            node,
+            stepId: node.id,
+            context,
+            options
+          })
+        } catch (error) {
+          context.status = STATUS_FAILED
+          emitEvent(
+            options,
+            toProgressEvent({
+              type: 'step.failed',
+              runId: context.runContext.runId,
+              stepId: node.id,
+              payload: { error: error instanceof Error ? error.message : String(error) }
+            })
+          )
+          throw error
+        }
+      }
+    )
   }
 
   private resolveApiKey(runContext: RunContext): string | undefined {
@@ -860,6 +961,22 @@ export class GraphController implements AgentController {
     for (const stepId of orderedSteps) {
       const node = context.plan.nodes[stepId]
       const nodeKind = this.getPlanNodeKind(node)
+      const task = node.task as { agentId?: string; subagentId?: string } | undefined
+      const subagentId =
+        nodeKind === 'subagent'
+          ? task?.agentId ?? task?.subagentId ?? (node.metadata?.subagentId as string | undefined)
+          : undefined
+      const spanInput: Record<string, unknown> = {
+        nodeId: node.id,
+        nodeKind,
+        runId: context.runContext.runId
+      }
+      if (node.metadata?.skillId) {
+        spanInput.skillId = node.metadata.skillId
+      }
+      if (subagentId) {
+        spanInput.subagentId = subagentId
+      }
 
       // Use skillsModel for skill nodes if configured, otherwise use default model
       const modelToUse = nodeKind === 'skill' && this.config.runtime.skillsModel
@@ -871,94 +988,126 @@ export class GraphController implements AgentController {
         : undefined
       const toolName = `node_${node.id}`
 
-      emitEvent(
-        options,
-        toProgressEvent({
-          type: 'step.started',
-          runId: context.runContext.runId,
-          stepId,
-          message: node.label
-        })
-      )
-
-      if (nodeKind === 'skill') {
-        await this.workspace.appendEvent(
-          context.runContext.runId,
-          createWorkspaceEvent(context.runContext.runId, 'skill', {
-            action: 'start',
-            stepId,
-            label: node.label
-          })
-        )
-      }
-
-      let lifecycle: SubagentLifecycle | undefined
-      if (nodeKind === 'subagent') {
-        const task = node.task as { agentId?: string; subagentId?: string } | undefined
-        const subagentId =
-          task?.agentId ?? task?.subagentId ?? (node.metadata?.subagentId as string | undefined)
-        if (!subagentId) {
-          throw new Error(`Subagent node "${node.id}" is missing a subagentId`)
-        }
-        lifecycle = await this.getSubagentLifecycle(subagentId)
-
+      let shouldStop = false
+      await withSpan(createStepSpan(node.id, node.label, spanInput), async () => {
         emitEvent(
           options,
           toProgressEvent({
-            type: 'subagent.started',
+            type: 'step.started',
             runId: context.runContext.runId,
-            stepId: node.id,
-            payload: {
+            stepId,
+            message: node.label
+          })
+        )
+
+        if (nodeKind === 'skill') {
+          await this.workspace.appendEvent(
+            context.runContext.runId,
+            createWorkspaceEvent(context.runContext.runId, 'skill', {
+              action: 'start',
+              stepId,
+              label: node.label
+            })
+          )
+        }
+
+        let lifecycle: SubagentLifecycle | undefined
+        if (nodeKind === 'subagent') {
+          if (!subagentId) {
+            throw new Error(`Subagent node "${node.id}" is missing a subagentId`)
+          }
+          lifecycle = await this.getSubagentLifecycle(subagentId)
+
+          emitEvent(
+            options,
+            toProgressEvent({
+              type: 'subagent.started',
+              runId: context.runContext.runId,
+              stepId: node.id,
+              payload: {
+                subagentId,
+                artifactKind: lifecycle.metadata.artifactKind,
+                label: lifecycle.metadata.label
+              },
+              message: `${lifecycle.metadata.label ?? subagentId} started`
+            })
+          )
+
+          await this.workspace.appendEvent(
+            context.runContext.runId,
+            createWorkspaceEvent(context.runContext.runId, 'subagent', {
+              action: 'start',
+              stepId: node.id,
               subagentId,
-              artifactKind: lifecycle.metadata.artifactKind,
-              label: lifecycle.metadata.label
-            },
-            message: `${lifecycle.metadata.label ?? subagentId} started`
-          })
-        )
-
-        await this.workspace.appendEvent(
-          context.runContext.runId,
-          createWorkspaceEvent(context.runContext.runId, 'subagent', {
-            action: 'start',
-            stepId: node.id,
-            subagentId,
-            artifactKind: lifecycle.metadata.artifactKind
-          })
-        )
-      }
-
-      const tool =
-        nodeKind === 'subagent' && lifecycle
-          ? createSubagentTool({
-              node,
-              runContext: context.runContext,
-              resolveLifecycle: async () => lifecycle as SubagentLifecycle,
-              resolveSourceArtifact: lc => this.resolveSubagentSourceArtifact(lc, node, context),
-              emitProgress: event =>
-                emitEvent(
-                  options,
-                  toProgressEvent({
-                    type: 'subagent.progress',
-                    runId: context.runContext.runId,
-                    payload: {
-                      subagentId: lifecycle?.metadata.id,
-                      event
-                    }
-                  })
-                )
+              artifactKind: lifecycle.metadata.artifactKind
             })
-          : createSkillTool({
-              node,
-              runContext: context.runContext,
-              skillRunner: this.skillRunner
-            })
+          )
+        }
 
-      try {
-        // For subagents, use direct execution to avoid tool choice issues
-        const toolResult = nodeKind === 'subagent'
-          ? await this.invokeToolDirectly(tool, node, context, options)
-          : await this.invokeToolWithModel({
+        const tool =
+          nodeKind === 'subagent' && lifecycle
+            ? createSubagentTool({
+                node,
+                runContext: context.runContext,
+                resolveLifecycle: async () => lifecycle as SubagentLifecycle,
+                resolveSourceArtifact: lc => this.resolveSubagentSourceArtifact(lc, node, context),
+                emitProgress: event =>
+                  emitEvent(
+                    options,
+                    toProgressEvent({
+                      type: 'subagent.progress',
+                      runId: context.runContext.runId,
+                      payload: {
+                        subagentId: lifecycle?.metadata.id,
+                        event
+                      }
+                    })
+                  )
+              })
+            : createSkillTool({
+                node,
+                runContext: context.runContext,
+                skillRunner: this.skillRunner
+              })
+
+        try {
+          if (nodeKind === 'subagent') {
+            const executeSubagent = async () => {
+              const toolResult = await this.invokeToolDirectly(tool, node, context, options)
+              await this.handleSubagentToolResult({
+                result: toolResult,
+                node,
+                lifecycle: lifecycle as SubagentLifecycle,
+                context,
+                options
+              })
+              // Check if subagent is blocked on approval - stop execution if so
+              if (context.status === STATUS_AWAITING_INPUT) {
+                shouldStop = true
+              }
+            }
+
+            const subagentSpanInput = {
+              nodeId: node.id,
+              stepId,
+              subagentId,
+              mode: 'plan',
+              runId: context.runContext.runId
+            }
+            await withSpan(
+              createSubagentSpan(
+                subagentId ?? 'unknown',
+                lifecycle?.metadata.artifactKind ?? 'unknown',
+                subagentSpanInput
+              ),
+              executeSubagent
+            )
+
+            if (shouldStop) {
+              return
+            }
+          } else {
+            const toolResult = await this.invokeToolWithModel({
               toolName,
               tool,
               model,
@@ -968,86 +1117,79 @@ export class GraphController implements AgentController {
               hasApiKey
             })
 
-        if (nodeKind === 'subagent') {
-          await this.handleSubagentToolResult({
-            result: toolResult,
-            node,
-            lifecycle: lifecycle as SubagentLifecycle,
-            context,
-            options
-          })
-          // Check if subagent is blocked on approval - stop execution if so
-          if (context.status === STATUS_AWAITING_INPUT) {
-            break
-          }
-        } else {
-          await this.handleSkillToolResult({
-            result: toolResult,
-            node,
-            stepId,
-            context,
-            options
-          })
-          if (context.status === STATUS_AWAITING_INPUT) {
-            break
-          }
-        }
-      } catch (error) {
-        emitEvent(
-          options,
-          toProgressEvent({
-            type: 'step.failed',
-            runId: context.runContext.runId,
-            stepId,
-            message: error instanceof Error ? error.message : 'Step failed'
-          })
-        )
-
-        if (nodeKind === 'subagent' && lifecycle) {
-          const message = error instanceof Error ? error.message : String(error)
-          await this.workspace.appendEvent(
-            context.runContext.runId,
-            createWorkspaceEvent(context.runContext.runId, 'subagent', {
-              action: 'failed',
+            await this.handleSkillToolResult({
+              result: toolResult,
+              node,
               stepId,
-              subagentId: lifecycle.metadata.id,
-              error: message
+              context,
+              options
             })
-          )
-
-          const subagentId = lifecycle.metadata.id
-          this.recordSubagentFailureMetadata(
-            context,
-            subagentId,
-            message,
-            'plan'
-          )
-
+            if (context.status === STATUS_AWAITING_INPUT) {
+              shouldStop = true
+              return
+            }
+          }
+        } catch (error) {
           emitEvent(
             options,
             toProgressEvent({
-              type: 'subagent.failed',
+              type: 'step.failed',
               runId: context.runContext.runId,
               stepId,
-              payload: {
-                subagentId,
-                error: message
-              },
-              message
+              message: error instanceof Error ? error.message : 'Step failed'
             })
           )
-        } else {
-          await this.workspace.appendEvent(
-            context.runContext.runId,
-            createWorkspaceEvent(context.runContext.runId, 'skill', {
-              action: 'failed',
-              stepId,
-              error: error instanceof Error ? error.message : String(error)
-            })
-          )
-        }
 
-        throw error
+          if (nodeKind === 'subagent' && lifecycle) {
+            const message = error instanceof Error ? error.message : String(error)
+            await this.workspace.appendEvent(
+              context.runContext.runId,
+              createWorkspaceEvent(context.runContext.runId, 'subagent', {
+                action: 'failed',
+                stepId,
+                subagentId: lifecycle.metadata.id,
+                error: message
+              })
+            )
+
+            const lifecycleSubagentId = lifecycle.metadata.id
+            this.recordSubagentFailureMetadata(
+              context,
+              lifecycleSubagentId,
+              message,
+              'plan'
+            )
+
+            emitEvent(
+              options,
+              toProgressEvent({
+                type: 'subagent.failed',
+                runId: context.runContext.runId,
+                stepId,
+                payload: {
+                  subagentId: lifecycleSubagentId,
+                  error: message
+                },
+                message
+              })
+            )
+          } else {
+            await this.workspace.appendEvent(
+              context.runContext.runId,
+              createWorkspaceEvent(context.runContext.runId, 'skill', {
+                action: 'failed',
+                stepId,
+                error: error instanceof Error ? error.message : String(error)
+              })
+            )
+          }
+
+          throw error
+        }
+      })
+
+      if (shouldStop) {
+        break
       }
     }
   }
@@ -1066,19 +1208,30 @@ export class GraphController implements AgentController {
     }
 
     try {
+      const telemetryEnabled = isOtelTelemetryEnabled()
+      const modelId = resolveModelId(params.model) ?? params.context.runContext.settings.model
+      const maxTokens = Math.min(params.context.runContext.settings.maxOutputTokens ?? 8000, 2048)
+      const systemPrompt = this.buildToolSystemPrompt(params.context)
+      const userPrompt = this.buildToolPrompt(params.context, params.node)
+      const startTime = new Date().toISOString()
       const response = await this.toolInvoker({
         model: params.model as any,
-        system: this.buildToolSystemPrompt(params.context),
-        prompt: this.buildToolPrompt(params.context, params.node),
+        system: systemPrompt,
+        prompt: userPrompt,
         tools: {
           [params.toolName]: params.tool as any
         },
         toolChoice: 'required',
-        maxTokens: Math.min(params.context.runContext.settings.maxOutputTokens ?? 8000, 2048),
+        maxTokens,
         temperature: params.context.runContext.settings.temperature,
         maxRetries: this.config.runtime.retry.attempts,
-        abortSignal: params.options?.signal
+        abortSignal: params.options?.signal,
+        experimental_telemetry: {
+          isEnabled: telemetryEnabled,
+          ...(modelId ? { metadata: { modelId } } : {})
+        }
       })
+      const endTime = new Date().toISOString()
 
       const toolResult =
         (response as any).toolResults?.[0]?.result ??
@@ -1086,6 +1239,35 @@ export class GraphController implements AgentController {
         (response as any).toolResults?.[0]
       if (!toolResult) {
         throw new Error(`Tool "${params.toolName}" did not return a result`)
+      }
+
+      if (isIngestionTelemetryEnabled()) {
+        const usage = normalizeUsage((response as any).usage)
+        void recordGeneration({
+          name: `tool.invoke:${params.toolName}`,
+          model: modelId ?? 'unknown',
+          input: {
+            system: systemPrompt,
+            prompt: userPrompt,
+            toolName: params.toolName,
+            toolChoice: 'required'
+          },
+          output: {
+            text: (response as any).text,
+            toolResults: (response as any).toolResults
+          },
+          startTime,
+          endTime,
+          usage,
+          modelParameters: {
+            temperature: params.context.runContext.settings.temperature,
+            maxTokens
+          },
+          metadata: {
+            runId: params.context.runContext.runId,
+            stepId: params.node.id
+          }
+        })
       }
 
       return toolResult as ToolExecutionResult
@@ -1408,88 +1590,96 @@ export class GraphController implements AgentController {
       return undefined
     }
 
-    emitEvent(
-      options,
-      toProgressEvent({
-        type: 'verification.started',
+    return withSpan(
+      createVerificationSpan({
+        artifactKind: context.artifact.kind,
         runId: context.runContext.runId
-      })
-    )
+      }),
+      async () => {
+        emitEvent(
+          options,
+          toProgressEvent({
+            type: 'verification.started',
+            runId: context.runContext.runId
+          })
+        )
 
-    const verifiers = this.verifierGroup
-    const primaryResult = await primaryVerifier.verify({
-      artifact: context.artifact,
-      context: context.runContext
-    })
-
-    const secondaryResults: VerificationResult[] = []
-    if (verifiers.secondary?.length) {
-      for (const verifier of verifiers.secondary) {
-        const result = await verifier.verify({
-          artifact: primaryResult.artifact,
+        const verifiers = this.verifierGroup
+        const primaryResult = await primaryVerifier.verify({
+          artifact: context.artifact!,
           context: context.runContext
         })
-        secondaryResults.push(result)
-      }
-    }
 
-    const allResults = [primaryResult, ...secondaryResults]
-    const finalArtifact = allResults.reduce<Artifact | undefined>(
-      (latest, result) => result.artifact ?? latest,
-      primaryResult.artifact
-    )
-    const combinedIssues = allResults.flatMap(result => result.issues ?? [])
-
-    const statusOrder: Record<VerificationResult['status'], number> = {
-      fail: 3,
-      'needs-review': 2,
-      pass: 1
-    }
-
-    const finalStatus = allResults.reduce<VerificationResult['status']>(
-      (current, result) =>
-        statusOrder[result.status] > statusOrder[current] ? result.status : current,
-      primaryResult.status
-    )
-
-    const metadata = {
-      primary: primaryResult.metadata,
-      secondary: secondaryResults.map(result => ({
-        status: result.status,
-        metadata: result.metadata,
-        issues: result.issues
-      }))
-    }
-
-    const aggregatedResult: VerificationResult = {
-      status: finalStatus,
-      artifact: finalArtifact ?? context.artifact,
-      issues: combinedIssues,
-      usage: primaryResult.usage,
-      metadata
-    }
-
-    emitEvent(
-      options,
-      toProgressEvent({
-        type: 'verification.completed',
-        runId: context.runContext.runId,
-        payload: {
-          status: aggregatedResult.status,
-          issues: aggregatedResult.issues
+        const secondaryResults: VerificationResult[] = []
+        if (verifiers.secondary?.length) {
+          for (const verifier of verifiers.secondary) {
+            const result = await verifier.verify({
+              artifact: primaryResult.artifact,
+              context: context.runContext
+            })
+            secondaryResults.push(result)
+          }
         }
-      })
-    )
 
-    await this.workspace.appendEvent(
-      context.runContext.runId,
-      createWorkspaceEvent(context.runContext.runId, 'verification', {
-        status: aggregatedResult.status,
-        issues: aggregatedResult.issues
-      })
-    )
+        const allResults = [primaryResult, ...secondaryResults]
+        const finalArtifact = allResults.reduce<Artifact | undefined>(
+          (latest, result) => result.artifact ?? latest,
+          primaryResult.artifact
+        )
+        const combinedIssues = allResults.flatMap(result => result.issues ?? [])
 
-    return aggregatedResult
+        const statusOrder: Record<VerificationResult['status'], number> = {
+          fail: 3,
+          'needs-review': 2,
+          pass: 1
+        }
+
+        const finalStatus = allResults.reduce<VerificationResult['status']>(
+          (current, result) =>
+            statusOrder[result.status] > statusOrder[current] ? result.status : current,
+          primaryResult.status
+        )
+
+        const metadata = {
+          primary: primaryResult.metadata,
+          secondary: secondaryResults.map(result => ({
+            status: result.status,
+            metadata: result.metadata,
+            issues: result.issues
+          }))
+        }
+
+        const aggregatedResult: VerificationResult = {
+          status: finalStatus,
+          artifact: finalArtifact ?? context.artifact!,
+          issues: combinedIssues,
+          usage: primaryResult.usage,
+          metadata
+        }
+
+        emitEvent(
+          options,
+          toProgressEvent({
+            type: 'verification.completed',
+            runId: context.runContext.runId,
+            payload: {
+              status: aggregatedResult.status,
+              issues: aggregatedResult.issues
+            }
+          })
+        )
+
+        await this.workspace.appendEvent(
+          context.runContext.runId,
+          createWorkspaceEvent(context.runContext.runId, 'verification', {
+            status: aggregatedResult.status,
+            issues: aggregatedResult.issues
+          })
+        )
+
+        return aggregatedResult
+      }
+    )
   }
 
   private trackArtifactForContext(stepId: StepId, artifact: Artifact, context: ExecutionContext) {
@@ -1759,124 +1949,143 @@ export class GraphController implements AgentController {
         continue
       }
 
-      emitEvent(
-        options,
-        toProgressEvent({
-          type: 'subagent.started',
-          runId,
-          payload: {
-            subagentId: subagent.metadata.id,
-            artifactKind: subagent.metadata.artifactKind,
-            label: subagent.metadata.label
-          },
-          message: `${subagent.metadata.label ?? subagent.metadata.id} started`
-        })
-      )
-
-      await this.workspace.appendEvent(
-        runId,
-        createWorkspaceEvent(runId, 'subagent', {
-          action: 'start',
-          subagentId: subagent.metadata.id,
-          artifactKind: subagent.metadata.artifactKind
-        })
-      )
+      const spanInput = {
+        subagentId: subagent.metadata.id,
+        artifactKind: subagent.metadata.artifactKind,
+        mode: 'auto',
+        runId: context.runContext.runId
+      }
 
       try {
-        // Extract context payload and research-specific parameters from the run request
-        const requestInput = context.runContext.request.input as SectionRoutingRequest | undefined
-        const contextPayload = requestInput?.context?.contextPayload as Record<string, unknown> | undefined
-
-        // Build params for the subagent, including any parameters from contextPayload
-        const subagentParams = contextPayload ?? {}
-
-        const result = await subagent.execute({
-          params: subagentParams,
-          run: context.runContext,
-          sourceArtifact: context.artifact,
-          emit: event =>
+        await withSpan(
+          createSubagentSpan(subagent.metadata.id, subagent.metadata.artifactKind, spanInput),
+          async () => {
             emitEvent(
               options,
               toProgressEvent({
-                type: 'subagent.progress',
+                type: 'subagent.started',
                 runId,
                 payload: {
                   subagentId: subagent.metadata.id,
-                  event
-                }
+                  artifactKind: subagent.metadata.artifactKind,
+                  label: subagent.metadata.label
+                },
+                message: `${subagent.metadata.label ?? subagent.metadata.id} started`
               })
             )
-        })
 
-        await this.workspace.writeArtifact(runId, result.artifact)
-        const syntheticStepId = (`subagent-auto-${subagent.metadata.id}-${context.subagentResults.length + 1}`) as StepId
-        this.trackArtifactForContext(syntheticStepId, result.artifact, context)
+            await this.workspace.appendEvent(
+              runId,
+              createWorkspaceEvent(runId, 'subagent', {
+                action: 'start',
+                subagentId: subagent.metadata.id,
+                artifactKind: subagent.metadata.artifactKind
+              })
+            )
 
-        context.subagentResults.push({
-          subagentId: subagent.metadata.id,
-          artifact: result.artifact,
-          metadata: result.metadata
-        })
+            try {
+              // Extract context payload and research-specific parameters from the run request
+              const requestInput = context.runContext.request.input as SectionRoutingRequest | undefined
+              const contextPayload = requestInput?.context?.contextPayload as Record<string, unknown> | undefined
 
-        this.recordSubagentArtifactMetadata(
-          context,
-          subagent.metadata.id,
-          result.artifact,
-          result.metadata
+              // Build params for the subagent, including any parameters from contextPayload
+              const subagentParams = contextPayload ?? {}
+
+              const result = await subagent.execute({
+                params: subagentParams,
+                run: context.runContext,
+                sourceArtifact: context.artifact,
+                emit: event =>
+                  emitEvent(
+                    options,
+                    toProgressEvent({
+                      type: 'subagent.progress',
+                      runId,
+                      payload: {
+                        subagentId: subagent.metadata.id,
+                        event
+                      }
+                    })
+                  )
+              })
+
+              await this.workspace.writeArtifact(runId, result.artifact)
+              const syntheticStepId = (`subagent-auto-${subagent.metadata.id}-${context.subagentResults.length + 1}`) as StepId
+              this.trackArtifactForContext(syntheticStepId, result.artifact, context)
+
+              context.subagentResults.push({
+                subagentId: subagent.metadata.id,
+                artifact: result.artifact,
+                metadata: result.metadata
+              })
+
+              this.recordSubagentArtifactMetadata(
+                context,
+                subagent.metadata.id,
+                result.artifact,
+                result.metadata
+              )
+              executedSubagents.add(subagent.metadata.id)
+
+              await this.workspace.appendEvent(
+                runId,
+                createWorkspaceEvent(runId, 'subagent', {
+                  action: 'complete',
+                  subagentId: subagent.metadata.id,
+                  artifactId: result.artifact.id,
+                  artifactKind: result.artifact.kind
+                })
+              )
+
+              emitEvent(
+                options,
+                toProgressEvent({
+                  type: 'subagent.completed',
+                  runId,
+                  payload: {
+                    subagentId: subagent.metadata.id,
+                    artifactId: result.artifact.id,
+                    artifactKind: result.artifact.kind
+                  },
+                  message: `${subagent.metadata.label ?? subagent.metadata.id} completed`
+                })
+              )
+            } catch (error) {
+              await this.workspace.appendEvent(
+                runId,
+                createWorkspaceEvent(runId, 'subagent', {
+                  action: 'failed',
+                  subagentId: subagent.metadata.id,
+                  error: error instanceof Error ? error.message : String(error)
+                })
+              )
+
+              emitEvent(
+                options,
+                toProgressEvent({
+                  type: 'subagent.failed',
+                  runId,
+                  payload: {
+                    subagentId: subagent.metadata.id,
+                    error: error instanceof Error ? error.message : String(error)
+                  },
+                  message: error instanceof Error ? error.message : 'Subagent failed'
+                })
+              )
+
+              this.recordSubagentFailureMetadata(
+                context,
+                subagent.metadata.id,
+                error instanceof Error ? error.message : String(error)
+              )
+              throw error
+            }
+          }
         )
-        executedSubagents.add(subagent.metadata.id)
-
-        await this.workspace.appendEvent(
-          runId,
-          createWorkspaceEvent(runId, 'subagent', {
-            action: 'complete',
-            subagentId: subagent.metadata.id,
-            artifactId: result.artifact.id,
-            artifactKind: result.artifact.kind
-          })
-        )
-
-        emitEvent(
-          options,
-          toProgressEvent({
-            type: 'subagent.completed',
-            runId,
-            payload: {
-              subagentId: subagent.metadata.id,
-              artifactId: result.artifact.id,
-              artifactKind: result.artifact.kind
-            },
-            message: `${subagent.metadata.label ?? subagent.metadata.id} completed`
-          })
-        )
-      } catch (error) {
-        await this.workspace.appendEvent(
-          runId,
-          createWorkspaceEvent(runId, 'subagent', {
-            action: 'failed',
-            subagentId: subagent.metadata.id,
-            error: error instanceof Error ? error.message : String(error)
-          })
-        )
-
-        emitEvent(
-          options,
-          toProgressEvent({
-            type: 'subagent.failed',
-            runId,
-            payload: {
-              subagentId: subagent.metadata.id,
-              error: error instanceof Error ? error.message : String(error)
-            },
-            message: error instanceof Error ? error.message : 'Subagent failed'
-          })
-        )
-
-        this.recordSubagentFailureMetadata(
-          context,
-          subagent.metadata.id,
-          error instanceof Error ? error.message : String(error)
-        )
+      } catch (err) {
+        // Log but continue running remaining subagents
+        // eslint-disable-next-line no-console
+        console.error(`[graph-controller] subagent span failed for ${subagent.metadata.id}:`, err)
       }
     }
   }
