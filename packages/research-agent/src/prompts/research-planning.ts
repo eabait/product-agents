@@ -37,7 +37,7 @@ Research Request: "${input.query}"
 
 ${constraintsText ? `Constraints:\n${constraintsText}\n` : ''}
 ${focusAreasText}
-Research Depth: ${input.depth} (quick = 2-3 steps, standard = 4-5 steps, deep = 6-8 steps)
+Research Depth: ${input.depth} (quick = 2 steps, standard = 3-4 steps, deep = 4-5 steps)
 ${contextText}
 
 Analyze this request and provide:
@@ -61,10 +61,12 @@ export function createGeneratePlanPrompt(
     suggestedStepTypes: string[]
   }
 ): string {
+  // Optimized depth config: fewer steps and queries for better performance
+  // while maintaining research quality through better query targeting
   const depthConfig = {
-    quick: { minSteps: 2, maxSteps: 3, queriesPerStep: 2 },
-    standard: { minSteps: 4, maxSteps: 5, queriesPerStep: 3 },
-    deep: { minSteps: 6, maxSteps: 8, queriesPerStep: 4 }
+    quick: { minSteps: 2, maxSteps: 2, queriesPerStep: 2 },
+    standard: { minSteps: 3, maxSteps: 4, queriesPerStep: 2 },
+    deep: { minSteps: 4, maxSteps: 5, queriesPerStep: 3 }
   }
 
   const config = depthConfig[input.depth]

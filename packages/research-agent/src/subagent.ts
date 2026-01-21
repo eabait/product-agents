@@ -37,6 +37,9 @@ export const researchAgentManifest: SubagentManifest = {
 const STATUS_AWAITING_PLAN_CONFIRMATION = 'awaiting-plan-confirmation'
 const STATUS_AWAITING_CLARIFICATION = 'awaiting-clarification'
 
+// Default concurrency for parallel Tavily queries (conservative to avoid rate limits)
+const DEFAULT_QUERY_CONCURRENCY = 5
+
 export interface CreateResearchAgentOptions {
   settings?: AgentSettings
   tavilyApiKey?: string
@@ -334,8 +337,15 @@ export const createResearchAgentSubagent = (
             )
           )
 
+          // Read concurrency limit from env or use default
+          const queryConcurrencyLimit = parseInt(
+            process.env.TAVILY_CONCURRENCY_LIMIT ?? String(DEFAULT_QUERY_CONCURRENCY),
+            10
+          )
+
           const executionResults: ResearchExecutionResult = await executor.execute(plan, {
             maxTotalSources: params.maxSources ?? 20,
+            queryConcurrencyLimit,
             runId,
             onStepStarted: step => {
               emit(

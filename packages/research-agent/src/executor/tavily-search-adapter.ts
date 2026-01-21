@@ -37,7 +37,7 @@ export class TavilySearchAdapter implements WebSearchAdapter {
       return []
     }
 
-    const executeSearch = async () => {
+    const executeSearch = async (): Promise<WebSearchResult[]> => {
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), this.timeout)
 
@@ -88,6 +88,7 @@ export class TavilySearchAdapter implements WebSearchAdapter {
       }
     }
 
+    // Execute search with span wrapping - span output includes metadata summary
     return withSpan(
       createSkillSpan('tavily.search', {
         query: query.trim(),

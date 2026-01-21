@@ -1,6 +1,40 @@
 import type { ResearchPlan, ResearchStep } from '../contracts/research-plan'
 import type { WebSearchAdapter, WebSearchResult } from './web-search-types'
 
+// Default concurrency limit for parallel searches (conservative to avoid rate limits)
+const DEFAULT_CONCURRENCY_LIMIT = 5
+
+/**
+ * Execute promises with concurrency control
+ */
+async function executeWithConcurrency<T>(
+  tasks: (() => Promise<T>)[],
+  concurrencyLimit: number
+): Promise<PromiseSettledResult<T>[]> {
+  const results: PromiseSettledResult<T>[] = new Array(tasks.length)
+  let currentIndex = 0
+
+  async function runNext(): Promise<void> {
+    while (currentIndex < tasks.length) {
+      const index = currentIndex++
+      try {
+        const value = await tasks[index]()
+        results[index] = { status: 'fulfilled', value }
+      } catch (reason) {
+        results[index] = { status: 'rejected', reason }
+      }
+    }
+  }
+
+  // Start workers up to the concurrency limit
+  const workers = Array(Math.min(concurrencyLimit, tasks.length))
+    .fill(null)
+    .map(() => runNext())
+
+  await Promise.all(workers)
+  return results
+}
+
 export interface StepExecutionResult {
   stepId: string
   stepType: string
@@ -22,6 +56,8 @@ export interface ResearchExecutionResult {
 export interface ExecutionOptions {
   maxSourcesPerStep?: number
   maxTotalSources?: number
+  /** Concurrency limit for parallel query execution within a step (default: 5) */
+  queryConcurrencyLimit?: number
   runId?: string
   traceId?: string
   onStepStarted?: (step: ResearchStep) => void
@@ -66,6 +102,7 @@ export class ResearchExecutor {
 
       const stepResult = await this.executeStep(step, {
         maxSources: maxForThisStep,
+        concurrencyLimit: options?.queryConcurrencyLimit ?? DEFAULT_CONCURRENCY_LIMIT,
         runId: options?.runId,
         traceId: options?.traceId,
         onProgress: (progress, sourcesFound) => {
@@ -98,6 +135,7 @@ export class ResearchExecutor {
     step: ResearchStep,
     options: {
       maxSources: number
+      concurrencyLimit: number
       runId?: string
       traceId?: string
       onProgress?: (progress: number, sourcesFound: number) => void
@@ -106,34 +144,44 @@ export class ResearchExecutor {
     const startTime = Date.now()
     const queries = step.queries.length > 0 ? step.queries : [step.label]
     const sourcesPerQuery = Math.ceil(options.maxSources / queries.length)
+    const queriesExecuted: string[] = [...queries]
 
+    // Create search tasks for parallel execution
+    const searchTasks = queries.map((query, i) => async () => {
+      const results = await this.webSearch.search(query, {
+        maxResults: sourcesPerQuery,
+        searchDepth: 'advanced',
+        runId: options.runId,
+        traceId: options.traceId,
+        stepId: step.id,
+        stepLabel: step.label,
+        stepType: step.type,
+        queryIndex: i,
+        queryCount: queries.length
+      })
+      return { query, results, index: i }
+    })
+
+    // Execute searches in parallel with concurrency control
+    const settledResults = await executeWithConcurrency(
+      searchTasks,
+      options.concurrencyLimit
+    )
+
+    // Collect results and track progress
     const allStepSources: WebSearchResult[] = []
-    const queriesExecuted: string[] = []
+    let completedCount = 0
 
-    for (let i = 0; i < queries.length; i++) {
-      const query = queries[i]
-      queriesExecuted.push(query)
-
-      try {
-        const results = await this.webSearch.search(query, {
-          maxResults: sourcesPerQuery,
-          searchDepth: 'advanced',
-          runId: options.runId,
-          traceId: options.traceId,
-          stepId: step.id,
-          stepLabel: step.label,
-          stepType: step.type,
-          queryIndex: i,
-          queryCount: queries.length
-        })
-
-        allStepSources.push(...results)
-
-        const progress = Math.round(((i + 1) / queries.length) * 100)
-        options.onProgress?.(progress, allStepSources.length)
-      } catch (error) {
-        console.error(`Search failed for query "${query}":`, error)
+    for (const result of settledResults) {
+      completedCount++
+      if (result.status === 'fulfilled') {
+        allStepSources.push(...result.value.results)
+      } else {
+        console.error(`Search failed:`, result.reason)
       }
+
+      const progress = Math.round((completedCount / queries.length) * 100)
+      options.onProgress?.(progress, allStepSources.length)
     }
 
     const uniqueSources = this.deduplicateSources(allStepSources)
