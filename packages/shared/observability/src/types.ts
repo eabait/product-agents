@@ -2,7 +2,7 @@
  * Types for the observability package
  */
 
-export type SpanType = "step" | "subagent" | "skill" | "verification" | "plan";
+export type SpanType = "step" | "subagent" | "skill" | "verification" | "plan" | "approval";
 export type ObservabilityTransport = "otel" | "ingestion";
 
 export interface TraceContext {

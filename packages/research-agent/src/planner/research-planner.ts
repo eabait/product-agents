@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { OpenRouterClient } from '@product-agents/openrouter-client'
+import { withSpan } from '@product-agents/observability'
 import type { AgentSettings } from '@product-agents/agent-core'
 import type {
   ResearchPlan,
@@ -23,6 +24,8 @@ export interface PlannerInput {
   depth: ResearchDepth
   existingContext?: string
   clarificationAnswers?: Record<string, string>
+  /** Runtime settings override - if provided, used instead of construction-time settings */
+  settings?: AgentSettings
 }
 
 export interface PlanResult {
@@ -87,9 +90,11 @@ export class ResearchPlanner {
   }
 
   async createPlan(input: PlannerInput): Promise<PlanResult> {
+    // Use runtime settings if provided, otherwise fall back to construction-time settings
+    const effectiveSettings = input.settings ?? this.settings
     const promptInput = this.buildPromptInput(input)
 
-    const analysis = await this.analyzeRequest(promptInput)
+    const analysis = await this.analyzeRequest(promptInput, effectiveSettings)
 
     if (analysis.needsClarification && !input.clarificationAnswers) {
       return {
@@ -100,7 +105,7 @@ export class ResearchPlanner {
       }
     }
 
-    const plan = await this.generateFullPlan(input, analysis)
+    const plan = await this.generateFullPlan(input, analysis, effectiveSettings)
 
     return {
       plan,
@@ -132,19 +137,30 @@ export class ResearchPlanner {
   }
 
   private async analyzeRequest(
-    input: PlanningPromptInput
+    input: PlanningPromptInput,
+    settings: AgentSettings
   ): Promise<z.infer<typeof AnalysisResultSchema>> {
-    const prompt = createAnalyzeRequestPrompt(input)
+    return withSpan(
+      {
+        name: 'analyze-request',
+        type: 'plan',
+        input: { query: input.query, depth: input.depth },
+        metadata: { model: settings.model }
+      },
+      async () => {
+        const prompt = createAnalyzeRequestPrompt(input)
 
-    const result = await this.client.generateStructured({
-      model: this.settings.model,
-      schema: AnalysisResultSchema,
-      prompt,
-      temperature: this.settings.temperature ?? 0.3,
-      maxTokens: this.settings.maxTokens ?? 4000
-    })
+        const result = await this.client.generateStructured({
+          model: settings.model,
+          schema: AnalysisResultSchema,
+          prompt,
+          temperature: settings.temperature ?? 0.3,
+          maxTokens: settings.maxTokens ?? 4000
+        })
 
-    return result
+        return result
+      }
+    )
   }
 
   private createDraftPlan(
@@ -165,39 +181,50 @@ export class ResearchPlanner {
 
   private async generateFullPlan(
     input: PlannerInput,
-    analysis: z.infer<typeof AnalysisResultSchema>
+    analysis: z.infer<typeof AnalysisResultSchema>,
+    settings: AgentSettings
   ): Promise<ResearchPlan> {
-    const promptInput = this.buildPromptInput(input)
-    const prompt = createGeneratePlanPrompt(promptInput, {
-      topic: analysis.topic,
-      scope: analysis.scope,
-      suggestedObjectives: analysis.suggestedObjectives,
-      suggestedStepTypes: analysis.suggestedStepTypes
-    })
+    return withSpan(
+      {
+        name: 'generate-plan',
+        type: 'plan',
+        input: { topic: analysis.topic, depth: input.depth },
+        metadata: { model: settings.model }
+      },
+      async () => {
+        const promptInput = this.buildPromptInput(input)
+        const prompt = createGeneratePlanPrompt(promptInput, {
+          topic: analysis.topic,
+          scope: analysis.scope,
+          suggestedObjectives: analysis.suggestedObjectives,
+          suggestedStepTypes: analysis.suggestedStepTypes
+        })
 
-    const generatedPlan = await this.client.generateStructured({
-      model: this.settings.model,
-      schema: GeneratedPlanSchema,
-      prompt,
-      temperature: this.settings.temperature ?? 0.3,
-      maxTokens: this.settings.maxTokens ?? 6000
-    })
+        const generatedPlan = await this.client.generateStructured({
+          model: settings.model,
+          schema: GeneratedPlanSchema,
+          prompt,
+          temperature: settings.temperature ?? 0.3,
+          maxTokens: settings.maxTokens ?? 6000
+        })
 
-    const steps = this.normalizeSteps(generatedPlan.steps)
-    const estimatedSources = steps.reduce((sum, s) => sum + (s.estimatedSources ?? 8), 0)
-    const estimatedDuration = this.estimateDuration(steps.length, input.depth)
+        const steps = this.normalizeSteps(generatedPlan.steps)
+        const estimatedSources = steps.reduce((sum, s) => sum + (s.estimatedSources ?? 8), 0)
+        const estimatedDuration = this.estimateDuration(steps.length, input.depth)
 
-    return {
-      id: this.idFactory(),
-      topic: analysis.topic,
-      scope: analysis.scope,
-      objectives: analysis.suggestedObjectives,
-      steps,
-      estimatedDuration,
-      estimatedSources,
-      status: 'draft',
-      createdAt: this.clock().toISOString()
-    }
+        return {
+          id: this.idFactory(),
+          topic: analysis.topic,
+          scope: analysis.scope,
+          objectives: analysis.suggestedObjectives,
+          steps,
+          estimatedDuration,
+          estimatedSources,
+          status: 'draft',
+          createdAt: this.clock().toISOString()
+        }
+      }
+    )
   }
 
   private normalizeSteps(

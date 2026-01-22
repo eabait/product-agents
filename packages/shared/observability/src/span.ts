@@ -251,3 +251,17 @@ export function createPlanSpan(input?: unknown): SpanContext {
     input,
   };
 }
+
+/**
+ * Create a span context for approval wait tracking.
+ */
+export function createApprovalSpan(
+  action: "requested" | "received",
+  input?: unknown
+): SpanContext {
+  return {
+    name: action,
+    type: "approval",
+    input,
+  };
+}

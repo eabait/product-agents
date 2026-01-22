@@ -55,6 +55,7 @@ export {
   createSkillSpan,
   createVerificationSpan,
   createPlanSpan,
+  createApprovalSpan,
 } from "./span.js";
 
 // LLM wrappers

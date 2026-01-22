@@ -8,7 +8,6 @@ import type {
   SubagentResult
 } from '@product-agents/product-agent'
 import type { AgentSettings } from '@product-agents/agent-core'
-import { withSpan } from '@product-agents/observability'
 
 import type { ResearchArtifactData } from './contracts/research-artifact'
 import type { ResearchPlan } from './contracts/research-plan'
@@ -208,282 +207,288 @@ export const createResearchAgentSubagent = (
       const emit = request.emit ?? (() => {})
       const runId = request.run.runId
       const query = extractQueryFromRequest(request)
+      // Extract run settings and map to AgentSettings format
+      // EffectiveRunSettings uses maxOutputTokens, AgentSettings uses maxTokens
+      const effectiveRunSettings: AgentSettings = {
+        model: request.run.settings.model,
+        temperature: request.run.settings.temperature,
+        maxTokens: request.run.settings.maxOutputTokens
+      }
 
-      return withSpan(
-        { name: 'research-agent', type: 'subagent', input: { query, runId } },
-        async () => {
-          const requirePlanConfirmation = params.requirePlanConfirmation ?? true
-          const approvedPlan = (params as ResearchBuilderParamsWithPlan).approvedPlan
+      // Note: Subagent-level span is created by graph-controller, so we don't wrap here
+      // to avoid redundant nesting (research.core.agent → research-agent)
+      const requirePlanConfirmation = params.requirePlanConfirmation ?? true
+      const approvedPlan = (params as ResearchBuilderParamsWithPlan).approvedPlan
 
-          // eslint-disable-next-line no-console
-          console.log(`[research-agent] execute called for run ${runId}`)
-          // eslint-disable-next-line no-console
-          console.log(`[research-agent]   - requirePlanConfirmation: ${requirePlanConfirmation}`)
-          // eslint-disable-next-line no-console
-          console.log(`[research-agent]   - approvedPlan exists: ${!!approvedPlan}`)
-          // eslint-disable-next-line no-console
-          console.log(`[research-agent]   - approvedPlan id: ${(approvedPlan as any)?.id ?? 'N/A'}`)
+      // eslint-disable-next-line no-console
+      console.log(`[research-agent] execute called for run ${runId}`)
+      // eslint-disable-next-line no-console
+      console.log(`[research-agent]   - requirePlanConfirmation: ${requirePlanConfirmation}`)
+      // eslint-disable-next-line no-console
+      console.log(`[research-agent]   - approvedPlan exists: ${!!approvedPlan}`)
+      // eslint-disable-next-line no-console
+      console.log(`[research-agent]   - approvedPlan id: ${(approvedPlan as any)?.id ?? 'N/A'}`)
 
-          // Helper function to execute research with a given plan
-          const executeResearchWithPlan = async (plan: ResearchPlan): Promise<SubagentResult<ResearchArtifactData>> => {
-            emit(
-              createProgressEvent(
-                'research.execution.started',
-                runId,
-                {
-                  planId: plan.id,
-                  stepsCount: plan.steps.length,
-                  estimatedSources: plan.estimatedSources
-                },
-                `Executing research plan with ${plan.steps.length} steps...`
-              )
-            )
-
-            // Read concurrency limit from env or use default
-            const queryConcurrencyLimit = parseInt(
-              process.env.TAVILY_CONCURRENCY_LIMIT ?? String(DEFAULT_QUERY_CONCURRENCY),
-              10
-            )
-
-            const executionResults: ResearchExecutionResult = await executor.execute(plan, {
-              maxTotalSources: params.maxSources ?? 20,
-              queryConcurrencyLimit,
-              runId,
-              onStepStarted: step => {
-                emit(
-                  createProgressEvent(
-                    'research.step.started',
-                    runId,
-                    {
-                      stepId: step.id,
-                      stepLabel: step.label,
-                      stepType: step.type
-                    },
-                    `Starting: ${step.label}`
-                  )
-                )
-              },
-              onStepProgress: (step, progress, sourcesFound) => {
-                emit(
-                  createProgressEvent(
-                    'research.step.progress',
-                    runId,
-                    {
-                      stepId: step.id,
-                      progress,
-                      sourcesFound
-                    },
-                    `${step.label}: ${progress}% complete (${sourcesFound} sources)`
-                  )
-                )
-              },
-              onStepCompleted: (step, result) => {
-                emit(
-                  createProgressEvent(
-                    'research.step.completed',
-                    runId,
-                    {
-                      stepId: step.id,
-                      sourcesFound: result.sources.length,
-                      executionTimeMs: result.executionTimeMs
-                    },
-                    `Completed: ${step.label} (${result.sources.length} sources)`
-                  )
-                )
-              }
-            })
-
-            emit(
-              createProgressEvent(
-                'research.synthesis.started',
-                runId,
-                {
-                  totalSources: executionResults.uniqueSourcesCount,
-                  executionTimeMs: executionResults.totalExecutionTimeMs
-                },
-                'Synthesizing research findings...'
-              )
-            )
-
-            const synthesizedData = await synthesizer.synthesize({
-              plan,
-              executionResults,
-              params
-            })
-
-            const artifactId = `research-${idFactory()}`
-            const generatedAt = clock().toISOString()
-
-            const artifact: Artifact<ResearchArtifactData> = {
-              id: artifactId,
-              kind: 'research',
-              version: '1.0.0',
-              label: `Research: ${plan.topic}`,
-              data: {
-                topic: synthesizedData.topic,
-                scope: synthesizedData.scope,
-                executiveSummary: synthesizedData.executiveSummary,
-                findings: synthesizedData.findings,
-                competitors: synthesizedData.competitors,
-                marketInsights: synthesizedData.marketInsights,
-                recommendations: synthesizedData.recommendations,
-                limitations: synthesizedData.limitations,
-                methodology: synthesizedData.methodology,
-                generatedAt
-              },
-              metadata: {
-                createdAt: generatedAt,
-                createdBy: request.run.request.createdBy,
-                tags: ['research', 'synthesized'],
-                confidence: synthesizedData.overallConfidence,
-                extras: {
-                  status: 'completed',
-                  sourceArtifactId: request.sourceArtifact?.id,
-                  planId: plan.id,
-                  sourcesConsulted: synthesizedData.methodology.sourcesConsulted,
-                  findingsCount: synthesizedData.findings.length
-                }
-              }
-            }
-
-            emit(
-              createProgressEvent(
-                'research.completed',
-                runId,
-                {
-                  artifactId,
-                  findingsCount: synthesizedData.findings.length,
-                  sourcesUsed: synthesizedData.methodology.sourcesUsed,
-                  confidence: synthesizedData.overallConfidence
-                },
-                `Research completed with ${synthesizedData.findings.length} findings from ${synthesizedData.methodology.sourcesUsed} sources`
-              )
-            )
-
-            return {
-              artifact,
-              metadata: {
-                status: 'completed',
-                planId: plan.id,
-                sourcesConsulted: synthesizedData.methodology.sourcesConsulted,
-                findingsCount: synthesizedData.findings.length,
-                confidence: synthesizedData.overallConfidence
-              }
-            }
-          }
-
-          // If we already have an approved plan, skip planning entirely and go straight to execution
-          if (approvedPlan) {
-            // eslint-disable-next-line no-console
-            console.log(`[research-agent] SKIPPING PLANNING: using pre-approved plan for run ${runId}`)
-            // eslint-disable-next-line no-console
-            console.log(`[research-agent]   - using approved plan: ${approvedPlan.id}`)
-
-            return executeResearchWithPlan(approvedPlan)
-          }
-
-          // No approved plan - proceed with planning phase
-          const existingContext = extractContextFromRequest(request)
-
-          emit(
-            createProgressEvent(
-              'research.planning.started',
-              runId,
-              { query },
-              'Analyzing research request and creating plan...'
-            )
+      // Helper function to execute research with a given plan
+      const executeResearchWithPlan = async (plan: ResearchPlan): Promise<SubagentResult<ResearchArtifactData>> => {
+        emit(
+          createProgressEvent(
+            'research.execution.started',
+            runId,
+            {
+              planId: plan.id,
+              stepsCount: plan.steps.length,
+              estimatedSources: plan.estimatedSources
+            },
+            `Executing research plan with ${plan.steps.length} steps...`
           )
+        )
 
-          const planResult: PlanResult = await planner.createPlan({
-            query,
-            industry: params.industry,
-            region: params.region,
-            timeframe: params.timeframe,
-            focusAreas: params.focusAreas,
-            depth: params.depth ?? 'standard',
-            existingContext,
-            clarificationAnswers: params.clarificationAnswers
-          })
+        // Read concurrency limit from env or use default
+        const queryConcurrencyLimit = parseInt(
+          process.env.TAVILY_CONCURRENCY_LIMIT ?? String(DEFAULT_QUERY_CONCURRENCY),
+          10
+        )
 
-          if (planResult.needsClarification && planResult.clarificationQuestions?.length) {
+        const executionResults: ResearchExecutionResult = await executor.execute(plan, {
+          maxTotalSources: params.maxSources ?? 20,
+          queryConcurrencyLimit,
+          runId,
+          onStepStarted: step => {
             emit(
               createProgressEvent(
-                'research.clarification.needed',
+                'research.step.started',
                 runId,
                 {
-                  status: STATUS_AWAITING_CLARIFICATION,
-                  clarification: {
-                    questions: planResult.clarificationQuestions,
-                    context: planResult.clarificationContext
-                  },
-                  plan: planResult.plan
+                  stepId: step.id,
+                  stepLabel: step.label,
+                  stepType: step.type
                 },
-                'Clarification needed before proceeding'
+                `Starting: ${step.label}`
               )
             )
-
-            return {
-              artifact: createPendingArtifact(
-                `research-${idFactory()}`,
-                clock(),
-                planResult.plan.topic,
-                STATUS_AWAITING_CLARIFICATION,
-                planResult.plan
-              ) as Artifact<ResearchArtifactData>,
-              metadata: {
-                status: STATUS_AWAITING_CLARIFICATION,
-                clarificationQuestions: planResult.clarificationQuestions,
-                plan: planResult.plan
-              }
-            }
-          }
-
-          // eslint-disable-next-line no-console
-          console.log(`[research-agent] checking approval requirement for run ${runId}`)
-          // eslint-disable-next-line no-console
-          console.log(`[research-agent]   - requirePlanConfirmation (resolved): ${requirePlanConfirmation}`)
-          // eslint-disable-next-line no-console
-          console.log(`[research-agent]   - will block for approval: ${requirePlanConfirmation}`)
-
-          if (requirePlanConfirmation) {
-            // eslint-disable-next-line no-console
-            console.log(`[research-agent] BLOCKING: returning awaiting-plan-confirmation for run ${runId}`)
+          },
+          onStepProgress: (step, progress, sourcesFound) => {
             emit(
               createProgressEvent(
-                'research.plan.created',
+                'research.step.progress',
                 runId,
                 {
-                  status: STATUS_AWAITING_PLAN_CONFIRMATION,
-                  plan: planResult.plan
+                  stepId: step.id,
+                  progress,
+                  sourcesFound
                 },
-                'Research plan ready for review'
+                `${step.label}: ${progress}% complete (${sourcesFound} sources)`
               )
             )
+          },
+          onStepCompleted: (step, result) => {
+            emit(
+              createProgressEvent(
+                'research.step.completed',
+                runId,
+                {
+                  stepId: step.id,
+                  sourcesFound: result.sources.length,
+                  executionTimeMs: result.executionTimeMs
+                },
+                `Completed: ${step.label} (${result.sources.length} sources)`
+              )
+            )
+          }
+        })
 
-            return {
-              artifact: createPendingArtifact(
-                `research-${idFactory()}`,
-                clock(),
-                planResult.plan.topic,
-                STATUS_AWAITING_PLAN_CONFIRMATION,
-                planResult.plan
-              ) as Artifact<ResearchArtifactData>,
-              metadata: {
-                status: STATUS_AWAITING_PLAN_CONFIRMATION,
-                plan: planResult.plan
-              }
+        emit(
+          createProgressEvent(
+            'research.synthesis.started',
+            runId,
+            {
+              totalSources: executionResults.uniqueSourcesCount,
+              executionTimeMs: executionResults.totalExecutionTimeMs
+            },
+            'Synthesizing research findings...'
+          )
+        )
+
+        const synthesizedData = await synthesizer.synthesize({
+          plan,
+          executionResults,
+          params,
+          settings: effectiveRunSettings
+        })
+
+        const artifactId = `research-${idFactory()}`
+        const generatedAt = clock().toISOString()
+
+        const artifact: Artifact<ResearchArtifactData> = {
+          id: artifactId,
+          kind: 'research',
+          version: '1.0.0',
+          label: `Research: ${plan.topic}`,
+          data: {
+            topic: synthesizedData.topic,
+            scope: synthesizedData.scope,
+            executiveSummary: synthesizedData.executiveSummary,
+            findings: synthesizedData.findings,
+            competitors: synthesizedData.competitors,
+            marketInsights: synthesizedData.marketInsights,
+            recommendations: synthesizedData.recommendations,
+            limitations: synthesizedData.limitations,
+            methodology: synthesizedData.methodology,
+            generatedAt
+          },
+          metadata: {
+            createdAt: generatedAt,
+            createdBy: request.run.request.createdBy,
+            tags: ['research', 'synthesized'],
+            confidence: synthesizedData.overallConfidence,
+            extras: {
+              status: 'completed',
+              sourceArtifactId: request.sourceArtifact?.id,
+              planId: plan.id,
+              sourcesConsulted: synthesizedData.methodology.sourcesConsulted,
+              findingsCount: synthesizedData.findings.length
             }
           }
-
-          // Auto-approve mode: proceed directly with the generated plan
-          // eslint-disable-next-line no-console
-          console.log(`[research-agent] AUTO-APPROVE: proceeding with generated plan for run ${runId}`)
-          // eslint-disable-next-line no-console
-          console.log(`[research-agent]   - using plan: ${planResult.plan.id}`)
-
-          return executeResearchWithPlan(planResult.plan)
         }
+
+        emit(
+          createProgressEvent(
+            'research.completed',
+            runId,
+            {
+              artifactId,
+              findingsCount: synthesizedData.findings.length,
+              sourcesUsed: synthesizedData.methodology.sourcesUsed,
+              confidence: synthesizedData.overallConfidence
+            },
+            `Research completed with ${synthesizedData.findings.length} findings from ${synthesizedData.methodology.sourcesUsed} sources`
+          )
+        )
+
+        return {
+          artifact,
+          metadata: {
+            status: 'completed',
+            planId: plan.id,
+            sourcesConsulted: synthesizedData.methodology.sourcesConsulted,
+            findingsCount: synthesizedData.findings.length,
+            confidence: synthesizedData.overallConfidence
+          }
+        }
+      }
+
+      // If we already have an approved plan, skip planning entirely and go straight to execution
+      if (approvedPlan) {
+        // eslint-disable-next-line no-console
+        console.log(`[research-agent] SKIPPING PLANNING: using pre-approved plan for run ${runId}`)
+        // eslint-disable-next-line no-console
+        console.log(`[research-agent]   - using approved plan: ${approvedPlan.id}`)
+
+        return executeResearchWithPlan(approvedPlan)
+      }
+
+      // No approved plan - proceed with planning phase
+      const existingContext = extractContextFromRequest(request)
+
+      emit(
+        createProgressEvent(
+          'research.planning.started',
+          runId,
+          { query },
+          'Analyzing research request and creating plan...'
+        )
       )
+
+      const planResult: PlanResult = await planner.createPlan({
+        query,
+        industry: params.industry,
+        region: params.region,
+        timeframe: params.timeframe,
+        focusAreas: params.focusAreas,
+        depth: params.depth ?? 'standard',
+        existingContext,
+        clarificationAnswers: params.clarificationAnswers,
+        settings: effectiveRunSettings
+      })
+
+      if (planResult.needsClarification && planResult.clarificationQuestions?.length) {
+        emit(
+          createProgressEvent(
+            'research.clarification.needed',
+            runId,
+            {
+              status: STATUS_AWAITING_CLARIFICATION,
+              clarification: {
+                questions: planResult.clarificationQuestions,
+                context: planResult.clarificationContext
+              },
+              plan: planResult.plan
+            },
+            'Clarification needed before proceeding'
+          )
+        )
+
+        return {
+          artifact: createPendingArtifact(
+            `research-${idFactory()}`,
+            clock(),
+            planResult.plan.topic,
+            STATUS_AWAITING_CLARIFICATION,
+            planResult.plan
+          ) as Artifact<ResearchArtifactData>,
+          metadata: {
+            status: STATUS_AWAITING_CLARIFICATION,
+            clarificationQuestions: planResult.clarificationQuestions,
+            plan: planResult.plan
+          }
+        }
+      }
+
+      // eslint-disable-next-line no-console
+      console.log(`[research-agent] checking approval requirement for run ${runId}`)
+      // eslint-disable-next-line no-console
+      console.log(`[research-agent]   - requirePlanConfirmation (resolved): ${requirePlanConfirmation}`)
+      // eslint-disable-next-line no-console
+      console.log(`[research-agent]   - will block for approval: ${requirePlanConfirmation}`)
+
+      if (requirePlanConfirmation) {
+        // eslint-disable-next-line no-console
+        console.log(`[research-agent] BLOCKING: returning awaiting-plan-confirmation for run ${runId}`)
+        emit(
+          createProgressEvent(
+            'research.plan.created',
+            runId,
+            {
+              status: STATUS_AWAITING_PLAN_CONFIRMATION,
+              plan: planResult.plan
+            },
+            'Research plan ready for review'
+          )
+        )
+
+        return {
+          artifact: createPendingArtifact(
+            `research-${idFactory()}`,
+            clock(),
+            planResult.plan.topic,
+            STATUS_AWAITING_PLAN_CONFIRMATION,
+            planResult.plan
+          ) as Artifact<ResearchArtifactData>,
+          metadata: {
+            status: STATUS_AWAITING_PLAN_CONFIRMATION,
+            plan: planResult.plan
+          }
+        }
+      }
+
+      // Auto-approve mode: proceed directly with the generated plan
+      // eslint-disable-next-line no-console
+      console.log(`[research-agent] AUTO-APPROVE: proceeding with generated plan for run ${runId}`)
+      // eslint-disable-next-line no-console
+      console.log(`[research-agent]   - using plan: ${planResult.plan.id}`)
+
+      return executeResearchWithPlan(planResult.plan)
     }
   }
 }

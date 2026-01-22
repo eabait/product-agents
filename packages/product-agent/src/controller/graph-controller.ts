@@ -5,6 +5,8 @@ import {
   createStepSpan,
   createSubagentSpan,
   createVerificationSpan,
+  createPlanSpan,
+  createApprovalSpan,
   getObservabilityTransport,
   isObservabilityEnabled,
   recordGeneration
@@ -321,7 +323,10 @@ export class GraphController implements AgentController {
     if (input.initialPlan) {
       planDraft = { plan: input.initialPlan }
     } else if (this.planner) {
-      planDraft = await this.planner.createPlan(runContext)
+      planDraft = await withSpan(
+        createPlanSpan({ runId, artifactKind: input.request.artifactKind }),
+        async () => this.planner!.createPlan(runContext)
+      )
     } else {
       throw new Error('No plan provided and no planner configured. Use the Orchestrator to generate a plan.')
     }
@@ -517,6 +522,16 @@ export class GraphController implements AgentController {
     // Clear blocked state
     context.status = STATUS_RUNNING
     delete context.runContext.metadata?.blockedSubagent
+
+    // Record approval received span for observability
+    void withSpan(
+      createApprovalSpan('received', {
+        subagentId: blockedSubagent.subagentId,
+        stepId,
+        runId
+      }),
+      async () => ({ stepId, subagentId: blockedSubagent.subagentId })
+    )
 
     // eslint-disable-next-line no-console
     console.log(`[graph-controller] emitting subagent.approved event for run ${runId}`)
@@ -1450,6 +1465,17 @@ export class GraphController implements AgentController {
 
     if (subagentStatus === 'awaiting-plan-confirmation' || subagentStatus === 'awaiting-clarification') {
       const subagentPlan = artifact.metadata?.extras?.plan || result.metadata?.plan
+
+      // Record approval request span for observability
+      void withSpan(
+        createApprovalSpan('requested', {
+          subagentId: lifecycle.metadata.id,
+          artifactKind: lifecycle.metadata.artifactKind,
+          status: subagentStatus,
+          runId: context.runContext.runId
+        }),
+        async () => ({ status: subagentStatus, subagentId: lifecycle.metadata.id })
+      )
 
       // Emit approval-required event
       emitEvent(

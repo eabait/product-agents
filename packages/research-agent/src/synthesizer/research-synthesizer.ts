@@ -97,6 +97,8 @@ export interface SynthesizerInput {
   plan: ResearchPlan
   executionResults: ResearchExecutionResult
   params: ResearchBuilderParams
+  /** Runtime settings override - if provided, used instead of construction-time settings */
+  settings?: AgentSettings
 }
 
 export interface SynthesizerOptions {
@@ -114,13 +116,15 @@ export class ResearchSynthesizer {
 
   async synthesize(input: SynthesizerInput): Promise<ResearchArtifactData & { overallConfidence: number }> {
     const { plan, executionResults, params } = input
+    // Use runtime settings if provided, otherwise fall back to construction-time settings
+    const effectiveSettings = input.settings ?? this.settings
 
     const allSources = executionResults.allSources
     const searchQueries = executionResults.stepResults.flatMap(r => r.queriesExecuted)
 
     const [findings, executiveSummary] = await Promise.all([
-      this.extractAllFindings(plan, executionResults),
-      this.generateExecutiveSummary(plan, executionResults)
+      this.extractAllFindings(plan, executionResults, effectiveSettings),
+      this.generateExecutiveSummary(plan, executionResults, effectiveSettings)
     ])
 
     const hasCompetitorStep = executionResults.stepResults.some(
@@ -131,10 +135,10 @@ export class ResearchSynthesizer {
     )
 
     const [competitors, marketInsights, recommendations, limitations] = await Promise.all([
-      hasCompetitorStep ? this.analyzeCompetitors(plan.topic, executionResults) : undefined,
-      hasMarketStep ? this.extractMarketInsights(plan.topic, executionResults) : undefined,
-      this.generateRecommendations(plan.topic, executiveSummary, findings.length, hasCompetitorStep, hasMarketStep),
-      this.generateLimitations(plan.topic, allSources.length, searchQueries)
+      hasCompetitorStep ? this.analyzeCompetitors(plan.topic, executionResults, effectiveSettings) : undefined,
+      hasMarketStep ? this.extractMarketInsights(plan.topic, executionResults, effectiveSettings) : undefined,
+      this.generateRecommendations(plan.topic, executiveSummary, findings.length, hasCompetitorStep, hasMarketStep, effectiveSettings),
+      this.generateLimitations(plan.topic, allSources.length, searchQueries, effectiveSettings)
     ])
 
     const overallConfidence = this.calculateOverallConfidence(findings, allSources.length)
@@ -143,7 +147,7 @@ export class ResearchSynthesizer {
       searchQueries,
       sourcesConsulted: executionResults.totalSourcesCollected,
       sourcesUsed: allSources.length,
-      synthesisModel: this.settings.model,
+      synthesisModel: effectiveSettings.model,
       searchProvider: 'tavily',
       executionTimeMs: executionResults.totalExecutionTimeMs
     }
@@ -165,7 +169,8 @@ export class ResearchSynthesizer {
 
   private async extractAllFindings(
     plan: ResearchPlan,
-    executionResults: ResearchExecutionResult
+    executionResults: ResearchExecutionResult,
+    settings: AgentSettings
   ): Promise<ResearchFinding[]> {
     const allFindings: ResearchFinding[] = []
 
@@ -174,7 +179,8 @@ export class ResearchSynthesizer {
 
       const stepFindings = await this.extractFindingsFromStep(
         plan.topic,
-        stepResult
+        stepResult,
+        settings
       )
       allFindings.push(...stepFindings)
     }
@@ -184,7 +190,8 @@ export class ResearchSynthesizer {
 
   private async extractFindingsFromStep(
     topic: string,
-    stepResult: StepExecutionResult
+    stepResult: StepExecutionResult,
+    settings: AgentSettings
   ): Promise<ResearchFinding[]> {
     const prompt = createFindingsExtractionPrompt(
       stepResult.stepType,
@@ -195,7 +202,7 @@ export class ResearchSynthesizer {
 
     try {
       const response = await this.client.generateStructured({
-        model: this.settings.model,
+        model: settings.model,
         schema: FindingsResponseSchema,
         prompt,
         temperature: 0.2,
@@ -227,7 +234,8 @@ export class ResearchSynthesizer {
 
   private async generateExecutiveSummary(
     plan: ResearchPlan,
-    executionResults: ResearchExecutionResult
+    executionResults: ResearchExecutionResult,
+    settings: AgentSettings
   ): Promise<string> {
     const sources = executionResults.stepResults.map(sr => ({
       stepType: sr.stepType,
@@ -244,7 +252,7 @@ export class ResearchSynthesizer {
 
     try {
       const response = await this.client.generateStructured({
-        model: this.settings.model,
+        model: settings.model,
         schema: ExecutiveSummaryResponseSchema,
         prompt,
         temperature: 0.3,
@@ -259,7 +267,8 @@ export class ResearchSynthesizer {
 
   private async analyzeCompetitors(
     topic: string,
-    executionResults: ResearchExecutionResult
+    executionResults: ResearchExecutionResult,
+    settings: AgentSettings
   ): Promise<CompetitorAnalysis[] | undefined> {
     const competitorSources = executionResults.stepResults
       .filter(r => r.stepType === 'competitor-analysis')
@@ -271,7 +280,7 @@ export class ResearchSynthesizer {
 
     try {
       const response = await this.client.generateStructured({
-        model: this.settings.model,
+        model: settings.model,
         schema: CompetitorsResponseSchema,
         prompt,
         temperature: 0.2,
@@ -290,7 +299,8 @@ export class ResearchSynthesizer {
 
   private async extractMarketInsights(
     topic: string,
-    executionResults: ResearchExecutionResult
+    executionResults: ResearchExecutionResult,
+    settings: AgentSettings
   ): Promise<MarketInsight | undefined> {
     const marketSources = executionResults.stepResults
       .filter(r => r.stepType === 'market-sizing' || r.stepType === 'trend-analysis')
@@ -302,7 +312,7 @@ export class ResearchSynthesizer {
 
     try {
       const response = await this.client.generateStructured({
-        model: this.settings.model,
+        model: settings.model,
         schema: MarketInsightsResponseSchema,
         prompt,
         temperature: 0.2,
@@ -321,7 +331,8 @@ export class ResearchSynthesizer {
     executiveSummary: string,
     findingsCount: number,
     hasCompetitors: boolean,
-    hasMarketInsights: boolean
+    hasMarketInsights: boolean,
+    settings: AgentSettings
   ): Promise<Recommendation[]> {
     const prompt = createRecommendationsPrompt(
       topic,
@@ -333,7 +344,7 @@ export class ResearchSynthesizer {
 
     try {
       const response = await this.client.generateStructured({
-        model: this.settings.model,
+        model: settings.model,
         schema: RecommendationsResponseSchema,
         prompt,
         temperature: 0.4,
@@ -350,13 +361,14 @@ export class ResearchSynthesizer {
   private async generateLimitations(
     topic: string,
     sourcesConsulted: number,
-    searchQueries: string[]
+    searchQueries: string[],
+    settings: AgentSettings
   ): Promise<string[]> {
     const prompt = createLimitationsPrompt(topic, sourcesConsulted, searchQueries)
 
     try {
       const response = await this.client.generateStructured({
-        model: this.settings.model,
+        model: settings.model,
         schema: LimitationsResponseSchema,
         prompt,
         temperature: 0.3,
