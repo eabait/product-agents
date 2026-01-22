@@ -212,15 +212,177 @@ export const createResearchAgentSubagent = (
       return withSpan(
         { name: 'research-agent', type: 'subagent', input: { query, runId } },
         async () => {
+          const requirePlanConfirmation = params.requirePlanConfirmation ?? true
+          const approvedPlan = (params as ResearchBuilderParamsWithPlan).approvedPlan
+
           // eslint-disable-next-line no-console
           console.log(`[research-agent] execute called for run ${runId}`)
           // eslint-disable-next-line no-console
-          console.log(`[research-agent]   - requirePlanConfirmation: ${params.requirePlanConfirmation}`)
+          console.log(`[research-agent]   - requirePlanConfirmation: ${requirePlanConfirmation}`)
           // eslint-disable-next-line no-console
-          console.log(`[research-agent]   - approvedPlan exists: ${!!(params as ResearchBuilderParamsWithPlan).approvedPlan}`)
+          console.log(`[research-agent]   - approvedPlan exists: ${!!approvedPlan}`)
           // eslint-disable-next-line no-console
-          console.log(`[research-agent]   - approvedPlan id: ${((params as ResearchBuilderParamsWithPlan).approvedPlan as any)?.id ?? 'N/A'}`)
+          console.log(`[research-agent]   - approvedPlan id: ${(approvedPlan as any)?.id ?? 'N/A'}`)
 
+          // Helper function to execute research with a given plan
+          const executeResearchWithPlan = async (plan: ResearchPlan): Promise<SubagentResult<ResearchArtifactData>> => {
+            emit(
+              createProgressEvent(
+                'research.execution.started',
+                runId,
+                {
+                  planId: plan.id,
+                  stepsCount: plan.steps.length,
+                  estimatedSources: plan.estimatedSources
+                },
+                `Executing research plan with ${plan.steps.length} steps...`
+              )
+            )
+
+            // Read concurrency limit from env or use default
+            const queryConcurrencyLimit = parseInt(
+              process.env.TAVILY_CONCURRENCY_LIMIT ?? String(DEFAULT_QUERY_CONCURRENCY),
+              10
+            )
+
+            const executionResults: ResearchExecutionResult = await executor.execute(plan, {
+              maxTotalSources: params.maxSources ?? 20,
+              queryConcurrencyLimit,
+              runId,
+              onStepStarted: step => {
+                emit(
+                  createProgressEvent(
+                    'research.step.started',
+                    runId,
+                    {
+                      stepId: step.id,
+                      stepLabel: step.label,
+                      stepType: step.type
+                    },
+                    `Starting: ${step.label}`
+                  )
+                )
+              },
+              onStepProgress: (step, progress, sourcesFound) => {
+                emit(
+                  createProgressEvent(
+                    'research.step.progress',
+                    runId,
+                    {
+                      stepId: step.id,
+                      progress,
+                      sourcesFound
+                    },
+                    `${step.label}: ${progress}% complete (${sourcesFound} sources)`
+                  )
+                )
+              },
+              onStepCompleted: (step, result) => {
+                emit(
+                  createProgressEvent(
+                    'research.step.completed',
+                    runId,
+                    {
+                      stepId: step.id,
+                      sourcesFound: result.sources.length,
+                      executionTimeMs: result.executionTimeMs
+                    },
+                    `Completed: ${step.label} (${result.sources.length} sources)`
+                  )
+                )
+              }
+            })
+
+            emit(
+              createProgressEvent(
+                'research.synthesis.started',
+                runId,
+                {
+                  totalSources: executionResults.uniqueSourcesCount,
+                  executionTimeMs: executionResults.totalExecutionTimeMs
+                },
+                'Synthesizing research findings...'
+              )
+            )
+
+            const synthesizedData = await synthesizer.synthesize({
+              plan,
+              executionResults,
+              params
+            })
+
+            const artifactId = `research-${idFactory()}`
+            const generatedAt = clock().toISOString()
+
+            const artifact: Artifact<ResearchArtifactData> = {
+              id: artifactId,
+              kind: 'research',
+              version: '1.0.0',
+              label: `Research: ${plan.topic}`,
+              data: {
+                topic: synthesizedData.topic,
+                scope: synthesizedData.scope,
+                executiveSummary: synthesizedData.executiveSummary,
+                findings: synthesizedData.findings,
+                competitors: synthesizedData.competitors,
+                marketInsights: synthesizedData.marketInsights,
+                recommendations: synthesizedData.recommendations,
+                limitations: synthesizedData.limitations,
+                methodology: synthesizedData.methodology,
+                generatedAt
+              },
+              metadata: {
+                createdAt: generatedAt,
+                createdBy: request.run.request.createdBy,
+                tags: ['research', 'synthesized'],
+                confidence: synthesizedData.overallConfidence,
+                extras: {
+                  status: 'completed',
+                  sourceArtifactId: request.sourceArtifact?.id,
+                  planId: plan.id,
+                  sourcesConsulted: synthesizedData.methodology.sourcesConsulted,
+                  findingsCount: synthesizedData.findings.length
+                }
+              }
+            }
+
+            emit(
+              createProgressEvent(
+                'research.completed',
+                runId,
+                {
+                  artifactId,
+                  findingsCount: synthesizedData.findings.length,
+                  sourcesUsed: synthesizedData.methodology.sourcesUsed,
+                  confidence: synthesizedData.overallConfidence
+                },
+                `Research completed with ${synthesizedData.findings.length} findings from ${synthesizedData.methodology.sourcesUsed} sources`
+              )
+            )
+
+            return {
+              artifact,
+              metadata: {
+                status: 'completed',
+                planId: plan.id,
+                sourcesConsulted: synthesizedData.methodology.sourcesConsulted,
+                findingsCount: synthesizedData.findings.length,
+                confidence: synthesizedData.overallConfidence
+              }
+            }
+          }
+
+          // If we already have an approved plan, skip planning entirely and go straight to execution
+          if (approvedPlan) {
+            // eslint-disable-next-line no-console
+            console.log(`[research-agent] SKIPPING PLANNING: using pre-approved plan for run ${runId}`)
+            // eslint-disable-next-line no-console
+            console.log(`[research-agent]   - using approved plan: ${approvedPlan.id}`)
+
+            return executeResearchWithPlan(approvedPlan)
+          }
+
+          // No approved plan - proceed with planning phase
           const existingContext = extractContextFromRequest(request)
 
           emit(
@@ -276,19 +438,14 @@ export const createResearchAgentSubagent = (
             }
           }
 
-          const requirePlanConfirmation = params.requirePlanConfirmation ?? true
-          const approvedPlan = (params as ResearchBuilderParamsWithPlan).approvedPlan
-
           // eslint-disable-next-line no-console
           console.log(`[research-agent] checking approval requirement for run ${runId}`)
           // eslint-disable-next-line no-console
           console.log(`[research-agent]   - requirePlanConfirmation (resolved): ${requirePlanConfirmation}`)
           // eslint-disable-next-line no-console
-          console.log(`[research-agent]   - approvedPlan (resolved): ${approvedPlan ? 'present' : 'absent'}`)
-          // eslint-disable-next-line no-console
-          console.log(`[research-agent]   - will block for approval: ${requirePlanConfirmation && !approvedPlan}`)
+          console.log(`[research-agent]   - will block for approval: ${requirePlanConfirmation}`)
 
-          if (requirePlanConfirmation && !approvedPlan) {
+          if (requirePlanConfirmation) {
             // eslint-disable-next-line no-console
             console.log(`[research-agent] BLOCKING: returning awaiting-plan-confirmation for run ${runId}`)
             emit(
@@ -318,156 +475,13 @@ export const createResearchAgentSubagent = (
             }
           }
 
+          // Auto-approve mode: proceed directly with the generated plan
           // eslint-disable-next-line no-console
-          console.log(`[research-agent] PROCEEDING with research execution for run ${runId}`)
-          const plan: ResearchPlan = approvedPlan ?? planResult.plan
+          console.log(`[research-agent] AUTO-APPROVE: proceeding with generated plan for run ${runId}`)
           // eslint-disable-next-line no-console
-          console.log(`[research-agent]   - using plan: ${plan.id}`)
+          console.log(`[research-agent]   - using plan: ${planResult.plan.id}`)
 
-          emit(
-            createProgressEvent(
-              'research.execution.started',
-              runId,
-              {
-                planId: plan.id,
-                stepsCount: plan.steps.length,
-                estimatedSources: plan.estimatedSources
-              },
-              `Executing research plan with ${plan.steps.length} steps...`
-            )
-          )
-
-          // Read concurrency limit from env or use default
-          const queryConcurrencyLimit = parseInt(
-            process.env.TAVILY_CONCURRENCY_LIMIT ?? String(DEFAULT_QUERY_CONCURRENCY),
-            10
-          )
-
-          const executionResults: ResearchExecutionResult = await executor.execute(plan, {
-            maxTotalSources: params.maxSources ?? 20,
-            queryConcurrencyLimit,
-            runId,
-            onStepStarted: step => {
-              emit(
-                createProgressEvent(
-                  'research.step.started',
-                  runId,
-                  {
-                    stepId: step.id,
-                    stepLabel: step.label,
-                    stepType: step.type
-                  },
-                  `Starting: ${step.label}`
-                )
-              )
-            },
-            onStepProgress: (step, progress, sourcesFound) => {
-              emit(
-                createProgressEvent(
-                  'research.step.progress',
-                  runId,
-                  {
-                    stepId: step.id,
-                    progress,
-                    sourcesFound
-                  },
-                  `${step.label}: ${progress}% complete (${sourcesFound} sources)`
-                )
-              )
-            },
-            onStepCompleted: (step, result) => {
-              emit(
-                createProgressEvent(
-                  'research.step.completed',
-                  runId,
-                  {
-                    stepId: step.id,
-                    sourcesFound: result.sources.length,
-                    executionTimeMs: result.executionTimeMs
-                  },
-                  `Completed: ${step.label} (${result.sources.length} sources)`
-                )
-              )
-            }
-          })
-
-          emit(
-            createProgressEvent(
-              'research.synthesis.started',
-              runId,
-              {
-                totalSources: executionResults.uniqueSourcesCount,
-                executionTimeMs: executionResults.totalExecutionTimeMs
-              },
-              'Synthesizing research findings...'
-            )
-          )
-
-          const synthesizedData = await synthesizer.synthesize({
-            plan,
-            executionResults,
-            params
-          })
-
-          const artifactId = `research-${idFactory()}`
-          const generatedAt = clock().toISOString()
-
-          const artifact: Artifact<ResearchArtifactData> = {
-            id: artifactId,
-            kind: 'research',
-            version: '1.0.0',
-            label: `Research: ${plan.topic}`,
-            data: {
-              topic: synthesizedData.topic,
-              scope: synthesizedData.scope,
-              executiveSummary: synthesizedData.executiveSummary,
-              findings: synthesizedData.findings,
-              competitors: synthesizedData.competitors,
-              marketInsights: synthesizedData.marketInsights,
-              recommendations: synthesizedData.recommendations,
-              limitations: synthesizedData.limitations,
-              methodology: synthesizedData.methodology,
-              generatedAt
-            },
-            metadata: {
-              createdAt: generatedAt,
-              createdBy: request.run.request.createdBy,
-              tags: ['research', 'synthesized'],
-              confidence: synthesizedData.overallConfidence,
-              extras: {
-                status: 'completed',
-                sourceArtifactId: request.sourceArtifact?.id,
-                planId: plan.id,
-                sourcesConsulted: synthesizedData.methodology.sourcesConsulted,
-                findingsCount: synthesizedData.findings.length
-              }
-            }
-          }
-
-          emit(
-            createProgressEvent(
-              'research.completed',
-              runId,
-              {
-                artifactId,
-                findingsCount: synthesizedData.findings.length,
-                sourcesUsed: synthesizedData.methodology.sourcesUsed,
-                confidence: synthesizedData.overallConfidence
-              },
-              `Research completed with ${synthesizedData.findings.length} findings from ${synthesizedData.methodology.sourcesUsed} sources`
-            )
-          )
-
-          return {
-            artifact,
-            metadata: {
-              status: 'completed',
-              planId: plan.id,
-              sourcesConsulted: synthesizedData.methodology.sourcesConsulted,
-              findingsCount: synthesizedData.findings.length,
-              confidence: synthesizedData.overallConfidence
-            }
-          }
+          return executeResearchWithPlan(planResult.plan)
         }
       )
     }
