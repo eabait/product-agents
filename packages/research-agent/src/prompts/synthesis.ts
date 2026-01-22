@@ -51,7 +51,10 @@ export function createFindingsExtractionPrompt(
   topic: string
 ): string {
   const sourceContent = sources
-    .map((s, i) => `[Source ${i + 1}] ${s.title}\nURL: ${s.url}\n${s.content}`)
+    .map((s, i) => {
+      const scoreInfo = s.score !== undefined ? ` (relevance: ${(s.score * 100).toFixed(0)}%)` : ''
+      return `[Source ${i + 1}]${scoreInfo} ${s.title}\nURL: ${s.url}\n${s.content}`
+    })
     .join('\n\n---\n\n')
 
   return `Extract key findings from the following sources for a research report on "${topic}".
@@ -72,9 +75,15 @@ For each distinct finding, provide:
 - sourceIndices: Which source numbers support this finding
 - tags: Relevant tags for categorization
 
+Source Quality Guidance:
+- Sources show relevance percentage (higher = more relevant to query)
+- Sources with >70% relevance are high quality - findings from these should have higher confidence
+- Sources with 40-70% relevance are moderate - verify with corroborating sources
+- Weight your confidence scores based on the quality of supporting sources
+
 Extract 3-7 distinct, meaningful findings. Avoid duplicates or trivial information.
 Prioritize findings that are:
-1. Backed by data or credible sources
+1. Backed by data or credible sources (prefer higher relevance sources)
 2. Relevant to the research objectives
 3. Actionable or strategically significant`
 }

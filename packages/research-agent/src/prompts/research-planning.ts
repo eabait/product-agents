@@ -1,5 +1,8 @@
 import type { ResearchFocusArea, ResearchDepth } from '../contracts/research-params'
 
+/** Get the current year for use in search queries */
+const getCurrentYear = (): number => new Date().getFullYear()
+
 export interface PlanningPromptInput {
   query: string
   industry?: string
@@ -99,11 +102,22 @@ Generate a plan with the following structure for each step:
 - estimatedSources: Expected number of sources (5-15)
 - dependsOn: Array of step IDs this depends on (first step has empty array)
 
+IMPORTANT for dependencies (affects execution parallelism):
+- Steps are INDEPENDENT by default unless they clearly require prior results
+- Most research steps CAN run in parallel: market-sizing, competitor-analysis, trend-analysis, regulatory-scan
+- Only specify dependsOn when a step genuinely needs findings from a prior step
+- Example of NEEDED dependency: "opportunity-analysis" may depend on "market-sizing" and "competitor-analysis"
+- Example of UNNECESSARY dependency: "market-sizing" does NOT need to depend on "competitor-analysis"
+- Fewer dependencies = faster research execution through parallelism
+
 IMPORTANT for queries:
 - Make queries specific and likely to return relevant results
-- Include year (2024) for current data
+- Include year (${getCurrentYear()}) for current data
 - Include region/industry terms when relevant
-- Avoid overly broad or generic queries`
+- Avoid overly broad or generic queries
+- Prefer queries that target authoritative sources (official docs, research papers, industry reports)
+- For market data, include terms like "market size", "market report", "industry analysis"
+- For technical topics, include terms like "documentation", "whitepaper", "technical specification"`
 }
 
 export function createGenerateQueriesPrompt(
@@ -124,7 +138,7 @@ ${constraints.timeframe ? `Timeframe: ${constraints.timeframe}` : ''}
 
 Generate queries that:
 1. Are specific enough to return relevant results
-2. Include relevant year (2024) for current information
+2. Include relevant year (${getCurrentYear()}) for current information
 3. Use industry-standard terminology
 4. Cover different aspects of the step's purpose
 5. Are likely to surface authoritative sources

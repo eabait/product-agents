@@ -240,7 +240,7 @@ export class ResearchPlanner {
       'opportunity-analysis'
     ]
 
-    return rawSteps.map((step, index) => {
+    const normalizedSteps = rawSteps.map((step, index) => {
       const normalizedType = validTypes.includes(step.type as ResearchStepType)
         ? (step.type as ResearchStepType)
         : 'web-search'
@@ -254,6 +254,56 @@ export class ResearchPlanner {
         estimatedSources: step.estimatedSources ?? 8,
         dependsOn: step.dependsOn
       }
+    })
+
+    return this.optimizeDependencies(normalizedSteps)
+  }
+
+  /**
+   * Optimize step dependencies for parallel execution.
+   * Removes unnecessary dependencies between steps that can safely run in parallel.
+   */
+  private optimizeDependencies(steps: ResearchStep[]): ResearchStep[] {
+    // Step types that can typically run in parallel (independent research)
+    const parallelizableTypes = new Set<ResearchStepType>([
+      'market-sizing',
+      'competitor-analysis',
+      'trend-analysis',
+      'regulatory-scan',
+      'web-search'
+    ])
+
+    // Step types that typically need prior findings (synthesis/analysis steps)
+    const synthesisDependentTypes = new Set<ResearchStepType>([
+      'opportunity-analysis',
+      'user-research-synthesis'
+    ])
+
+    const stepMap = new Map(steps.map(s => [s.id, s]))
+
+    return steps.map(step => {
+      // Synthesis steps keep their dependencies - they need prior findings
+      if (synthesisDependentTypes.has(step.type)) {
+        return step
+      }
+
+      // For parallelizable steps, remove dependencies on other parallelizable steps
+      if (parallelizableTypes.has(step.type)) {
+        const optimizedDeps = step.dependsOn.filter(depId => {
+          const depStep = stepMap.get(depId)
+          if (!depStep) return false
+
+          // Keep dependency if the dependent step is a synthesis step
+          // (parallelizable step might depend on a synthesis step's output)
+          return synthesisDependentTypes.has(depStep.type)
+        })
+
+        if (optimizedDeps.length !== step.dependsOn.length) {
+          return { ...step, dependsOn: optimizedDeps }
+        }
+      }
+
+      return step
     })
   }
 

@@ -105,6 +105,11 @@ export interface SynthesizerOptions {
   settings: AgentSettings
 }
 
+/** Minimum source score threshold for inclusion in synthesis (0-1 scale from Tavily) */
+const MIN_SOURCE_SCORE = 0.3
+/** Maximum sources to include per step after filtering */
+const MAX_SOURCES_PER_STEP = 15
+
 export class ResearchSynthesizer {
   private readonly client: OpenRouterClient
   private readonly settings: AgentSettings
@@ -141,7 +146,7 @@ export class ResearchSynthesizer {
       this.generateLimitations(plan.topic, allSources.length, searchQueries, effectiveSettings)
     ])
 
-    const overallConfidence = this.calculateOverallConfidence(findings, allSources.length)
+    const overallConfidence = this.calculateOverallConfidence(findings, allSources)
 
     const methodology: ResearchMethodology = {
       searchQueries,
@@ -193,10 +198,14 @@ export class ResearchSynthesizer {
     stepResult: StepExecutionResult,
     settings: AgentSettings
   ): Promise<ResearchFinding[]> {
+    // Filter sources by quality before extraction
+    const filteredSources = this.filterSourcesByQuality(stepResult.sources)
+    if (filteredSources.length === 0) return []
+
     const prompt = createFindingsExtractionPrompt(
       stepResult.stepType,
       stepResult.label,
-      stepResult.sources,
+      filteredSources,
       topic
     )
 
@@ -212,7 +221,7 @@ export class ResearchSynthesizer {
       return response.findings.map(f => ({
         ...f,
         sources: f.sourceIndices.map(idx => {
-          const source = stepResult.sources[idx]
+          const source = filteredSources[idx]
           return source
             ? {
                 url: source.url,
@@ -402,17 +411,42 @@ export class ResearchSynthesizer {
 
   private calculateOverallConfidence(
     findings: ResearchFinding[],
-    sourceCount: number
+    sources: WebSearchResult[]
   ): number {
     if (findings.length === 0) return 0.3
 
     const avgFindingConfidence =
       findings.reduce((sum, f) => sum + f.confidence, 0) / findings.length
 
-    const sourceBonus = Math.min(sourceCount / 30, 0.2)
+    // Calculate average source quality score
+    const sourcesWithScores = sources.filter(s => s.score !== undefined)
+    const avgSourceScore = sourcesWithScores.length > 0
+      ? sourcesWithScores.reduce((sum, s) => sum + (s.score ?? 0), 0) / sourcesWithScores.length
+      : 0.5 // Default to neutral if no scores available
 
-    const findingBonus = Math.min(findings.length / 20, 0.15)
+    // Source quality bonus: ranges from -0.1 (low quality) to +0.1 (high quality)
+    const sourceQualityBonus = (avgSourceScore - 0.5) * 0.2
 
-    return Math.min(avgFindingConfidence + sourceBonus + findingBonus, 0.95)
+    // Source count bonus (capped)
+    const sourceCountBonus = Math.min(sources.length / 30, 0.15)
+
+    // Finding count bonus (capped)
+    const findingBonus = Math.min(findings.length / 20, 0.1)
+
+    return Math.min(
+      avgFindingConfidence + sourceQualityBonus + sourceCountBonus + findingBonus,
+      0.95
+    )
+  }
+
+  /**
+   * Filter sources by quality score and limit count.
+   * Sources with higher Tavily scores are prioritized.
+   */
+  private filterSourcesByQuality(sources: WebSearchResult[]): WebSearchResult[] {
+    return sources
+      .filter(s => (s.score ?? 0.5) >= MIN_SOURCE_SCORE)
+      .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+      .slice(0, MAX_SOURCES_PER_STEP)
   }
 }

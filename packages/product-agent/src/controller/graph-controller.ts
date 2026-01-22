@@ -4,7 +4,6 @@ import {
   withSpan,
   createStepSpan,
   createSubagentSpan,
-  createVerificationSpan,
   createPlanSpan,
   createApprovalSpan,
   getObservabilityTransport,
@@ -183,21 +182,6 @@ const topologicallySortPlan = (plan: PlanGraph): StepId[] => {
   return resolved
 }
 
-const mapVerificationStatusToRunStatus = (verification?: VerificationResult): RunStatus => {
-  if (!verification) {
-    return STATUS_COMPLETED
-  }
-
-  switch (verification.status) {
-    case 'fail':
-      return STATUS_FAILED
-    case 'needs-review':
-      return STATUS_AWAITING_INPUT
-    default:
-      return STATUS_COMPLETED
-  }
-}
-
 const toControllerStatus = (status: RunStatus): ControllerRunSummary['status'] => {
   switch (status) {
     case STATUS_FAILED:
@@ -246,8 +230,6 @@ export class GraphController implements AgentController {
   private readonly clock: Clock
   private readonly idFactory: () => string
   private readonly workspaceOverrides?: GraphControllerOptions['workspaceOverrides']
-  private readonly verifierGroup: ControllerComposition['verifier']
-  private readonly verifierRegistry?: Record<ArtifactKind, Verifier>
   private readonly runSummaries = new Map<string, ControllerRunSummary>()
   private readonly executionContexts = new Map<string, ExecutionContext>()
   private readonly providerFactory: NonNullable<GraphControllerOptions['providerFactory']>
@@ -264,8 +246,6 @@ export class GraphController implements AgentController {
     this.workspace = composition.workspace
     this.subagents = composition.subagents ?? []
     this.subagentRegistry = options?.subagentRegistry
-    this.verifierGroup = composition.verifier
-    this.verifierRegistry = composition.verifier.registry
     this.config = config
     this.clock = options?.clock ?? (() => new Date())
     this.idFactory = options?.idFactory ?? (() => randomUUID())
@@ -391,18 +371,9 @@ export class GraphController implements AgentController {
             throw new Error('Run completed without producing an artifact')
           }
         } else {
-          const verifier = this.resolveVerifier(executionContext.artifact.kind)
-          if (verifier) {
-            const verification = await this.runVerification(executionContext, verifier, options)
-            executionContext.verification = verification
-            executionContext.status = mapVerificationStatusToRunStatus(verification)
-
-            if (executionContext.status === STATUS_FAILED) {
-              throw new Error('Verification failed')
-            }
-          } else {
-            executionContext.status = STATUS_COMPLETED
-          }
+          // Verification step removed (Option B) - see agent-optimization-langfuse-trace-analysis.md
+          // The verification step was a no-op for most artifacts and added minimal value
+          executionContext.status = STATUS_COMPLETED
         }
       }
 
@@ -689,13 +660,7 @@ export class GraphController implements AgentController {
     // eslint-disable-next-line no-console
     console.log(`[graph-controller] continueFromStep completed, status: ${context.status}`)
 
-    // Run verification if needed
-    const verifier = this.resolveVerifier(context.plan.artifactKind)
-    if (context.status === STATUS_COMPLETED && context.artifact && verifier) {
-      // eslint-disable-next-line no-console
-      console.log(`[graph-controller] running verification for run ${runId}`)
-      await this.runVerification(context, verifier, options)
-    }
+    // Verification step removed (Option B) - see agent-optimization-langfuse-trace-analysis.md
 
     // Run any remaining subagents
     if (context.status === STATUS_COMPLETED) {
@@ -1597,114 +1562,6 @@ export class GraphController implements AgentController {
           subagentId: lifecycle.metadata.id
         }
       })
-    )
-  }
-
-  private resolveVerifier(kind: ArtifactKind): Verifier | undefined {
-    if (this.verifierRegistry) {
-      return this.verifierRegistry[kind]
-    }
-    return this.verifier
-  }
-
-  private async runVerification(
-    context: ExecutionContext,
-    primaryVerifier: Verifier,
-    options?: ControllerStartOptions
-  ): Promise<VerificationResult | undefined> {
-    if (!context.artifact) {
-      return undefined
-    }
-
-    return withSpan(
-      createVerificationSpan({
-        artifactKind: context.artifact.kind,
-        runId: context.runContext.runId
-      }),
-      async () => {
-        emitEvent(
-          options,
-          toProgressEvent({
-            type: 'verification.started',
-            runId: context.runContext.runId
-          })
-        )
-
-        const verifiers = this.verifierGroup
-        const primaryResult = await primaryVerifier.verify({
-          artifact: context.artifact!,
-          context: context.runContext
-        })
-
-        const secondaryResults: VerificationResult[] = []
-        if (verifiers.secondary?.length) {
-          for (const verifier of verifiers.secondary) {
-            const result = await verifier.verify({
-              artifact: primaryResult.artifact,
-              context: context.runContext
-            })
-            secondaryResults.push(result)
-          }
-        }
-
-        const allResults = [primaryResult, ...secondaryResults]
-        const finalArtifact = allResults.reduce<Artifact | undefined>(
-          (latest, result) => result.artifact ?? latest,
-          primaryResult.artifact
-        )
-        const combinedIssues = allResults.flatMap(result => result.issues ?? [])
-
-        const statusOrder: Record<VerificationResult['status'], number> = {
-          fail: 3,
-          'needs-review': 2,
-          pass: 1
-        }
-
-        const finalStatus = allResults.reduce<VerificationResult['status']>(
-          (current, result) =>
-            statusOrder[result.status] > statusOrder[current] ? result.status : current,
-          primaryResult.status
-        )
-
-        const metadata = {
-          primary: primaryResult.metadata,
-          secondary: secondaryResults.map(result => ({
-            status: result.status,
-            metadata: result.metadata,
-            issues: result.issues
-          }))
-        }
-
-        const aggregatedResult: VerificationResult = {
-          status: finalStatus,
-          artifact: finalArtifact ?? context.artifact!,
-          issues: combinedIssues,
-          usage: primaryResult.usage,
-          metadata
-        }
-
-        emitEvent(
-          options,
-          toProgressEvent({
-            type: 'verification.completed',
-            runId: context.runContext.runId,
-            payload: {
-              status: aggregatedResult.status,
-              issues: aggregatedResult.issues
-            }
-          })
-        )
-
-        await this.workspace.appendEvent(
-          context.runContext.runId,
-          createWorkspaceEvent(context.runContext.runId, 'verification', {
-            status: aggregatedResult.status,
-            issues: aggregatedResult.issues
-          })
-        )
-
-        return aggregatedResult
-      }
     )
   }
 
