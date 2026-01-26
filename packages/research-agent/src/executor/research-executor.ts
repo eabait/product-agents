@@ -127,7 +127,7 @@ export class ResearchExecutor {
       allSources,
       totalSourcesCollected: stepResults.reduce((sum, r) => sum + r.sources.length, 0),
       uniqueSourcesCount: allSources.length,
-      totalExecutionTimeMs: Date.now() - startTime
+      totalExecutionTimeMs: Math.max(1, Date.now() - startTime) // ensure non-zero for fast runs
     }
   }
 
@@ -192,7 +192,7 @@ export class ResearchExecutor {
       label: step.label,
       sources: uniqueSources.slice(0, options.maxSources),
       queriesExecuted,
-      executionTimeMs: Date.now() - startTime
+      executionTimeMs: Math.max(1, Date.now() - startTime) // ensure non-zero for fast runs
     }
   }
 
