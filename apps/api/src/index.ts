@@ -429,44 +429,54 @@ const registerRun = (payload: StartRunPayload): RunRecord => {
  * Generate a plan using the Orchestrator without executing.
  */
 const generatePlan = async (record: RunRecord): Promise<OrchestratorPlanProposal> => {
-  const existingArtifacts = new Map<ArtifactKind, Artifact[]>()
+  return withTrace(
+    {
+      runId: record.id,
+      artifactType: record.artifactType,
+      model: record.request.settings?.model,
+      metadata: { phase: 'planning' }
+    },
+    async () => {
+      const existingArtifacts = new Map<ArtifactKind, Artifact[]>()
 
-  // Extract existing artifacts from conversation history
-  for (const message of record.request.messages) {
-    try {
-      const parsed = JSON.parse(message.content)
-      if (parsed && typeof parsed === 'object') {
-        const candidate = parsed as Record<string, unknown>
-        if (typeof candidate.problemStatement === 'string' || candidate.sections) {
-          const artifact: Artifact = {
-            id: `existing-prd-${record.id}`,
-            kind: 'prd',
-            version: '1.0.0',
-            label: 'Existing PRD',
-            data: parsed
+      // Extract existing artifacts from conversation history
+      for (const message of record.request.messages) {
+        try {
+          const parsed = JSON.parse(message.content)
+          if (parsed && typeof parsed === 'object') {
+            const candidate = parsed as Record<string, unknown>
+            if (typeof candidate.problemStatement === 'string' || candidate.sections) {
+              const artifact: Artifact = {
+                id: `existing-prd-${record.id}`,
+                kind: 'prd',
+                version: '1.0.0',
+                label: 'Existing PRD',
+                data: parsed
+              }
+              const prdList = existingArtifacts.get('prd') ?? []
+              prdList.push(artifact)
+              existingArtifacts.set('prd', prdList)
+            }
           }
-          const prdList = existingArtifacts.get('prd') ?? []
-          prdList.push(artifact)
-          existingArtifacts.set('prd', prdList)
+        } catch {
+          // ignore
         }
       }
-    } catch {
-      // ignore
+
+      const proposal = await orchestrator.propose({
+        message: buildConversationContext(record.request.messages),
+        existingArtifacts,
+        conversationHistory: record.request.messages.map(m => ({
+          role: m.role,
+          content: m.content
+        })),
+        contextPayload: record.request.contextPayload,
+        targetArtifact: record.artifactType as ArtifactKind
+      })
+
+      return proposal
     }
-  }
-
-  const proposal = await orchestrator.propose({
-    message: buildConversationContext(record.request.messages),
-    existingArtifacts,
-    conversationHistory: record.request.messages.map(m => ({
-      role: m.role,
-      content: m.content
-    })),
-    contextPayload: record.request.contextPayload,
-    targetArtifact: record.artifactType as ArtifactKind
-  })
-
-  return proposal
+  )
 }
 
 const startRunExecution = async (record: RunRecord) => {
