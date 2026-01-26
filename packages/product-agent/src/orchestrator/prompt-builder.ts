@@ -125,7 +125,7 @@ const buildOutputSchema = (): string => {
  * Build the planning rules section.
  */
 const buildRules = (): string => {
-  return `## Planning Rules
+ return `## Planning Rules
 
 1. **Dependency Order**: Steps that produce artifacts must come before steps that consume them
 2. **No Cycles**: Never create circular dependencies between steps
@@ -135,6 +135,7 @@ const buildRules = (): string => {
 6. **Skills for Atomic Operations**: Use skills for specific operations that don't have a dedicated subagent
 7. **Rationale Required**: Every step must explain WHY that specific tool was chosen
 8. **Clarify Before Planning**: If the user's request is too vague to propose meaningful steps, return a minimal plan (0-2 steps) with clarification questions. Don't propose research on overly broad topics.
+9. **Research-first requires clarifications**: When you start with research or your confidence is below 0.7, include at least 3 targeted clarifications covering target users, market/segment, and differentiation/constraints. Set confidence to 0.65 or lower until those answers are provided.
 
 ## When to Ask for Clarifications (No Research Yet)
 
@@ -158,6 +159,7 @@ Start with research-agent when the request has a **specific domain** but is miss
 
 A request like "Create a PRD for a mobile payment app" has enough context to research (mobile payments is a specific domain).
 A request like "I need a PRD for a new SaaS product" is TOO VAGUE - "SaaS" is an entire industry, not a researchable topic.
+If you choose research-first because of missing context, you MUST also ask clarifying questions (at least 3) about who the users are, which market/segment to prioritize, and how the product should differentiate.
 
 ## Common Patterns
 
@@ -215,7 +217,7 @@ const buildExamples = (): string => {
   "overallRationale": "User wants personas but hasn't provided enough context about the target market, user segments, or competitive landscape. Running research first will provide the necessary context for creating well-informed personas.",
   "confidence": 0.7,
   "warnings": ["Limited context provided - research will help define target user segments"],
-  "suggestedClarifications": ["What specific fitness goals does your app target?", "Is this for beginners, athletes, or a general audience?"],
+  "clarifications": ["What specific fitness goals does your app target?", "Is this for beginners, athletes, or a general audience?"],
   "steps": [
     {
       "id": "step-1",
@@ -259,7 +261,11 @@ const buildExamples = (): string => {
   "overallRationale": "User specified a domain (mobile payment) which is specific enough to research, but lacks details about target users, use cases, and differentiation. Starting with research will gather competitive landscape and market context to inform the PRD.",
   "confidence": 0.6,
   "warnings": ["Limited context about target users and specific use cases"],
-  "clarifications": ["What makes your mobile payment app different from existing solutions like Venmo, PayPal, or Cash App?", "Who is the primary target audience? (consumers, businesses, specific demographics)"],
+  "clarifications": [
+    "Who is the primary target audience? (consumers, businesses, specific demographics)",
+    "What makes your mobile payment app different from existing solutions like Venmo, PayPal, or Cash App?",
+    "Which markets or regions should we prioritize? (e.g., US gig workers, EU SMEs, LATAM peer-to-peer)"
+  ],
   "steps": [
     {
       "id": "step-1",

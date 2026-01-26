@@ -311,6 +311,21 @@ export class PlanTranslator {
     // Validate tool references
     errors.push(...validateToolReferences(raw.steps, this.tools))
 
+    // Research-first or low-confidence PRD plans must include clarifications
+    const firstStep = raw.steps[0]
+    const startsWithResearch =
+      firstStep?.toolId === 'research.core.agent' || firstStep?.toolId?.includes('research.')
+    const requiresClarifications =
+      raw.targetArtifact === 'prd' && (startsWithResearch || raw.confidence < 0.7)
+    if (requiresClarifications) {
+      const clarificationsCount = raw.clarifications?.length ?? 0
+      if (clarificationsCount < 3) {
+        errors.push(
+          'Research-first or low-confidence PRD plans must include at least 3 clarifications covering target users, market/segment, and differentiation.'
+        )
+      }
+    }
+
     // Detect cycles
     const cycles = detectCycles(raw.steps)
     errors.push(...cycles)
