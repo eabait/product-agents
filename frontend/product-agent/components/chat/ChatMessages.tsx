@@ -154,8 +154,8 @@ export function ChatMessages({
                   <div className="mt-4">
                     <PlanReview
                       plan={card.approvalPlan}
-                      onApprove={() =>
-                        onPlanApproval?.({ runId, cardId: card.id, approved: true })
+                      onApprove={feedback =>
+                        onPlanApproval?.({ runId, cardId: card.id, approved: true, feedback })
                       }
                       onReject={feedback =>
                         onPlanApproval?.({
@@ -230,8 +230,8 @@ export function ChatMessages({
               <div className="mt-4">
                 <PlanReview
                   plan={card.approvalPlan}
-                  onApprove={() =>
-                    onPlanApproval?.({ runId, cardId: card.id, approved: true })
+                  onApprove={feedback =>
+                    onPlanApproval?.({ runId, cardId: card.id, approved: true, feedback })
                   }
                   onReject={feedback =>
                     onPlanApproval?.({

@@ -10,7 +10,7 @@ import type { PlanProposal, PlanStepProposal } from '@/types';
 
 export interface PlanReviewProps {
   plan: PlanProposal;
-  onApprove: () => void;
+  onApprove: (_feedback?: string) => void;
   onReject: (_feedback?: string) => void;
   isLoading?: boolean;
   error?: string;
@@ -97,6 +97,7 @@ function StepCard({ step, index }: { step: PlanStepProposal; index: number }) {
 
 export function PlanReview({ plan, onApprove, onReject, isLoading, error }: PlanReviewProps) {
   const [feedback, setFeedback] = useState('');
+  const hasClarifications = plan.suggestedClarifications && plan.suggestedClarifications.length > 0;
 
   const handleReject = () => {
     onReject();
@@ -104,6 +105,15 @@ export function PlanReview({ plan, onApprove, onReject, isLoading, error }: Plan
 
   const handleRequestChanges = () => {
     onReject(feedback.trim() || undefined);
+  };
+
+  const handleApprove = () => {
+    // When there are clarifications, include feedback as the user's answers
+    if (hasClarifications && feedback.trim()) {
+      onApprove(feedback.trim());
+    } else {
+      onApprove();
+    }
   };
 
   return (
@@ -183,10 +193,13 @@ export function PlanReview({ plan, onApprove, onReject, isLoading, error }: Plan
         {/* Feedback Input */}
         <div className="space-y-2">
           <label className="text-sm font-medium">
-            Refinement feedback (optional)
+            {hasClarifications ? 'Your answers (required to proceed)' : 'Refinement feedback (optional)'}
           </label>
           <Textarea
-            placeholder="Describe any changes you'd like to the plan..."
+            placeholder={hasClarifications
+              ? "Please answer the questions above to help refine the plan..."
+              : "Describe any changes you'd like to the plan..."
+            }
             value={feedback}
             onChange={(e) => setFeedback(e.target.value)}
             rows={3}
@@ -214,8 +227,8 @@ export function PlanReview({ plan, onApprove, onReject, isLoading, error }: Plan
           </Button>
         )}
         <Button
-          onClick={onApprove}
-          disabled={isLoading}
+          onClick={handleApprove}
+          disabled={isLoading || (hasClarifications && !feedback.trim())}
         >
           <CheckCircle className="h-4 w-4 mr-2" />
           Approve & Execute
