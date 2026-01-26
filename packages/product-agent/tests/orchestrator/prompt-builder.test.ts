@@ -17,8 +17,7 @@ test('PromptBuilder', async (t) => {
       const builder = createPromptBuilder()
       const prompt = builder.buildSystemPrompt(MOCK_TOOLS)
 
-      // Check skills are included
-      assert.ok(prompt.includes('prd.check-clarification'), 'Should include prd.check-clarification')
+      // Check skills are included (clarification is handled by Orchestrator, not as a skill)
       assert.ok(prompt.includes('prd.analyze-context'), 'Should include prd.analyze-context')
       assert.ok(prompt.includes('prd.assemble-prd'), 'Should include prd.assemble-prd')
 

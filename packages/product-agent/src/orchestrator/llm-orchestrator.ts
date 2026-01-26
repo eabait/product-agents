@@ -3,7 +3,8 @@ import {
   withSpan,
   createPlanSpan,
   isObservabilityEnabled,
-  getObservabilityTransport
+  getObservabilityTransport,
+  recordGeneration
 } from '@product-agents/observability'
 
 import type { RunContext } from '../contracts/core'
@@ -139,13 +140,43 @@ export class LLMOrchestrator implements Orchestrator {
 
       // Generate plan using LLM with tracing (telemetry enabled for OTEL transport)
       const telemetryEnabled = isObservabilityEnabled() && getObservabilityTransport() === 'otel'
+      const startTime = new Date().toISOString()
       const response = await this.textGenerator({
         model: model as any,
         system: systemPrompt,
         prompt: userPrompt,
-        maxTokens: this.orchestratorConfig.maxTokens,
+        maxOutputTokens: this.orchestratorConfig.maxTokens,
         temperature: this.orchestratorConfig.temperature,
         experimental_telemetry: { isEnabled: telemetryEnabled }
+      })
+
+      // Record the generation with full prompts for Langfuse visibility
+      const modelId = typeof (model as any)?.modelId === 'string' ? (model as any).modelId : this.orchestratorConfig.model
+      void recordGeneration({
+        name: 'orchestrator.propose',
+        model: modelId,
+        input: {
+          system: systemPrompt,
+          prompt: userPrompt,
+          message: input.message,
+          targetArtifact: input.targetArtifact
+        },
+        output: response.text,
+        startTime,
+        endTime: new Date().toISOString(),
+        usage: response.usage ? {
+          promptTokens: response.usage.inputTokens,
+          completionTokens: response.usage.outputTokens,
+          totalTokens: response.usage.totalTokens
+        } : undefined,
+        modelParameters: {
+          temperature: this.orchestratorConfig.temperature,
+          maxTokens: this.orchestratorConfig.maxTokens
+        },
+        metadata: {
+          runId,
+          action: 'propose'
+        }
       })
 
       // Parse and translate the response
@@ -205,13 +236,44 @@ export class LLMOrchestrator implements Orchestrator {
 
       // Generate refined plan using LLM with tracing (telemetry enabled for OTEL transport)
       const telemetryEnabled = isObservabilityEnabled() && getObservabilityTransport() === 'otel'
+      const startTime = new Date().toISOString()
       const response = await this.textGenerator({
         model: model as any,
         system: systemPrompt,
         prompt: refinementPrompt,
-        maxTokens: this.orchestratorConfig.maxTokens,
+        maxOutputTokens: this.orchestratorConfig.maxTokens,
         temperature: this.orchestratorConfig.temperature,
         experimental_telemetry: { isEnabled: telemetryEnabled }
+      })
+
+      // Record the generation with full prompts for Langfuse visibility
+      const modelId = typeof (model as any)?.modelId === 'string' ? (model as any).modelId : this.orchestratorConfig.model
+      void recordGeneration({
+        name: 'orchestrator.refine',
+        model: modelId,
+        input: {
+          system: systemPrompt,
+          prompt: refinementPrompt,
+          originalMessage: input.originalInput.message,
+          feedback: input.feedback,
+          currentPlan: currentPlanJson
+        },
+        output: response.text,
+        startTime,
+        endTime: new Date().toISOString(),
+        usage: response.usage ? {
+          promptTokens: response.usage.inputTokens,
+          completionTokens: response.usage.outputTokens,
+          totalTokens: response.usage.totalTokens
+        } : undefined,
+        modelParameters: {
+          temperature: this.orchestratorConfig.temperature,
+          maxTokens: this.orchestratorConfig.maxTokens
+        },
+        metadata: {
+          runId,
+          action: 'refine'
+        }
       })
 
       // Parse and translate the response

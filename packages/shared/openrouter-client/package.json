@@ -20,8 +20,8 @@
     "test": "vitest"
   },
   "dependencies": {
-    "@openrouter/ai-sdk-provider": "^0.0.5",
-    "ai": "^3.1.0",
+    "@openrouter/ai-sdk-provider": "^1.5.4",
+    "ai": "^5.0.0",
     "zod": "^3.22.0",
     "@product-agents/agent-core": "*",
     "@product-agents/observability": "*"

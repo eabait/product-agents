@@ -572,3 +572,214 @@ test('GraphController falls back to direct tool execution when provider call fai
     await fs.rm(workspaceRoot, { recursive: true, force: true })
   }
 })
+
+test('GraphController resumeSubagent passes request.input to subsequent subagent steps', async () => {
+  const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'product-agent-resume-'))
+  const workspaceDao = new FilesystemWorkspaceDAO({ root: workspaceRoot, clock: fixedClock })
+  const config = getDefaultProductAgentConfig()
+  config.workspace.storageRoot = workspaceRoot
+
+  // Plan: init-step (skill) → research-step (subagent, pauses) → prd-step (subagent, needs input)
+  const plan = {
+    id: 'plan-resume-test',
+    artifactKind: 'prd',
+    entryId: 'init-step',
+    createdAt: fixedClock(),
+    version: 'test-plan',
+    nodes: {
+      'init-step': {
+        id: 'init-step',
+        label: 'Initialize',
+        task: { kind: 'init' },
+        status: 'pending' as const,
+        dependsOn: [] as string[],
+        metadata: { skillId: 'init', kind: 'skill' }
+      },
+      'research-step': {
+        id: 'research-step',
+        label: 'Research',
+        task: { kind: 'subagent', agentId: 'research.agent' },
+        status: 'pending' as const,
+        dependsOn: ['init-step'],
+        metadata: {
+          kind: 'subagent',
+          subagentId: 'research.agent',
+          artifactKind: 'research'
+        }
+      },
+      'prd-step': {
+        id: 'prd-step',
+        label: 'Generate PRD',
+        task: { kind: 'subagent', agentId: 'prd.agent' },
+        status: 'pending' as const,
+        dependsOn: ['research-step'],
+        metadata: {
+          kind: 'subagent',
+          subagentId: 'prd.agent',
+          artifactKind: 'prd'
+        }
+      }
+    }
+  }
+
+  const planner = {
+    async createPlan(context: any) {
+      return { plan, context }
+    },
+    async refinePlan(input: any) {
+      return { plan: input.currentPlan, context: input.context }
+    }
+  }
+
+  const initArtifact = {
+    id: 'artifact-init',
+    kind: 'prd',
+    version: '0.1.0',
+    data: { sections: {}, metadata: {}, validation: { is_valid: true, issues: [] as string[], warnings: [] as string[] } },
+    metadata: { createdAt: fixedClock().toISOString() }
+  }
+
+  const skillRunner = {
+    async invoke() {
+      return { output: initArtifact.data, metadata: { artifact: initArtifact }, confidence: 0.9 }
+    }
+  }
+
+  const verifier = {
+    async verify({ artifact }: any) {
+      return { status: 'pass' as const, artifact, issues: [] as any[] }
+    }
+  }
+
+  // The SectionRoutingRequest-shaped input that the PRD subagent expects
+  const sectionRoutingRequest = {
+    message: 'generate product requirements for a budgeting app',
+    context: {
+      contextPayload: { categorizedContext: [{ type: 'note', content: 'test context' }] },
+      existingPRD: undefined,
+      conversationHistory: []
+    },
+    settings: { model: 'test-model', temperature: 0.7, maxTokens: 4096 }
+  }
+
+  // Track subagent executions
+  let researchExecutions = 0
+  let prdExecutions = 0
+  let prdReceivedInput: unknown = undefined
+
+  const researchSubagent: SubagentLifecycle = {
+    metadata: {
+      id: 'research.agent',
+      label: 'Research Agent',
+      version: '1.0.0',
+      artifactKind: 'research',
+      sourceKinds: []
+    },
+    async execute(request) {
+      researchExecutions++
+      if (researchExecutions === 1) {
+        // First call: return awaiting-plan-confirmation
+        return {
+          artifact: {
+            id: 'research-partial',
+            kind: 'research',
+            version: '0.1.0',
+            data: { partial: true },
+            metadata: {
+              extras: {
+                status: 'awaiting-plan-confirmation',
+                plan: { steps: ['search market data', 'analyze competitors'] }
+              }
+            }
+          },
+          metadata: { status: 'awaiting-plan-confirmation' }
+        }
+      }
+      // Second call (resumed with approvedPlan): return completed
+      assert.equal((request.params as any).requirePlanConfirmation, false)
+      return {
+        artifact: {
+          id: 'research-complete',
+          kind: 'research',
+          version: '1.0.0',
+          data: { findings: ['market is growing'] },
+          metadata: {}
+        },
+        metadata: {}
+      }
+    }
+  }
+
+  const prdSubagent: SubagentLifecycle = {
+    metadata: {
+      id: 'prd.agent',
+      label: 'PRD Agent',
+      version: '1.0.0',
+      artifactKind: 'prd',
+      sourceKinds: ['research']
+    },
+    async execute(request) {
+      prdExecutions++
+      prdReceivedInput = (request.params as any).input
+      return {
+        artifact: {
+          id: 'prd-artifact',
+          kind: 'prd',
+          version: '1.0.0',
+          data: { sections: { summary: 'A budgeting app PRD' }, metadata: {}, validation: { is_valid: true, issues: [], warnings: [] } },
+          metadata: {}
+        },
+        metadata: {}
+      }
+    }
+  }
+
+  const controller = new GraphController(
+    {
+      planner,
+      skillRunner,
+      verifier: { primary: verifier, registry: { prd: verifier } },
+      workspace: workspaceDao,
+      subagents: [researchSubagent, prdSubagent]
+    },
+    config,
+    {
+      clock: fixedClock,
+      idFactory: () => 'resume-test-run'
+    }
+  )
+
+  try {
+    // Step 1: Start the run - research subagent should pause
+    const startSummary = await controller.start({
+      request: {
+        artifactKind: 'prd',
+        input: sectionRoutingRequest,
+        createdBy: 'unit-test'
+      }
+    })
+
+    assert.equal(startSummary.status, 'awaiting-input', 'run should be awaiting input after research subagent pauses')
+    assert.equal(researchExecutions, 1, 'research subagent should have been called once')
+    assert.equal(prdExecutions, 0, 'prd subagent should not have been called yet')
+
+    // Step 2: Resume with approved plan - research completes, then PRD executes
+    const approvedPlan = { steps: ['search market data', 'analyze competitors'] }
+    const resumeSummary = await controller.resumeSubagent(
+      'resume-test-run',
+      'research-step',
+      approvedPlan
+    )
+
+    assert.equal(resumeSummary.status, 'completed', 'run should complete after resume')
+    assert.equal(researchExecutions, 2, 'research subagent should have been called twice (initial + resume)')
+    assert.equal(prdExecutions, 1, 'prd subagent should have been called once during continuation')
+
+    // Step 3: Verify the PRD subagent received the correct input
+    assert.ok(prdReceivedInput, 'PRD subagent should have received params.input')
+    assert.deepEqual(prdReceivedInput, sectionRoutingRequest, 'PRD subagent params.input should be the full SectionRoutingRequest')
+  } finally {
+    await workspaceDao.teardown('resume-test-run').catch(() => {})
+    await fs.rm(workspaceRoot, { recursive: true, force: true })
+  }
+})

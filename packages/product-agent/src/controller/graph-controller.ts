@@ -577,6 +577,7 @@ export class GraphController implements AgentController {
     const subagentRequest = {
       params: {
         ...(node.inputs ?? {}),
+        input: context.runContext.request.input,
         approvedPlan,
         requirePlanConfirmation: false // Don't ask for confirmation again
       },
@@ -785,7 +786,10 @@ export class GraphController implements AgentController {
         )
 
         const subagentRequest = {
-          params: node.inputs ?? {},
+          params: {
+            ...(node.inputs ?? {}),
+            input: context.runContext.request.input
+          },
           run: context.runContext,
           sourceArtifact,
           emit: (event: ProgressEvent) => {
@@ -1190,7 +1194,7 @@ export class GraphController implements AgentController {
     try {
       const telemetryEnabled = isOtelTelemetryEnabled()
       const modelId = resolveModelId(params.model) ?? params.context.runContext.settings.model
-      const maxTokens = Math.min(params.context.runContext.settings.maxOutputTokens ?? 8000, 2048)
+      const maxOutputTokens = Math.min(params.context.runContext.settings.maxOutputTokens ?? 8000, 2048)
       const systemPrompt = this.buildToolSystemPrompt(params.context)
       const userPrompt = this.buildToolPrompt(params.context, params.node)
       const startTime = new Date().toISOString()
@@ -1202,7 +1206,7 @@ export class GraphController implements AgentController {
           [params.toolName]: params.tool as any
         },
         toolChoice: 'required',
-        maxTokens,
+        maxOutputTokens,
         temperature: params.context.runContext.settings.temperature,
         maxRetries: this.config.runtime.retry.attempts,
         abortSignal: params.options?.signal,
@@ -1218,7 +1222,8 @@ export class GraphController implements AgentController {
         (response as any).toolResults?.[0]?.output ??
         (response as any).toolResults?.[0]
       if (!toolResult) {
-        throw new Error(`Tool "${params.toolName}" did not return a result`)
+        // Fallback: execute the tool directly if the model failed to return a tool result.
+        return this.invokeToolDirectly(params.tool, params.node, params.context, params.options)
       }
 
       if (isIngestionTelemetryEnabled()) {
@@ -1241,7 +1246,7 @@ export class GraphController implements AgentController {
           usage,
           modelParameters: {
             temperature: params.context.runContext.settings.temperature,
-            maxTokens
+            maxTokens: maxOutputTokens
           },
           metadata: {
             runId: params.context.runContext.runId,
@@ -1419,6 +1424,33 @@ export class GraphController implements AgentController {
   }): Promise<void> {
     const { result, node, lifecycle, context, options } = params
     const artifact = result.artifact
+
+    const runStatusOverride =
+      (result.metadata?.runStatus as RunStatus | undefined) ||
+      (artifact?.metadata?.extras?.status as RunStatus | undefined)
+
+    if (runStatusOverride === STATUS_AWAITING_INPUT && !artifact) {
+      // Propagate awaiting-input status without requiring an artifact (e.g., clarification flows)
+      context.status = STATUS_AWAITING_INPUT
+      const clarification = result.metadata?.clarification as ClarificationResult | undefined
+      if (clarification) {
+        context.clarification = clarification
+        context.runContext.metadata = {
+          ...(context.runContext.metadata ?? {}),
+          clarification
+        }
+      }
+      await this.workspace.appendEvent(
+        context.runContext.runId,
+        createWorkspaceEvent(context.runContext.runId, 'subagent', {
+          action: 'awaiting-input',
+          stepId: node.id,
+          subagentId: lifecycle.metadata.id
+        })
+      )
+      return
+    }
+
     if (!artifact) {
       throw new Error(`Subagent "${lifecycle.metadata.id}" did not return an artifact`)
     }

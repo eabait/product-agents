@@ -1,5 +1,4 @@
 import {
-  ClarificationAnalyzer,
   ContextAnalyzer,
   TargetUsersSectionWriter,
   SolutionSectionWriter,
@@ -14,8 +13,7 @@ import {
   combineConfidenceAssessments,
   SECTION_NAMES,
   type SectionName,
-  DEFAULT_TEMPERATURE,
-  type ClarificationResult
+  DEFAULT_TEMPERATURE
 } from '@product-agents/prd-shared'
 import type {
   SkillRunner,
@@ -33,8 +31,6 @@ interface RunState {
   confidenceAssessments: Record<string, ConfidenceAssessment>
   validationIssues: Record<string, string[]>
   startedAt: number
-  clarification?: ClarificationResult
-  haltReason?: string
 }
 
 interface PrdSkillRunnerOptions {
@@ -42,7 +38,6 @@ interface PrdSkillRunnerOptions {
   fallbackModel?: string | null
   factories?: {
     createContextAnalyzer?: (settings: AgentSettings) => ContextAnalyzer
-    createClarificationAnalyzer?: (settings: AgentSettings) => ClarificationAnalyzer
     createSectionWriter?: (section: SectionName, settings: AgentSettings) => {
       writeSection: TargetUsersSectionWriter['writeSection']
     }
@@ -107,8 +102,6 @@ export class PrdSkillRunner implements SkillRunner<PrdPlanTask, unknown> {
     const state = this.ensureState(request.context.run.runId)
 
     switch (task.kind) {
-      case 'clarification-check':
-        return this.runClarificationCheck(request, runInput, state)
       case 'analyze-context':
         return this.runContextAnalysis(request, runInput, state)
       case 'write-section':
@@ -117,44 +110,6 @@ export class PrdSkillRunner implements SkillRunner<PrdPlanTask, unknown> {
         return this.runAssembly(request, runInput, state)
       default:
         throw new Error(`Unsupported PRD task kind: ${String((task as any)?.kind)}`)
-    }
-  }
-
-  private async runClarificationCheck(
-    request: PrdSkillRequest,
-    runInput: SectionRoutingRequest,
-    state: RunState
-  ): Promise<SkillResult<unknown>> {
-    const analyzerFactory =
-      this.factories?.createClarificationAnalyzer ??
-      ((settings: AgentSettings) => new ClarificationAnalyzer(settings))
-    const analyzer = analyzerFactory(this.createAgentSettings(request, runInput))
-    const result = await analyzer.analyze({
-      message: runInput.message,
-      context: {
-        contextPayload: runInput.context?.contextPayload,
-        existingPRD: runInput.context?.existingPRD
-      }
-    })
-
-    state.analysisResults.set(result.name, result)
-    state.clarification = result.data
-
-    const metadata: Record<string, unknown> = {
-      ...(result.metadata ?? {}),
-      clarification: result.data
-    }
-
-    if (result.data.needsClarification) {
-      state.haltReason = 'clarification-required'
-      metadata.runStatus = 'awaiting-input'
-      metadata.haltReason = state.haltReason
-    }
-
-    return {
-      output: result,
-      confidence: confidenceLevelToScore(result.confidence),
-      metadata
     }
   }
 

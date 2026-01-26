@@ -72,9 +72,9 @@ export const PRD_SUFFICIENT_CONTEXT_SCENARIOS: TestScenario[] = [
       'without constant meetings. Target users are engineering teams of 10-50 people.',
     expectedTarget: 'prd',
     expectedTools: {
-      required: ['prd.check-clarification', 'prd.analyze-context'],
+      required: ['prd.analyze-context'],
       forbidden: ['research.core.agent'],
-      minSteps: 2,
+      minSteps: 1,
       maxSteps: 8
     },
     expectedConfidence: [0.75, 1.0],
@@ -95,9 +95,9 @@ export const PRD_SUFFICIENT_CONTEXT_SCENARIOS: TestScenario[] = [
       'to collaborate on contracts and legal briefs.',
     expectedTarget: 'prd',
     expectedTools: {
-      required: ['prd.check-clarification', 'prd.analyze-context'],
+      required: ['prd.analyze-context'],
       forbidden: ['research.core.agent'],
-      minSteps: 2,
+      minSteps: 1,
       maxSteps: 8
     },
     expectedConfidence: [0.8, 1.0],
@@ -241,7 +241,7 @@ export const RESEARCH_SCENARIOS: TestScenario[] = [
     expectedTools: {
       required: ['research.core.agent'],
       shouldStartWith: ['research.core.agent'],
-      forbidden: ['persona.builder', 'prd.check-clarification'],
+      forbidden: ['persona.builder'],
       minSteps: 1,
       maxSteps: 2
     },
@@ -309,15 +309,6 @@ export const COMPLEX_WORKFLOW_SCENARIOS: TestScenario[] = [
  */
 export const MOCK_TOOLS: ToolDescriptor[] = [
   // PRD Skills
-  {
-    id: 'prd.check-clarification',
-    type: 'skill',
-    label: 'Check Clarification',
-    description: 'Checks if clarification is needed from the user',
-    inputArtifacts: ['prompt'],
-    outputArtifact: 'prd',
-    capabilities: ['clarification', 'validation']
-  },
   {
     id: 'prd.analyze-context',
     type: 'skill',

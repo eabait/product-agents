@@ -8,7 +8,7 @@ import {
   type SubagentRegistry
 } from '@product-agents/product-agent'
 import { createPersonaAgentSubagent } from '@product-agents/persona-agent'
-import { createPrdSkillRunner, createPrdVerifier } from '../adapters'
+import { createPrdSkillRunner, createPrdVerifier, createPrdPlanner } from '../adapters'
 
 interface CreatePrdControllerOptions {
   config?: ProductAgentConfig
@@ -39,6 +39,7 @@ export const createPrdController = (options?: CreatePrdControllerOptions): Agent
     clock: options?.clock
   })
   const verifier = createPrdVerifier({ clock: options?.clock })
+  const planner = createPrdPlanner({ config, clock: options?.clock })
 
   const workspace = new FilesystemWorkspaceDAO({
     root: options?.workspaceRoot ?? config.workspace.storageRoot,
@@ -49,6 +50,7 @@ export const createPrdController = (options?: CreatePrdControllerOptions): Agent
 
   return new GraphController(
     {
+      planner,
       skillRunner,
       verifier: {
         primary: verifier,

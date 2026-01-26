@@ -33,8 +33,8 @@ test('createPrdPlanner builds plan with context analysis, selected sections, and
 
   const { plan } = await planner.createPlan(runContext)
 
-  assert.equal(plan.entryId, 'clarification-check')
-  // When classifier is unavailable, planner may short-circuit to clarification-only.
-  const hasCoreNodes = Boolean(plan.nodes['clarification-check'])
+  assert.equal(plan.entryId, 'analyze-context')
+  // Verify the plan has the expected core nodes
+  const hasCoreNodes = Boolean(plan.nodes['analyze-context'])
   assert.ok(hasCoreNodes || Object.keys(plan.nodes).length === 0)
 })

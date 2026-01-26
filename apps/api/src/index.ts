@@ -16,7 +16,7 @@ import {
   runWithTraceContext
 } from '@product-agents/observability'
 
-import { createPrdController } from '@product-agents/prd-agent'
+import { createPrdController, prdAgentManifest } from '@product-agents/prd-agent'
 import {
   loadProductAgentConfig,
   type ArtifactIntent,
@@ -132,6 +132,10 @@ if (!registeredSubagents.has(personaAgentManifest.id)) {
 
 if (!registeredSubagents.has(researchAgentManifest.id)) {
   subagentRegistry.register(researchAgentManifest, researchAgentLoader)
+}
+
+if (!registeredSubagents.has(prdAgentManifest.id)) {
+  subagentRegistry.register(prdAgentManifest)
 }
 
 const controller = createPrdController({ config, subagentRegistry })
@@ -948,6 +952,39 @@ const server = http.createServer(async (req, res) => {
 
       if (payload.approved) {
         // User approved the plan - start execution with the proposed plan
+        const pendingClarifications =
+          (record.proposedPlan?.suggestedClarifications ?? []).filter(
+            (q: unknown) => typeof q === 'string' && q.trim().length > 0
+          )
+        const hasFeedback = typeof payload.feedback === 'string' && payload.feedback.trim().length > 0
+
+        if (pendingClarifications.length > 0 && !hasFeedback) {
+          console.warn(
+            `[product-agent/api] approval blocked: run ${record.id} has ${pendingClarifications.length} outstanding clarifications`
+          )
+          writeJson(res, 400, {
+            error:
+              'Clarifications are required before execution. Please answer the questions and resubmit approval with that context.',
+            runId: record.id,
+            clarifications: pendingClarifications
+          })
+          return
+        }
+
+        // If the user provided feedback while clarifications were outstanding,
+        // treat it as their answers so execution can proceed.
+        if (pendingClarifications.length > 0 && hasFeedback) {
+          record.request.messages.push({
+            id: `clarification-${Date.now()}`,
+            role: 'user',
+            content: `Clarification responses: ${payload.feedback}`,
+            timestamp: new Date().toISOString()
+          })
+          if (record.proposedPlan) {
+            record.proposedPlan.suggestedClarifications = []
+          }
+        }
+
         if (record.proposedPlan) {
           // Immediately update status to prevent duplicate approvals (race condition)
           console.log(`[product-agent/api] run ${record.id} approved, setting status to running`)

@@ -19,8 +19,10 @@
   "dependencies": {
     "@product-agents/observability": "*",
     "@product-agents/product-agent": "*",
+    "@product-agents/prd-agent": "*",
     "@product-agents/prd-shared": "*",
     "@product-agents/persona-agent": "*",
+    "@product-agents/research-agent": "*",
     "@product-agents/agent-core": "*",
     "zod": "^3.25.76"
   },

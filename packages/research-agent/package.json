@@ -4,10 +4,10 @@
   "description": "Research subagent for market intelligence and competitor analysis with web search capabilities",
   "private": true,
   "type": "module",
-  "main": "src/index.ts",
+  "main": "dist/index.js",
   "types": "src/index.ts",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsup",
     "test": "node --test --loader ./tests/ts-loader.mjs tests/**/*.test.ts",
     "lint": "eslint 'src/**/*.{ts,tsx}'",
     "clean": "rm -rf dist"
@@ -18,9 +18,10 @@
     "zod": "^3.25.76"
   },
   "peerDependencies": {
-    "ai": "^3.1.0"
+    "ai": "^5.0.0"
   },
   "devDependencies": {
+    "tsup": "^7.2.0",
     "typescript": "^5.0.0"
   }
 }

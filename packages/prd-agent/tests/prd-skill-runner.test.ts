@@ -31,28 +31,6 @@ class StubSectionWriter {
   }
 }
 
-class StubClarificationAnalyzer {
-  async analyze() {
-    return {
-      name: 'clarification',
-      data: {
-        needsClarification: false,
-        confidence: {
-          level: 'medium',
-          reasons: ['stub clarification result']
-        },
-        missingCritical: [],
-        questions: []
-      },
-      confidence: {
-        level: 'medium',
-        reasons: ['stub clarification analyzer']
-      },
-      metadata: {}
-    }
-  }
-}
-
 test('PrdSkillRunner composes context analysis, section writers, and assembly', async () => {
   const config = getDefaultProductAgentConfig()
   const settings = resolveRunSettings(config)
@@ -60,7 +38,6 @@ test('PrdSkillRunner composes context analysis, section writers, and assembly', 
   const runner = new PrdSkillRunner({
     clock: fixedClock,
     factories: {
-      createClarificationAnalyzer: () => new StubClarificationAnalyzer() as any,
       createContextAnalyzer: () => ({
         async analyze() {
           return {
@@ -112,21 +89,12 @@ test('PrdSkillRunner composes context analysis, section writers, and assembly', 
     metadata: undefined
   }
 
-  const clarificationNode: PlanNode = {
-    id: 'clarification-check',
-    label: 'Clarification check',
-    task: { kind: 'clarification-check' },
-    status: 'pending',
-    dependsOn: [],
-    metadata: { skillId: 'prd.check-clarification' }
-  }
-
   const analysisNode: PlanNode = {
     id: 'analyze-context',
     label: 'Analyze context',
     task: { kind: 'analyze-context' },
     status: 'pending',
-    dependsOn: ['clarification-check'],
+    dependsOn: [],
     metadata: { skillId: 'prd.analyze-context' }
   }
 
@@ -147,16 +115,6 @@ test('PrdSkillRunner composes context analysis, section writers, and assembly', 
     dependsOn: ['write-targetUsers'],
     metadata: { skillId: 'prd.assemble-prd' }
   }
-
-  await runner.invoke({
-    skillId: 'prd.check-clarification',
-    planNode: clarificationNode,
-    input: clarificationNode.task,
-    context: {
-      run: runContext,
-      step: clarificationNode
-    }
-  })
 
   await runner.invoke({
     skillId: 'prd.analyze-context',
@@ -202,16 +160,6 @@ test('PrdSkillRunner composes context analysis, section writers, and assembly', 
       createdBy: 'unit-test-2'
     }
   }
-
-  await runner.invoke({
-    skillId: 'prd.check-clarification',
-    planNode: clarificationNode,
-    input: clarificationNode.task,
-    context: {
-      run: secondRunContext,
-      step: clarificationNode
-    }
-  })
 
   await runner.invoke({
     skillId: 'prd.analyze-context',

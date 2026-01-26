@@ -131,8 +131,8 @@ const buildRules = (): string => {
 2. **No Cycles**: Never create circular dependencies between steps
 3. **Minimize Steps**: Only include tools that are necessary for the user's request
 4. **Reuse Artifacts**: If an artifact already exists, don't regenerate it unless explicitly asked
-5. **Subagents for Complex Tasks**: Use subagents for generating complete artifacts (personas, research)
-6. **Skills for Atomic Operations**: Use skills for specific operations like writing sections or analyzing context
+5. **Subagents for Complete Artifacts**: Use subagents for generating complete artifacts (PRD, personas, research). The PRD subagent handles the full PRD generation workflow internally.
+6. **Skills for Atomic Operations**: Use skills for specific operations that don't have a dedicated subagent
 7. **Rationale Required**: Every step must explain WHY that specific tool was chosen
 8. **Clarify Before Planning**: If the user's request is too vague to propose meaningful steps, return a minimal plan (0-2 steps) with clarification questions. Don't propose research on overly broad topics.
 
@@ -161,8 +161,8 @@ A request like "I need a PRD for a new SaaS product" is TOO VAGUE - "SaaS" is an
 
 ## Common Patterns
 
-- **PRD with full context**: clarification → analyze-context → section-writers → assemble-prd
-- **PRD with minimal context**: research.core.agent → persona.builder → prd skills
+- **PRD with full context**: prd.core.agent (handles full workflow internally)
+- **PRD with minimal context**: research.core.agent → persona.builder → prd.core.agent
 - **Personas with minimal context**: research.core.agent → persona.builder
 - **Quick Market Research**: prompt → research.core.agent`
 }
@@ -176,25 +176,16 @@ const buildExamples = (): string => {
 ### Example 1: User asks "I need a PRD for a task management app for remote teams that integrates with Slack and focuses on async collaboration"
 {
   "targetArtifact": "prd",
-  "overallRationale": "User provided detailed context: target audience (remote teams), integration requirements (Slack), and core value proposition (async collaboration). This is enough context to proceed directly with PRD generation.",
+  "overallRationale": "User provided detailed context: target audience (remote teams), integration requirements (Slack), and core value proposition (async collaboration). This is enough context to proceed directly with PRD generation using the PRD subagent.",
   "confidence": 0.9,
   "steps": [
     {
       "id": "step-1",
-      "toolId": "prd.check-clarification",
-      "toolType": "skill",
-      "label": "Check if clarification needed",
-      "rationale": "First verify we have enough information to proceed",
+      "toolId": "prd.core.agent",
+      "toolType": "subagent",
+      "label": "Generate complete PRD",
+      "rationale": "User provided sufficient context for the PRD subagent to handle clarification, context analysis, section writing, and assembly internally",
       "dependsOn": [],
-      "outputArtifact": "prd"
-    },
-    {
-      "id": "step-2",
-      "toolId": "prd.analyze-context",
-      "toolType": "skill",
-      "label": "Analyze product context",
-      "rationale": "Extract key information from user's request",
-      "dependsOn": ["step-1"],
       "outputArtifact": "prd"
     }
   ]
@@ -281,10 +272,10 @@ const buildExamples = (): string => {
     },
     {
       "id": "step-2",
-      "toolId": "prd.analyze-context",
-      "toolType": "skill",
-      "label": "Analyze context from research",
-      "rationale": "Extract key insights from research to inform PRD structure",
+      "toolId": "prd.core.agent",
+      "toolType": "subagent",
+      "label": "Generate PRD using research insights",
+      "rationale": "PRD subagent will use research artifact to generate a comprehensive PRD with market context",
       "dependsOn": ["step-1"],
       "outputArtifact": "prd"
     }
@@ -322,10 +313,10 @@ const buildExamples = (): string => {
     },
     {
       "id": "step-3",
-      "toolId": "prd.analyze-context",
-      "toolType": "skill",
-      "label": "Analyze context from research and personas",
-      "rationale": "Synthesize research and persona insights into PRD structure",
+      "toolId": "prd.core.agent",
+      "toolType": "subagent",
+      "label": "Generate PRD using research and personas",
+      "rationale": "PRD subagent will synthesize research and persona artifacts into a comprehensive PRD",
       "dependsOn": ["step-2"],
       "outputArtifact": "prd"
     }

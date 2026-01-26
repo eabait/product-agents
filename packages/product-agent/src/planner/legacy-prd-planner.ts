@@ -5,9 +5,6 @@ import { ALL_SECTION_NAMES } from '@product-agents/prd-shared'
 
 export type PrdPlanTask =
   | {
-      kind: 'clarification-check'
-    }
-  | {
       kind: 'analyze-context'
     }
   | {
@@ -57,26 +54,16 @@ export class LegacyPrdPlanner implements Planner<PrdPlanTask> {
     const plan: PlanGraph<PrdPlanTask> = {
       id: `plan-${context.runId}`,
       artifactKind: context.request.artifactKind,
-      entryId: 'clarification-check',
+      entryId: 'analyze-context',
       createdAt,
       version: PLAN_VERSION,
       nodes: {
-        'clarification-check': {
-          id: 'clarification-check',
-          label: 'Check prompt for clarification needs',
-          task: { kind: 'clarification-check' },
-          status: 'pending',
-          dependsOn: [],
-          metadata: {
-            skillId: 'prd.check-clarification'
-          }
-        },
         'analyze-context': {
           id: 'analyze-context',
           label: 'Analyze product context',
           task: { kind: 'analyze-context' },
           status: 'pending',
-          dependsOn: ['clarification-check'],
+          dependsOn: [],
           metadata: {
             skillId: 'prd.analyze-context'
           }

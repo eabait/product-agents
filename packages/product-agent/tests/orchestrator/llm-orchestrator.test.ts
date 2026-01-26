@@ -284,8 +284,7 @@ test('LLMOrchestrator', async (t) => {
         overallRationale: 'Generate PRD for task management app',
         confidence: 0.9,
         steps: [
-          { id: 'step-1', toolId: 'prd.check-clarification', toolType: 'skill', label: 'Check Clarification', rationale: 'Verify requirements', dependsOn: [] },
-          { id: 'step-2', toolId: 'prd.analyze-context', toolType: 'skill', label: 'Analyze Context', rationale: 'Extract key info', dependsOn: ['step-1'] }
+          { id: 'step-1', toolId: 'prd.analyze-context', toolType: 'skill', label: 'Analyze Context', rationale: 'Extract key info', dependsOn: [] }
         ]
       })
 
@@ -308,7 +307,7 @@ test('LLMOrchestrator', async (t) => {
 
       assert.ok(proposal.plan)
       assert.equal(proposal.targetArtifact, 'prd')
-      assert.equal(proposal.steps.length, 2)
+      assert.equal(proposal.steps.length, 1)
       assert.ok(proposal.confidence >= 0 && proposal.confidence <= 1)
       assert.ok(proposal.overallRationale.length > 0)
     })

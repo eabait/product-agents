@@ -154,7 +154,21 @@ export const createPrdAgentSubagent = (
         }
       )
 
+      // Allow awaiting-input to propagate for clarification flows
       if (summary.status !== 'completed' || !summary.artifact) {
+        if (summary.status === 'awaiting-input') {
+          return {
+            // Artifact may be absent for clarification flows; cast to satisfy interface.
+            artifact: summary.artifact as Artifact<SectionRoutingResponse>,
+            progress,
+            metadata: {
+              subagentRunId: summary.runId,
+              originatingSubagent: prdAgentManifest.id,
+              runStatus: summary.status,
+              ...(summary.metadata?.clarification ? { clarification: summary.metadata.clarification } : {})
+            }
+          }
+        }
         throw new Error(`PRD subagent run did not complete successfully (status: ${summary.status})`)
       }
 
