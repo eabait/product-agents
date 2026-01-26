@@ -106,7 +106,7 @@ const createMockPlanResponse = (scenario: TestScenario): string => {
   // Generate clarifications based on expectations
   const clarifications: string[] = []
   if (scenario.expectClarifications) {
-    const minClarifications = scenario.expectMinClarifications ?? 1
+    const minClarifications = Math.max(scenario.expectMinClarifications ?? 1, 3)
     const clarificationTemplates = [
       'What specific market or industry is this product targeting?',
       'What problem or pain point will this product solve?',
@@ -318,7 +318,11 @@ test('LLMOrchestrator', async (t) => {
         overallRationale: 'Plan with limited context',
         confidence: 0.5,
         warnings: ['Limited context provided'],
-        clarifications: ['What is your target audience?', 'What problem does this solve?'],
+        clarifications: [
+          'Who is your target audience?',
+          'What market or region should we focus on?',
+          'How will this product differentiate?'
+        ],
         steps: [
           { id: 'step-1', toolId: 'research.core.agent', toolType: 'subagent', label: 'Research', rationale: 'Gather context', dependsOn: [] }
         ]
@@ -399,6 +403,11 @@ test('LLMOrchestrator', async (t) => {
         targetArtifact: 'prd',
         overallRationale: 'Research first, then PRD',
         confidence: 0.85,
+        clarifications: [
+          'Who are the primary users?',
+          'Which market segment?',
+          'What differentiates the product?'
+        ],
         steps: [
           { id: 'step-1', toolId: 'research.core.agent', toolType: 'subagent', label: 'Research', rationale: 'Added per user feedback', dependsOn: [] },
           { id: 'step-2', toolId: 'prd.analyze-context', toolType: 'skill', label: 'Analyze', rationale: 'Process research', dependsOn: ['step-1'] }
@@ -460,6 +469,11 @@ test('LLMOrchestrator', async (t) => {
         targetArtifact: 'prd',
         overallRationale: 'User provided healthcare domain context. Now specific enough to research the healthcare care coordination market before building PRD.',
         confidence: 0.7,
+        clarifications: [
+          'Who are the primary users?',
+          'Which market segment?',
+          'What differentiates the product?'
+        ],
         steps: [
           { id: 'step-1', toolId: 'research.core.agent', toolType: 'subagent', label: 'Research healthcare market', rationale: 'Gather competitive and market context', dependsOn: [], outputArtifact: 'research' },
           { id: 'step-2', toolId: 'prd.analyze-context', toolType: 'skill', label: 'Analyze context', rationale: 'Process research insights', dependsOn: ['step-1'], outputArtifact: 'prd' }
@@ -505,7 +519,10 @@ test('LLMOrchestrator', async (t) => {
       assert.equal(refinedProposal.steps.length, 2, 'Refined plan should have steps')
       assert.equal(refinedProposal.steps[0].toolId, 'research.core.agent', 'First step should be research')
       assert.ok(refinedProposal.confidence > 0.5, 'Confidence should increase with domain context')
-      assert.equal(refinedProposal.suggestedClarifications?.length ?? 0, 0, 'Should not have clarifications anymore')
+      assert.ok(
+        (refinedProposal.suggestedClarifications?.length ?? 0) >= 3,
+        'Should keep clarifications when starting with research'
+      )
     })
   })
 
@@ -608,9 +625,11 @@ test('LLMOrchestrator Scenarios', async (t) => {
 
         // Should suggest clarifications
         if (scenario.expectClarifications) {
+          const minClarifications = Math.max(scenario.expectMinClarifications ?? 1, 3)
           assert.ok(
-            proposal.suggestedClarifications && proposal.suggestedClarifications.length > 0,
-            `[${scenario.name}] Should suggest clarifications`
+            proposal.suggestedClarifications &&
+              proposal.suggestedClarifications.length >= minClarifications,
+            `[${scenario.name}] Should suggest at least ${minClarifications} clarifications`
           )
         }
       })
@@ -656,17 +675,10 @@ test('LLMOrchestrator Scenarios', async (t) => {
 
         // Should have clarifications
         assert.ok(
-          proposal.suggestedClarifications && proposal.suggestedClarifications.length > 0,
-          `[${scenario.name}] Should suggest clarifications`
+          proposal.suggestedClarifications &&
+            proposal.suggestedClarifications.length >= Math.max(scenario.expectMinClarifications ?? 1, 3),
+          `[${scenario.name}] Should suggest at least ${Math.max(scenario.expectMinClarifications ?? 1, 3)} clarifications`
         )
-
-        // Check minimum clarifications if specified
-        if (scenario.expectMinClarifications) {
-          assert.ok(
-            proposal.suggestedClarifications && proposal.suggestedClarifications.length >= scenario.expectMinClarifications,
-            `[${scenario.name}] Should have at least ${scenario.expectMinClarifications} clarifications, got ${proposal.suggestedClarifications?.length ?? 0}`
-          )
-        }
       })
     }
   })

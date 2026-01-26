@@ -239,6 +239,11 @@ test('PlanTranslator', async (t) => {
         targetArtifact: 'prd',
         overallRationale: 'Test',
         confidence: 0.3,
+        clarifications: [
+          'Who are the users?',
+          'Which market segment?',
+          'What differentiates this product?'
+        ],
         steps: [
           { id: 'step-1', toolId: 'prd.analyze-context', toolType: 'skill', label: 'A', rationale: 'A', dependsOn: [] }
         ]
@@ -465,7 +470,11 @@ test('PlanTranslator', async (t) => {
         overallRationale: 'Complete PRD generation plan',
         confidence: 0.85,
         warnings: ['Some warning'],
-        clarifications: ['Some clarification'],
+        clarifications: [
+          'Who are the primary users?',
+          'Which market or region should we prioritize?',
+          'What differentiates this product?'
+        ],
         steps: [
           { id: 'step-1', toolId: 'research.core.agent', toolType: 'subagent' as const, label: 'Research', rationale: 'Gather context', dependsOn: [], outputArtifact: 'research' },
           { id: 'step-2', toolId: 'prd.analyze-context', toolType: 'skill' as const, label: 'Analyze', rationale: 'Process context', dependsOn: ['step-1'] }
@@ -481,7 +490,11 @@ test('PlanTranslator', async (t) => {
       assert.equal(proposal.confidence, 0.85)
       assert.equal(proposal.targetArtifact, 'prd')
       assert.deepEqual(proposal.warnings, ['Some warning'])
-      assert.deepEqual(proposal.suggestedClarifications, ['Some clarification'])
+      assert.deepEqual(proposal.suggestedClarifications, [
+        'Who are the primary users?',
+        'Which market or region should we prioritize?',
+        'What differentiates this product?'
+      ])
     })
 
     await t.test('merges validation warnings with LLM warnings', () => {
@@ -491,6 +504,11 @@ test('PlanTranslator', async (t) => {
         overallRationale: 'Test',
         confidence: 0.3, // Low confidence triggers warning
         warnings: ['LLM warning'],
+        clarifications: [
+          'Who are the users?',
+          'Which market segment?',
+          'What is the differentiation?'
+        ],
         steps: [
           { id: 'step-1', toolId: 'prd.analyze-context', toolType: 'skill' as const, label: 'Test', rationale: 'Test', dependsOn: [] }
         ]

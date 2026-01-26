@@ -296,8 +296,9 @@ export const COMPLEX_WORKFLOW_SCENARIOS: TestScenario[] = [
       maxSteps: 8
     },
     expectedConfidence: [0.6, 0.9],
-    expectWarnings: false,
-    expectClarifications: false,
+    expectWarnings: true,
+    expectClarifications: true,
+    expectMinClarifications: 3,
     tags: ['complex', 'multi-artifact', 'full-workflow']
   }
 ]
