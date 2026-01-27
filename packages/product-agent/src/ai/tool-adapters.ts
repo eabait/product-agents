@@ -91,8 +91,13 @@ export const createSubagentTool = (params: SubagentToolParams) =>
       const contextPayload = requestInput?.context?.contextPayload as Record<string, unknown> | undefined
 
       // Merge node params and context payload, with context payload taking precedence
+      // Also include the full input for subagents that require it (e.g., PRD subagent)
       const nodeParams = (params.node.metadata?.params as Record<string, unknown>) ?? {}
-      const subagentParams = contextPayload ? { ...nodeParams, ...contextPayload } : nodeParams
+      const subagentParams = {
+        ...nodeParams,
+        ...(contextPayload ?? {}),
+        input: params.runContext.request.input
+      }
 
       const result = await lifecycle.execute({
         params: subagentParams,

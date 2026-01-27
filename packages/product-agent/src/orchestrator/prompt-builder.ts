@@ -81,6 +81,74 @@ const formatExistingArtifacts = (artifacts: Map<ArtifactKind, Artifact[]>): stri
 }
 
 /**
+ * Maximum characters to include from a single message content.
+ * Large JSON artifacts are summarized instead of included fully.
+ */
+const MAX_MESSAGE_CONTENT_LENGTH = 500
+
+/**
+ * Summarize JSON content by extracting key information.
+ */
+const summarizeJsonContent = (content: string): string => {
+  try {
+    const parsed = JSON.parse(content)
+
+    // Handle PRD artifacts
+    if (parsed.sections && typeof parsed.sections === 'object') {
+      const sectionNames = Object.keys(parsed.sections)
+      return `[PRD artifact with sections: ${sectionNames.join(', ')}]`
+    }
+
+    // Handle research artifacts
+    if (parsed.kind === 'research' || parsed.data?.findings) {
+      const findingsCount = parsed.data?.findings?.length ?? 0
+      const topic = parsed.data?.topic ?? 'unknown topic'
+      return `[Research artifact: "${topic}" with ${findingsCount} findings]`
+    }
+
+    // Handle persona artifacts
+    if (parsed.kind === 'persona' || parsed.data?.personas) {
+      const personaCount = parsed.data?.personas?.length ?? 0
+      return `[Persona artifact with ${personaCount} personas]`
+    }
+
+    // Handle other JSON with metadata
+    if (parsed.metadata && parsed.sections) {
+      const sectionNames = Object.keys(parsed.sections)
+      return `[Artifact with sections: ${sectionNames.join(', ')}]`
+    }
+
+    // Generic JSON - show structure hint
+    const keys = Object.keys(parsed).slice(0, 5)
+    return `[JSON object with keys: ${keys.join(', ')}${Object.keys(parsed).length > 5 ? '...' : ''}]`
+  } catch {
+    // Not valid JSON, return truncated content
+    return content.length > MAX_MESSAGE_CONTENT_LENGTH
+      ? content.slice(0, MAX_MESSAGE_CONTENT_LENGTH) + '...'
+      : content
+  }
+}
+
+/**
+ * Format a single message content, summarizing large JSON artifacts.
+ */
+const formatMessageContent = (content: string): string => {
+  const trimmed = content.trim()
+
+  // Check if content looks like JSON (starts with { or [)
+  if ((trimmed.startsWith('{') || trimmed.startsWith('[')) && trimmed.length > MAX_MESSAGE_CONTENT_LENGTH) {
+    return summarizeJsonContent(trimmed)
+  }
+
+  // Truncate long non-JSON content
+  if (trimmed.length > MAX_MESSAGE_CONTENT_LENGTH) {
+    return trimmed.slice(0, MAX_MESSAGE_CONTENT_LENGTH) + '...'
+  }
+
+  return trimmed
+}
+
+/**
  * Format conversation history.
  */
 const formatHistory = (
@@ -93,7 +161,7 @@ const formatHistory = (
 
   const recentHistory = history.slice(-maxMessages)
   return recentHistory
-    .map(msg => `**${msg.role}**: ${msg.content}`)
+    .map(msg => `**${msg.role}**: ${formatMessageContent(msg.content)}`)
     .join('\n\n')
 }
 
