@@ -6,7 +6,7 @@ import { PRDEditor } from './PRDEditor';
 import { ResearchPlanCard } from '../research/ResearchPlanCard';
 import { ResearchArtifactView } from '../research/ResearchArtifactView';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { ChevronDown, ChevronUp, FileText } from 'lucide-react';
+import { ChevronDown, ChevronUp, FileText, Users, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { NewPRD, FlattenedPRD, isNewPRD, isFlattenedPRD } from '@/lib/prd-schema';
 import { Badge } from '@/components/ui/badge';
@@ -82,7 +82,7 @@ export function SmartMessageRenderer({
   }, [messageId, onRegenerateSection]);
 
   if (personaArtifact) {
-    return <PersonaArtifactViewer artifact={personaArtifact} />
+    return <CollapsiblePersonaViewer artifact={personaArtifact} />
   }
 
   if (researchArtifact) {
@@ -212,6 +212,53 @@ const isPersonaArtifact = (value: unknown): value is PersonaArtifactShape => {
   }
   const artifact = value as PersonaArtifactShape
   return artifact.kind === 'persona' && Array.isArray(artifact.data?.personas)
+}
+
+const CollapsiblePersonaViewer = ({ artifact }: { artifact: PersonaArtifactShape }) => {
+  const [isOpen, setIsOpen] = useState(false)
+  const personaCount = artifact.data?.personas?.length ?? 0
+  const label = artifact.label ?? 'Personas'
+
+  return (
+    <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+      <div className="border rounded-lg bg-card">
+        <CollapsibleTrigger asChild>
+          <Button
+            variant="ghost"
+            className="flex w-full justify-between items-center p-4 hover:bg-muted/50"
+          >
+            <div className="flex items-center gap-2">
+              <Users className="w-4 h-4" />
+              <span className="font-medium">{label}</span>
+              <span className="text-xs bg-purple-100 text-purple-800 px-2 py-1 rounded-full">
+                {personaCount} persona{personaCount !== 1 ? 's' : ''}
+              </span>
+            </div>
+            {isOpen ? (
+              <ChevronUp className="w-4 h-4" />
+            ) : (
+              <ChevronDown className="w-4 h-4" />
+            )}
+          </Button>
+        </CollapsibleTrigger>
+
+        {!isOpen && (
+          <div className="px-4 pb-4">
+            <p className="text-sm text-muted-foreground line-clamp-2">
+              {artifact.data?.personas?.slice(0, 3).map(p => p.name).join(', ')}
+              {personaCount > 3 ? ` and ${personaCount - 3} more...` : ''}
+            </p>
+          </div>
+        )}
+
+        <CollapsibleContent className="border-t">
+          <div className="p-4">
+            <PersonaArtifactViewer artifact={artifact} />
+          </div>
+        </CollapsibleContent>
+      </div>
+    </Collapsible>
+  )
 }
 
 const PersonaArtifactViewer = ({ artifact }: { artifact: PersonaArtifactShape }) => {
@@ -525,6 +572,66 @@ const isResearchArtifact = (value: unknown): value is ResearchArtifactShape => {
   return artifact.kind === 'research'
 }
 
+const CollapsibleResearchView = ({
+  artifact,
+  data,
+  confidence
+}: {
+  artifact: ResearchArtifactShape
+  data: any
+  confidence?: number
+}) => {
+  const [isOpen, setIsOpen] = useState(false)
+  const label = artifact.label || data?.topic || 'Research Report'
+  const findingsCount = data?.findings?.length ?? 0
+
+  return (
+    <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+      <div className="border rounded-lg bg-card">
+        <CollapsibleTrigger asChild>
+          <Button
+            variant="ghost"
+            className="flex w-full justify-between items-center p-4 hover:bg-muted/50"
+          >
+            <div className="flex items-center gap-2">
+              <Search className="w-4 h-4" />
+              <span className="font-medium">Research Report</span>
+              {confidence !== undefined && (
+                <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full">
+                  {Math.round(confidence * 100)}% confidence
+                </span>
+              )}
+              {findingsCount > 0 && (
+                <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
+                  {findingsCount} finding{findingsCount !== 1 ? 's' : ''}
+                </span>
+              )}
+            </div>
+            {isOpen ? (
+              <ChevronUp className="w-4 h-4" />
+            ) : (
+              <ChevronDown className="w-4 h-4" />
+            )}
+          </Button>
+        </CollapsibleTrigger>
+
+        {!isOpen && (
+          <div className="px-4 pb-4">
+            <p className="font-medium text-sm mb-1">{label}</p>
+            <p className="text-sm text-muted-foreground line-clamp-2">
+              {data?.executiveSummary || data?.scope || 'Research findings and analysis'}
+            </p>
+          </div>
+        )}
+
+        <CollapsibleContent className="border-t">
+          <ResearchArtifactView data={data} confidence={confidence} />
+        </CollapsibleContent>
+      </div>
+    </Collapsible>
+  )
+}
+
 const ResearchArtifactRenderer = ({
   artifact,
   onResearchPlanAction
@@ -564,9 +671,9 @@ const ResearchArtifactRenderer = ({
     )
   }
 
-  // If completed, show the full research artifact
+  // If completed, show the full research artifact in a collapsible
   if (status === 'completed' && data) {
-    return <ResearchArtifactView data={data} confidence={confidence} />
+    return <CollapsibleResearchView artifact={artifact} data={data} confidence={confidence} />
   }
 
   // Fallback: show basic artifact info

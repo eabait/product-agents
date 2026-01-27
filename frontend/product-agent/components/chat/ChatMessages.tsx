@@ -4,7 +4,7 @@ import { TypingIndicator } from './TypingIndicator';
 import { ProgressIndicator } from './ProgressIndicator';
 import { NewPRD } from '@/lib/prd-schema';
 import { Message, type RunProgressCard } from '../../types';
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { PlanReview } from '@/components/plan-review';
 import { ResearchPlanCard } from '@/components/research/ResearchPlanCard';
 
@@ -50,38 +50,6 @@ export function ChatMessages({
   isStreaming = false,
 }: ChatMessagesProps) {
   const [expandedPRDs, setExpandedPRDs] = useState<Set<string>>(new Set());
-
-  // Helper function to check if a message contains a PRD
-  const isPRDMessage = (message: Message) => {
-    if (message.role === 'user') return false;
-    try {
-      const parsed = JSON.parse(message.content);
-      return parsed && typeof parsed === 'object' && typeof parsed.problemStatement === 'string';
-    } catch {
-      return false;
-    }
-  };
-
-  // Find the last PRD message ID
-  const lastPRDMessageId = useMemo(() => {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (isPRDMessage(messages[i])) {
-        return messages[i].id;
-      }
-    }
-    return null;
-  }, [messages]);
-
-  // Auto-expand the last PRD message when it changes
-  useEffect(() => {
-    if (lastPRDMessageId) {
-      setExpandedPRDs(_ => {
-        const newSet = new Set<string>();
-        newSet.add(lastPRDMessageId);
-        return newSet;
-      });
-    }
-  }, [lastPRDMessageId]);
 
   const handleToggleExpanded = (messageId: string) => {
     setExpandedPRDs(prev => {
