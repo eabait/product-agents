@@ -41,11 +41,12 @@ import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { contextStorage } from "@/lib/context-storage";
 import { buildEnhancedContextPayload, getContextSummary } from "@/lib/context-utils";
 import { getRun, startRun, streamRun, submitRunApproval, type ArtifactType } from "@/lib/run-client";
-import { 
-  UI_DIMENSIONS, 
-  VALIDATION_LIMITS, 
+import {
+  UI_DIMENSIONS,
+  VALIDATION_LIMITS,
   TimingSettings
 } from "@/lib/ui-constants";
+import { getMessageDedupeKey } from "@/hooks/useMessageStore";
 
 // Streaming configuration constants
 const STREAM_TIMEOUT_MS = 300000; // 5 minutes
@@ -129,6 +130,9 @@ function PRDAgentPageContent() {
   const progressCardRunMap = useRef(new Map<string, string>());
   const progressCardConversationMap = useRef(new Map<string, string>());
   const activeProgressCardRef = useRef<string | null>(null);
+
+  // Centralized message dedup tracking - persists across all function calls
+  const seenMessageKeys = useRef(new Set<string>());
   // Track cards that are blocked on subagent approval (ref for synchronous access in event handlers)
   const blockedSubagentCardsRef = useRef(new Set<string>());
   const [approvalLoadingByRun, setApprovalLoadingByRun] = useState<Record<string, boolean>>({});
@@ -660,7 +664,45 @@ function PRDAgentPageContent() {
 
   // Computed helpers for working with active conversation
   const activeConversation = conversations.find(c => c.id === activeId);
-  const activeMessages = React.useMemo(() => activeConversation?.messages || [], [activeConversation]);
+  const activeMessages = React.useMemo(() => {
+    const messages = activeConversation?.messages || [];
+    // Deduplicate artifacts and PRDs to prevent double rendering
+    const seenKeys = new Set<string>();
+    return messages.filter(msg => {
+      if (msg.role !== 'assistant') return true;
+      try {
+        const parsed = JSON.parse(msg.content);
+
+        // Check for artifact ID (research artifacts, etc.)
+        const artifactId = parsed?.id;
+        if (artifactId && typeof artifactId === 'string') {
+          const key = `artifact:${artifactId}`;
+          if (seenKeys.has(key)) return false;
+          seenKeys.add(key);
+        }
+
+        // Check for PRD (identified by problemStatement)
+        if (typeof parsed?.problemStatement === 'string') {
+          const key = `prd:${parsed.problemStatement.slice(0, 200)}`;
+          if (seenKeys.has(key)) return false;
+          seenKeys.add(key);
+        }
+
+        // Check for PRD with sections structure (alternative format)
+        if (parsed?.sections && typeof parsed.sections === 'object') {
+          const solutionOverview = parsed.sections?.solution?.solutionOverview;
+          if (typeof solutionOverview === 'string') {
+            const key = `prd-sections:${solutionOverview.slice(0, 200)}`;
+            if (seenKeys.has(key)) return false;
+            seenKeys.add(key);
+          }
+        }
+      } catch {
+        // Not JSON, keep the message
+      }
+      return true;
+    });
+  }, [activeConversation]);
 
   const conversationCost = React.useMemo<ConversationCostSummary | null>(() => {
     if (!activeConversation) {
@@ -1070,6 +1112,14 @@ function PRDAgentPageContent() {
 
         if (isMounted) {
           setConversations(conversationsFromStorage);
+
+          // Initialize seenMessageKeys from existing messages
+          conversationsFromStorage.forEach(conv => {
+            conv.messages.forEach(msg => {
+              const key = getMessageDedupeKey(msg);
+              if (key) seenMessageKeys.current.add(key);
+            });
+          });
 
           let savedActiveId: string | null = null;
           if (rawActiveId && rawActiveId.trim() && rawActiveId !== "undefined" && rawActiveId !== "null") {
@@ -1583,7 +1633,24 @@ function PRDAgentPageContent() {
     let streamStatus: RunProgressStatus | null = null;
     const appendedSubagentIds = new Set<string>();
 
-    const pushAssistantMessage = (message: Message) => {
+    /**
+     * Push an assistant message with centralized deduplication.
+     * Returns true if message was added, false if it was a duplicate.
+     */
+    const pushAssistantMessage = (message: Message): boolean => {
+      const key = getMessageDedupeKey(message);
+
+      // Check centralized dedup tracking
+      if (key && seenMessageKeys.current.has(key)) {
+        console.debug('[streamRunExecution] Skipping duplicate message:', key);
+        return false;
+      }
+
+      // Track this key
+      if (key) {
+        seenMessageKeys.current.add(key);
+      }
+
       updateActiveConversation(conv => {
         if (!titleSeedMessage) {
           return {
@@ -1598,6 +1665,8 @@ function PRDAgentPageContent() {
           title: shouldUpdateTitle ? generateTitleFromMessage(titleSeedMessage.content) : conv.title
         };
       });
+
+      return true;
     };
 
     const buildMessageFromArtifact = (
@@ -1794,6 +1863,7 @@ function PRDAgentPageContent() {
                 throw new Error(eventData.error);
               } else if (eventData.artifact) {
                 const artifactPayload = eventData.artifact as Record<string, unknown> | undefined;
+
                 const assistantMessage = buildMessageFromArtifact(
                   artifactPayload,
                   streamedUsageSummary ?? eventData.usage,
@@ -1802,8 +1872,11 @@ function PRDAgentPageContent() {
                   assistantMessageId
                 );
 
-                hasFinalArtifact = true;
-                pushAssistantMessage(assistantMessage);
+                // pushAssistantMessage handles dedup via seenMessageKeys
+                const wasAdded = pushAssistantMessage(assistantMessage);
+                if (wasAdded) {
+                  hasFinalArtifact = true;
+                }
                 streamedUsageSummary = null;
                 streamedMetadata = null;
                 streamStatus = 'completed';
@@ -1824,6 +1897,7 @@ function PRDAgentPageContent() {
                 }
               } else if (eventData.content) {
                 const contentPayload = eventData.content;
+
                 const messageContent =
                   typeof contentPayload === 'string'
                     ? contentPayload
@@ -1835,8 +1909,6 @@ function PRDAgentPageContent() {
                   streamedMetadata || eventData.metadata
                 );
 
-                hasFinalArtifact = true;
-
                 const assistantMessage: Message = {
                   id: assistantMessageId,
                   role: 'assistant',
@@ -1845,7 +1917,11 @@ function PRDAgentPageContent() {
                   ...(assistantMetadata ? { metadata: assistantMetadata } : {})
                 };
 
-                pushAssistantMessage(assistantMessage);
+                // pushAssistantMessage handles dedup via seenMessageKeys
+                const wasAdded = pushAssistantMessage(assistantMessage);
+                if (wasAdded) {
+                  hasFinalArtifact = true;
+                }
                 streamedUsageSummary = null;
                 streamedMetadata = null;
                 streamStatus = 'completed';
@@ -1944,6 +2020,7 @@ function PRDAgentPageContent() {
               runSummary?.metadata ?? null,
               streamedModel
             );
+            // pushAssistantMessage handles dedup via seenMessageKeys
             pushAssistantMessage(assistantMessage);
             streamStatus = 'completed';
           } else if (runSummary?.status === 'awaiting-input') {
