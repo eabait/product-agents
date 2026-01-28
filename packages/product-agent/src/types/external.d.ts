@@ -95,6 +95,49 @@ declare module '@product-agents/prd-shared' {
   ): ConfidenceAssessment
 }
 
+declare module '@product-agents/skill-analyzer-core' {
+  import type { AgentSettings } from '@product-agents/agent-core'
+  import type { ConfidenceAssessment } from '@product-agents/prd-shared'
+  import type { z } from 'zod'
+
+  export interface AnalyzerResult<T = unknown> {
+    name: string
+    data: T
+    confidence?: ConfidenceAssessment
+    metadata?: Record<string, unknown>
+  }
+
+  export interface AnalyzerInput {
+    message: string
+    context?: {
+      contextPayload?: any
+      existingPRD?: any
+      previousResults?: Map<string, any>
+    }
+  }
+
+  export abstract class BaseAnalyzer {
+    protected client: any
+    protected settings: AgentSettings
+    constructor(settings: AgentSettings)
+    abstract analyze(input: AnalyzerInput): Promise<AnalyzerResult>
+    protected generateStructured<T>(params: {
+      schema: z.ZodType<T, z.ZodTypeDef, any>
+      prompt: string
+      temperature?: number
+      arrayFields?: string[]
+    }): Promise<T>
+    protected generateText(params: {
+      prompt: string
+      temperature?: number
+      maxTokens?: number
+    }): Promise<string>
+    protected composeMetadata(baseMetadata?: Record<string, unknown>):
+      | Record<string, unknown>
+      | undefined
+  }
+}
+
 declare module '@product-agents/skills-clarifications' {
   import type { AgentSettings } from '@product-agents/agent-core'
   import type { ClarificationResult, ConfidenceAssessment } from '@product-agents/prd-shared'

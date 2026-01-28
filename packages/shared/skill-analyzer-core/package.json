@@ -1,7 +1,7 @@
 {
-  "name": "@product-agents/skills-prd",
+  "name": "@product-agents/skill-analyzer-core",
   "version": "0.1.0",
-  "description": "PRD-focused stateless skills (analyzers, section writers, prompts)",
+  "description": "Shared analyzer base and types for stateless skill packages",
   "private": true,
   "type": "module",
   "main": "dist/index.js",
@@ -22,8 +22,6 @@
     "@product-agents/agent-core": "*",
     "@product-agents/openrouter-client": "*",
     "@product-agents/prd-shared": "*",
-    "@product-agents/skill-analyzer-core": "*",
-    "@product-agents/skills-clarifications": "*",
     "zod": "^3.25.76"
   },
   "devDependencies": {

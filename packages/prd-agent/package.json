@@ -16,6 +16,7 @@
     "@product-agents/agent-core": "*",
     "@product-agents/prd-shared": "*",
     "@product-agents/product-agent": "*",
+    "@product-agents/skill-analyzer-core": "*",
     "@product-agents/skills-clarifications": "*",
     "@product-agents/skills-prd": "*"
   },

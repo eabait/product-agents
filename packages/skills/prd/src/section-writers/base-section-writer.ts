@@ -2,11 +2,11 @@ import { AgentSettings } from '@product-agents/agent-core'
 import { OpenRouterClient } from '@product-agents/openrouter-client'
 import { z } from 'zod'
 import {
-  BaseAnalyzer,
-  AnalyzerInput,
+  type AnalyzerInput,
   ContextAnalyzer,
   ClarificationAnalyzer
 } from '../analyzers/index'
+import { BaseAnalyzer } from '@product-agents/skill-analyzer-core'
 import { ConfidenceAssessment, CONTENT_VALIDATION } from '@product-agents/prd-shared'
 
 export interface SectionWriterResult<T = unknown> {

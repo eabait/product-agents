@@ -3,6 +3,7 @@ const path = require('path')
 const workspaceRoot = path.resolve(__dirname, '..', '..')
 
 const packageAlias = {
+  '@product-agents/skill-analyzer-core': path.join(workspaceRoot, 'packages/shared/skill-analyzer-core/src'),
   '@product-agents/skills-clarifications': path.join(workspaceRoot, 'packages/skills/clarifications/src'),
   '@product-agents/skills-prd': path.join(workspaceRoot, 'packages/skills/prd/src'),
   '@product-agents/product-agent': path.join(workspaceRoot, 'packages/product-agent/src'),

@@ -1,5 +1,9 @@
 import { z } from 'zod'
-import { BaseAnalyzer, AnalyzerResult, AnalyzerInput } from './base-analyzer'
+import {
+  BaseAnalyzer,
+  type AnalyzerResult,
+  type AnalyzerInput
+} from '@product-agents/skill-analyzer-core'
 import { createClarificationPrompt } from '../prompts'
 import {
   ClarificationResult,
