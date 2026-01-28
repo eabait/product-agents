@@ -1,11 +1,11 @@
-import { SectionWriterInput } from '../section-writers/base-section-writer.ts'
+import { SectionWriterInput } from '../section-writers/base-section-writer'
 import {
   buildAnalysisSummaryBlock,
   buildExistingSectionBlock,
   buildUserContextBlock,
   formatReturnJsonOnly,
   formatStructuredOutputRequirement
-} from './prompt-helpers.ts'
+} from './prompt-helpers'
 
 export function createSolutionSectionPrompt(input: SectionWriterInput, contextAnalysis: any): string {
   const lines: string[] = [

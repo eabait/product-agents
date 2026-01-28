@@ -1,6 +1,6 @@
 import { z } from 'zod'
-import { BaseSectionWriter, SectionWriterInput, SectionWriterResult } from './base-section-writer.ts'
-import { createConstraintsSectionPrompt } from '../prompts/index.ts'
+import { BaseSectionWriter, SectionWriterInput, SectionWriterResult } from './base-section-writer'
+import { createConstraintsSectionPrompt } from '../prompts/index'
 import {
   assessConfidence,
   assessInputCompleteness,
@@ -119,9 +119,9 @@ export class ConstraintsSectionWriter extends BaseSectionWriter {
 
     const prompt = this.createConstraintsPrompt(input, contextData, existingConstraints, existingAssumptions)
 
-    let plan: ConstraintsPlanInput
+    let plan: ConstraintsPlan
     try {
-      plan = await this.generateStructuredWithFallback({
+      plan = await this.generateStructuredWithFallback<ConstraintsPlan>({
         schema: ConstraintsSectionPlanSchema,
         prompt,
         temperature: DEFAULT_TEMPERATURE
@@ -277,9 +277,7 @@ export class ConstraintsSectionWriter extends BaseSectionWriter {
   }
 }
 
-type StringListPlanInput = z.input<typeof StringListPlanSchema>
 type StringListPlan = z.output<typeof StringListPlanSchema>
-type ConstraintsPlanInput = z.input<typeof ConstraintsSectionPlanSchema>
 type ConstraintsPlan = z.output<typeof ConstraintsSectionPlanSchema>
 
 const sanitizeEntries = (entries: any[]): string[] =>
@@ -307,7 +305,7 @@ const findEntryIndex = (entries: string[], reference?: string): number => {
   return entries.findIndex(entry => entry.trim().toLowerCase() === ref)
 }
 
-const normalizeStringListPlan = (plan?: StringListPlanInput): StringListPlan => ({
+const normalizeStringListPlan = (plan?: StringListPlan): StringListPlan => ({
   operations: (plan?.operations ?? []).map(operation => ({
     action: operation.action ?? 'add',
     reference: operation.reference,
@@ -317,7 +315,7 @@ const normalizeStringListPlan = (plan?: StringListPlanInput): StringListPlan => 
   proposed: plan?.proposed ?? []
 })
 
-const applyStringListPlan = (existing: string[], plan: StringListPlanInput): string[] => {
+const applyStringListPlan = (existing: string[], plan: StringListPlan): string[] => {
   const normalizedPlan = normalizeStringListPlan(plan)
 
   let working = sanitizeEntries(existing)
@@ -372,7 +370,7 @@ const applyStringListPlan = (existing: string[], plan: StringListPlanInput): str
 export const applyConstraintsPlan = (
   existingConstraints: string[],
   existingAssumptions: string[],
-  plan: ConstraintsPlanInput
+  plan: ConstraintsPlan
 ): { constraints: string[]; assumptions: string[] } => {
   const normalizedPlan: ConstraintsPlan = {
     mode: plan.mode ?? 'smart_merge',

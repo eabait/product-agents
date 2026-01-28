@@ -2,11 +2,11 @@ import { AgentSettings } from '@product-agents/agent-core'
 import { OpenRouterClient } from '@product-agents/openrouter-client'
 import { z } from 'zod'
 import {
-  BaseAnalyzer, 
+  BaseAnalyzer,
   AnalyzerInput,
   ContextAnalyzer,
   ClarificationAnalyzer
-} from '../analyzers/index.ts'
+} from '../analyzers/index'
 import { ConfidenceAssessment, CONTENT_VALIDATION } from '@product-agents/prd-shared'
 
 export interface SectionWriterResult<T = unknown> {
@@ -20,12 +20,12 @@ export interface SectionWriterResult<T = unknown> {
 export interface SectionWriterInput {
   message: string
   context?: {
-    contextPayload?: unknown
-    existingPRD?: unknown
-    existingSection?: unknown
-    previousResults?: Map<string, unknown>
+    contextPayload?: any
+    existingPRD?: any
+    existingSection?: any
+    previousResults?: Map<string, any>
     targetSection?: string
-    sharedAnalysisResults?: Map<string, unknown>
+    sharedAnalysisResults?: Map<string, any>
   }
 }
 
@@ -46,7 +46,7 @@ export abstract class BaseSectionWriter {
   }
 
   protected async generateStructuredWithFallback<T>(params: {
-    schema: z.ZodSchema<T>
+    schema: z.ZodType<T, z.ZodTypeDef, any>
     prompt: string
     temperature?: number
     maxTokens?: number

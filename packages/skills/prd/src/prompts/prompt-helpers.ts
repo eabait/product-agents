@@ -1,4 +1,4 @@
-import { SectionWriterInput } from '../section-writers/base-section-writer.ts'
+import { SectionWriterInput } from '../section-writers/base-section-writer'
 
 const DEFAULT_MAX_JSON_CHARS = 800
 const DEFAULT_MAX_ITEMS = 6

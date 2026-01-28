@@ -1,4 +1,4 @@
-import { summarizeExistingPrd } from './prompt-helpers.ts'
+import { summarizeExistingPrd } from './prompt-helpers'
 
 const SECTION_DESCRIPTORS: Record<string, string> = {
   targetUsers: 'Who the product is for',

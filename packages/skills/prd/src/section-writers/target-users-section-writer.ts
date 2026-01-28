@@ -1,6 +1,6 @@
 import { z } from 'zod'
-import { BaseSectionWriter, SectionWriterInput, SectionWriterResult } from './base-section-writer.ts'
-import { createTargetUsersSectionPrompt } from '../prompts/index.ts'
+import { BaseSectionWriter, SectionWriterInput, SectionWriterResult } from './base-section-writer'
+import { createTargetUsersSectionPrompt } from '../prompts/index'
 import {
   assessConfidence,
   assessInputCompleteness,
@@ -158,7 +158,7 @@ export class TargetUsersSectionWriter extends BaseSectionWriter {
 
     const prompt = this.createTargetUsersPrompt(input, contextData, existingUsers)
 
-    const plan = await this.generateStructuredWithFallback({
+    const plan = await this.generateStructuredWithFallback<TargetUsersPlan>({
       schema: TargetUsersSectionPlanSchema,
       prompt,
       temperature: DEFAULT_TEMPERATURE,
@@ -284,7 +284,7 @@ const findUserIndex = (users: string[], reference?: string): number => {
   return users.findIndex(user => user.trim().toLowerCase() === ref)
 }
 
-const normalizeTargetUsersPlan = (plan: TargetUsersPlanInput): TargetUsersPlan => ({
+const normalizeTargetUsersPlan = (plan: TargetUsersPlan): TargetUsersPlan => ({
   mode: plan.mode ?? 'smart_merge',
   operations: (plan.operations ?? []).map(operation => ({
     action: normalizePlanAction(operation.action ?? 'add'),
@@ -298,7 +298,7 @@ const normalizeTargetUsersPlan = (plan: TargetUsersPlanInput): TargetUsersPlan =
 
 export const applyTargetUsersPlan = (
   existingUsers: string[],
-  plan: TargetUsersPlanInput
+  plan: TargetUsersPlan
 ): string[] => {
   const normalizedPlan = normalizeTargetUsersPlan(plan)
 

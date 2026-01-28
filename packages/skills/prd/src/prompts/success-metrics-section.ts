@@ -1,4 +1,4 @@
-import { SectionWriterInput } from '../section-writers/base-section-writer.ts'
+import { SectionWriterInput } from '../section-writers/base-section-writer'
 import {
   buildAnalysisSummaryBlock,
   buildExistingSectionBlock,
@@ -6,7 +6,7 @@ import {
   formatMetricsList,
   formatReturnJsonOnly,
   formatStructuredOutputRequirement
-} from './prompt-helpers.ts'
+} from './prompt-helpers'
 
 export function createSuccessMetricsSectionPrompt(input: SectionWriterInput, contextAnalysis: any): string {
   const existingMetrics = Array.isArray(input.context?.existingSection?.successMetrics)

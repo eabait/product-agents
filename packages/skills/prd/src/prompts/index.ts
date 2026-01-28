@@ -5,13 +5,13 @@
  */
 
 // Analyzer prompts
-export { createClarificationPrompt } from './clarification.ts'
-export { createContextAnalysisPrompt } from './context-analysis.ts'
-export { createSectionDetectionPrompt } from './section-detection.ts'
+export { createClarificationPrompt } from './clarification'
+export { createContextAnalysisPrompt } from './context-analysis'
+export { createSectionDetectionPrompt } from './section-detection'
 
 // Section writer prompts
-export { createTargetUsersSectionPrompt } from './target-users-section.ts'
-export { createSolutionSectionPrompt } from './solution-section.ts'
-export { createKeyFeaturesSectionPrompt } from './key-features-section.ts'
-export { createSuccessMetricsSectionPrompt } from './success-metrics-section.ts'
-export { createConstraintsSectionPrompt } from './constraints-section.ts'
+export { createTargetUsersSectionPrompt } from './target-users-section'
+export { createSolutionSectionPrompt } from './solution-section'
+export { createKeyFeaturesSectionPrompt } from './key-features-section'
+export { createSuccessMetricsSectionPrompt } from './success-metrics-section'
+export { createConstraintsSectionPrompt } from './constraints-section'

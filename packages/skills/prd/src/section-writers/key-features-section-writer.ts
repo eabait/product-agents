@@ -1,6 +1,6 @@
 import { z } from 'zod'
-import { BaseSectionWriter, SectionWriterInput, SectionWriterResult } from './base-section-writer.ts'
-import { createKeyFeaturesSectionPrompt } from '../prompts/index.ts'
+import { BaseSectionWriter, SectionWriterInput, SectionWriterResult } from './base-section-writer'
+import { createKeyFeaturesSectionPrompt } from '../prompts/index'
 import {
   assessConfidence,
   assessInputCompleteness,

@@ -1,8 +1,8 @@
 import { z } from 'zod'
-import { BaseAnalyzer, AnalyzerResult, AnalyzerInput } from './base-analyzer.ts'
-import { createClarificationPrompt } from '../prompts/index.ts'
+import { BaseAnalyzer, AnalyzerResult, AnalyzerInput } from './base-analyzer'
+import { createClarificationPrompt } from '../prompts/index'
 import { ClarificationResult, assessConfidence, assessInputCompleteness, assessContextRichness, CONFIDENCE_THRESHOLDS, CONTENT_VALIDATION } from '@product-agents/prd-shared'
-import { ensureArrayFields } from '../utils/post-process-structured-response.ts'
+import { ensureArrayFields } from '../utils/post-process-structured-response'
 
 // Temporary schema that accepts numeric confidence from AI
 const ClarificationResultRawSchema = z.object({

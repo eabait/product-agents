@@ -13,9 +13,9 @@ export interface AnalyzerResult<T = unknown> {
 export interface AnalyzerInput {
   message: string
   context?: {
-    contextPayload?: unknown
-    existingPRD?: unknown
-    previousResults?: Map<string, unknown>
+    contextPayload?: any
+    existingPRD?: any
+    previousResults?: Map<string, any>
   }
 }
 
@@ -31,7 +31,7 @@ export abstract class BaseAnalyzer {
   abstract analyze(input: AnalyzerInput): Promise<AnalyzerResult>
 
   protected async generateStructured<T>(params: {
-    schema: z.ZodSchema<T>
+    schema: z.ZodType<T, z.ZodTypeDef, any>
     prompt: string
     temperature?: number
     arrayFields?: string[]

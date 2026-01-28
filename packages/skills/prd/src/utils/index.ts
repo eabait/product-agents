@@ -1,1 +1,1 @@
-export * from './post-process-structured-response.ts'
+export * from './post-process-structured-response'

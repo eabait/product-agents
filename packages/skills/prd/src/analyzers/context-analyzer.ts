@@ -1,6 +1,6 @@
 import { z } from 'zod'
-import { BaseAnalyzer, AnalyzerResult, AnalyzerInput } from './base-analyzer.ts'
-import { createContextAnalysisPrompt } from '../prompts/index.ts'
+import { BaseAnalyzer, AnalyzerResult, AnalyzerInput } from './base-analyzer'
+import { createContextAnalysisPrompt } from '../prompts/index'
 import {
   assessConfidence,
   assessInputCompleteness,

@@ -1,6 +1,6 @@
 import { z } from 'zod'
-import { BaseAnalyzer, AnalyzerResult, AnalyzerInput } from './base-analyzer.ts'
-import { createSectionDetectionPrompt } from '../prompts/section-detection.ts'
+import { BaseAnalyzer, AnalyzerResult, AnalyzerInput } from './base-analyzer'
+import { createSectionDetectionPrompt } from '../prompts/section-detection'
 import {
   assessConfidence,
   assessInputCompleteness,
