@@ -55,7 +55,8 @@ export interface PlanTranslatorOptions {
 
 const PLAN_VERSION = '4.0.0'
 
-const PRD_SKILL_TASK_KINDS: Record<string, 'clarification-check' | 'analyze-context' | 'assemble-prd'> = {
+const SKILL_TASK_KINDS: Record<string, 'clarification-check' | 'analyze-context' | 'assemble-prd'> = {
+  'clarification.check': 'clarification-check',
   'prd.check-clarification': 'clarification-check',
   'prd.analyze-context': 'analyze-context',
   'prd.assemble-prd': 'assemble-prd'
@@ -81,12 +82,12 @@ const resolvePrdSection = (toolId: string, tool?: ToolDescriptor): SectionName |
 }
 
 const buildSkillTask = (step: RawStep, tool?: ToolDescriptor): Record<string, unknown> => {
-  if (step.toolId.startsWith('prd.')) {
-    const mappedKind = PRD_SKILL_TASK_KINDS[step.toolId]
-    if (mappedKind) {
-      return { kind: mappedKind }
-    }
+  const mappedKind = SKILL_TASK_KINDS[step.toolId]
+  if (mappedKind) {
+    return { kind: mappedKind }
+  }
 
+  if (step.toolId.startsWith('prd.')) {
     if (step.toolId.startsWith('prd.write-')) {
       const section = resolvePrdSection(step.toolId, tool)
       return {

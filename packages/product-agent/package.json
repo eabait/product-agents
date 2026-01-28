@@ -16,6 +16,7 @@
     "@openrouter/ai-sdk-provider": "^1.5.4",
     "ai": "^5.0.0",
     "@product-agents/agent-core": "*",
+    "@product-agents/skills-clarifications": "*",
     "@product-agents/skills-prd": "*",
     "zod": "^3.25.76"
   },

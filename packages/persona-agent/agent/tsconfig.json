@@ -11,6 +11,7 @@
     "paths": {
       "@product-agents/product-agent": ["./packages/persona-agent/agent/src/types/product-agent"],
       "@product-agents/prd-shared": ["./packages/persona-agent/agent/src/types/prd-shared"],
+      "@product-agents/skills-clarifications": ["../../skills/clarifications/src"],
       "@product-agents/skills-prd": ["./packages/persona-agent/agent/src/types/skills-prd"]
     }
   },

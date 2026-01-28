@@ -5,7 +5,7 @@
  */
 
 // Analyzer prompts
-export { createClarificationPrompt } from './clarification'
+export { createClarificationPrompt } from '@product-agents/skills-clarifications'
 export { createContextAnalysisPrompt } from './context-analysis'
 export { createSectionDetectionPrompt } from './section-detection'
 

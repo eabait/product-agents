@@ -38,17 +38,10 @@ const SECTION_LABELS: Record<SectionName, string> = {
 
 export const prdSkillPack: PrdSkillPackManifest = {
   id: 'prd.core',
-  version: '0.3.0',
+  version: '0.4.0',
   label: 'PRD Core Skills',
   description: 'Context analysis, section writers, and assembly primitives for PRD generation.',
   skills: [
-    {
-      id: 'prd.check-clarification',
-      label: 'Clarification Analyzer',
-      version: '1.0.0',
-      category: 'analyzer',
-      description: 'Evaluates the incoming request and decides if clarification questions are required.'
-    },
     {
       id: 'prd.analyze-context',
       label: 'Context Analyzer',

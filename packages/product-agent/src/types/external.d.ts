@@ -95,6 +95,50 @@ declare module '@product-agents/prd-shared' {
   ): ConfidenceAssessment
 }
 
+declare module '@product-agents/skills-clarifications' {
+  import type { AgentSettings } from '@product-agents/agent-core'
+  import type { ClarificationResult, ConfidenceAssessment } from '@product-agents/prd-shared'
+
+  interface ClarificationAnalysisResult<TData = unknown> {
+    name: string
+    data: TData
+    confidence?: ConfidenceAssessment
+    metadata?: Record<string, unknown>
+  }
+
+  export class ClarificationAnalyzer {
+    constructor(settings: AgentSettings)
+    analyze(input: {
+      message: string
+      context?: {
+        contextPayload?: unknown
+        existingPRD?: unknown
+      }
+    }): Promise<ClarificationAnalysisResult<ClarificationResult>>
+  }
+
+  export interface ClarificationSkillManifestEntry {
+    id: string
+    label: string
+    version: string
+    category: string
+    description?: string
+  }
+
+  export interface ClarificationSkillPackManifest {
+    id: string
+    version: string
+    label: string
+    description?: string
+    skills: ClarificationSkillManifestEntry[]
+  }
+
+  export const clarificationSkillPack: ClarificationSkillPackManifest
+  export function listClarificationSkills(): ClarificationSkillManifestEntry[]
+  export function createClarificationPrompt(userMessage: string): string
+  export function ensureArrayFields<T>(response: unknown, arrayFields: string[]): T
+}
+
 declare module '@product-agents/skills-prd' {
   import type { AgentSettings } from '@product-agents/agent-core'
   import type {

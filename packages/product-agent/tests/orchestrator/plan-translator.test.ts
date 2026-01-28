@@ -374,24 +374,39 @@ test('PlanTranslator', async (t) => {
       assert.deepEqual(node.task, { kind: 'subagent', agentId: 'research.core.agent' })
     })
 
-    await t.test('maps PRD skill task kinds correctly', () => {
+    await t.test('maps skill task kinds correctly', () => {
       const translator = createTranslator()
       const raw = {
         targetArtifact: 'prd',
         overallRationale: 'Test',
         confidence: 0.8,
         steps: [
-          { id: 'step-1', toolId: 'prd.check-clarification', toolType: 'skill' as const, label: 'Check', rationale: 'Check', dependsOn: [] },
-          { id: 'step-2', toolId: 'prd.analyze-context', toolType: 'skill' as const, label: 'Analyze', rationale: 'Analyze', dependsOn: ['step-1'] },
-          { id: 'step-3', toolId: 'prd.assemble-prd', toolType: 'skill' as const, label: 'Assemble', rationale: 'Assemble', dependsOn: ['step-2'] }
+          { id: 'step-0', toolId: 'clarification.check', toolType: 'skill' as const, label: 'Clarify', rationale: 'Check', dependsOn: [] },
+          { id: 'step-1', toolId: 'prd.analyze-context', toolType: 'skill' as const, label: 'Analyze', rationale: 'Analyze', dependsOn: ['step-0'] },
+          { id: 'step-2', toolId: 'prd.assemble-prd', toolType: 'skill' as const, label: 'Assemble', rationale: 'Assemble', dependsOn: ['step-1'] }
         ]
       }
 
       const plan = translator.translateToPlanGraph(raw)
 
+      assert.deepEqual(plan.nodes['step-0'].task, { kind: 'clarification-check' })
+      assert.deepEqual(plan.nodes['step-1'].task, { kind: 'analyze-context' })
+      assert.deepEqual(plan.nodes['step-2'].task, { kind: 'assemble-prd' })
+    })
+
+    await t.test('maps legacy clarification id for compatibility', () => {
+      const translator = createTranslator()
+      const raw = {
+        targetArtifact: 'prd',
+        overallRationale: 'Test',
+        confidence: 0.8,
+        steps: [
+          { id: 'step-1', toolId: 'prd.check-clarification', toolType: 'skill' as const, label: 'Clarify', rationale: 'Check', dependsOn: [] }
+        ]
+      }
+
+      const plan = translator.translateToPlanGraph(raw)
       assert.deepEqual(plan.nodes['step-1'].task, { kind: 'clarification-check' })
-      assert.deepEqual(plan.nodes['step-2'].task, { kind: 'analyze-context' })
-      assert.deepEqual(plan.nodes['step-3'].task, { kind: 'assemble-prd' })
     })
 
     await t.test('handles section writer skills', () => {

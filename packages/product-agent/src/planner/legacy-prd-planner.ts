@@ -5,6 +5,9 @@ import { ALL_SECTION_NAMES } from '@product-agents/prd-shared'
 
 export type PrdPlanTask =
   | {
+      kind: 'clarification-check'
+    }
+  | {
       kind: 'analyze-context'
     }
   | {

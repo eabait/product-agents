@@ -112,8 +112,6 @@ export class ToolDiscovery {
   /**
    * Discover only skills.
    * Filters out PRD skills when the PRD subagent is registered.
-   * The clarification skill is also filtered out as clarification is handled
-   * by the Orchestrator during plan proposal, not as an executable skill step.
    */
   async discoverSkills(): Promise<ToolDescriptor[]> {
     const catalogSkills = await this.skillCatalog.listSkills()
@@ -124,12 +122,9 @@ export class ToolDiscovery {
     )
 
     // Filter out PRD skills if PRD subagent is available.
-    // Clarification is always filtered out since the Orchestrator handles
-    // clarification during plan proposal (via LLM reasoning and clarifications
-    // in the proposal output), not as an executable skill step.
     const filteredSkills = hasPrdSubagent
       ? catalogSkills.filter(skill => !skill.id.startsWith('prd.'))
-      : catalogSkills.filter(skill => skill.id !== 'prd.check-clarification')
+      : catalogSkills
 
     return filteredSkills.map(skill => this.skillToDescriptor(skill))
   }

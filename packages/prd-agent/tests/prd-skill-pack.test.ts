@@ -6,9 +6,8 @@ import { SECTION_NAMES } from '@product-agents/prd-shared'
 
 test('prdSkillPack exposes expected skills', () => {
   assert.equal(prdSkillPack.id, 'prd.core')
-  assert.equal(prdSkillPack.skills.length, 8)
+  assert.equal(prdSkillPack.skills.length, 7)
   const ids = prdSkillPack.skills.map(skill => skill.id)
-  assert.ok(ids.includes('prd.check-clarification'))
   assert.ok(ids.includes('prd.analyze-context'))
   assert.ok(ids.includes('prd.assemble-prd'))
   assert.ok(ids.includes(`prd.write-${SECTION_NAMES.TARGET_USERS}`))
@@ -24,7 +23,7 @@ test('listPrdSkills produces copy of manifest entries', () => {
     category: 'analyzer'
   } as any)
 
-  assert.equal(prdSkillPack.skills.length, 8)
+  assert.equal(prdSkillPack.skills.length, 7)
 })
 
 test('prdSkillPack declares persona subagent', () => {

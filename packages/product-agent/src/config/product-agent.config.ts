@@ -144,6 +144,11 @@ const DEFAULT_CONFIG: ProductAgentConfig = {
   skills: {
     enabledPacks: [
       {
+        id: 'clarification-skill-pack',
+        version: 'latest',
+        label: 'Clarification Skill Pack'
+      },
+      {
         id: 'prd-skill-pack',
         version: 'latest',
         label: 'PRD Skill Pack'

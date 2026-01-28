@@ -137,7 +137,7 @@ const createTestFixtures = (mockResponse?: string) => {
   config.runtime.defaultModel = 'test-model'
 
   // Create a minimal skill catalog
-  const skillCatalog = new SkillCatalog([{ id: 'prd-skill-pack', version: '1.0.0' }])
+  const skillCatalog = new SkillCatalog(config.skills.enabledPacks)
 
   // Override listSkills to return mock skills
   ;(skillCatalog as any).loaded = true

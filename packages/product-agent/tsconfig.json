@@ -14,6 +14,7 @@
     "paths": {
       "@product-agents/agent-core": ["./src/types/external.d.ts"],
       "@product-agents/prd-shared": ["./src/types/external.d.ts"],
+      "@product-agents/skills-clarifications": ["./src/types/external.d.ts"],
       "@product-agents/skills-prd": ["./src/types/external.d.ts"]
     }
   },

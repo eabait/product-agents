@@ -6,6 +6,7 @@ import {
   SuccessMetricsSectionWriter,
   ConstraintsSectionWriter
 } from '@product-agents/skills-prd'
+import { ClarificationAnalyzer } from '@product-agents/skills-clarifications'
 import {
   type SectionRoutingRequest,
   type SectionRoutingResponse,
@@ -102,6 +103,8 @@ export class PrdSkillRunner implements SkillRunner<PrdPlanTask, unknown> {
     const state = this.ensureState(request.context.run.runId)
 
     switch (task.kind) {
+      case 'clarification-check':
+        return this.runClarificationCheck(request, runInput, state)
       case 'analyze-context':
         return this.runContextAnalysis(request, runInput, state)
       case 'write-section':
@@ -144,6 +147,35 @@ export class PrdSkillRunner implements SkillRunner<PrdPlanTask, unknown> {
       maxTokens: runSettings.maxOutputTokens,
       apiKey,
       advanced: this.fallbackModel ? { fallbackModel: this.fallbackModel } : undefined
+    }
+  }
+
+  private async runClarificationCheck(
+    request: PrdSkillRequest,
+    runInput: SectionRoutingRequest,
+    state: RunState
+  ): Promise<SkillResult<unknown>> {
+    const analyzer = new ClarificationAnalyzer(this.createAgentSettings(request, runInput))
+    const result = await analyzer.analyze({
+      message: runInput.message,
+      context: {
+        contextPayload: runInput.context?.contextPayload,
+        existingPRD: runInput.context?.existingPRD
+      }
+    })
+
+    state.analysisResults.set(result.name, result)
+
+    const metadata = {
+      ...result.metadata,
+      clarification: result.data,
+      ...(result.data.needsClarification ? { runStatus: 'awaiting-input' } : {})
+    }
+
+    return {
+      output: result,
+      confidence: confidenceLevelToScore(result.confidence),
+      metadata
     }
   }
 

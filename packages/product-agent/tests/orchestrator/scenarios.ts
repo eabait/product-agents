@@ -311,6 +311,15 @@ export const COMPLEX_WORKFLOW_SCENARIOS: TestScenario[] = [
 export const MOCK_TOOLS: ToolDescriptor[] = [
   // PRD Skills
   {
+    id: 'clarification.check',
+    type: 'skill',
+    label: 'Clarification Analyzer',
+    description: 'Evaluates whether more information is needed and drafts questions',
+    inputArtifacts: ['prompt'],
+    outputArtifact: 'prompt',
+    capabilities: ['analyzer', 'clarify']
+  },
+  {
     id: 'prd.analyze-context',
     type: 'skill',
     label: 'Analyze Context',
