@@ -1,3 +1,3 @@
-export * from './schemas.ts'
-export * from './confidence.ts'
-export * from './constants.ts'
+export * from './schemas'
+export * from './confidence'
+export * from './constants'

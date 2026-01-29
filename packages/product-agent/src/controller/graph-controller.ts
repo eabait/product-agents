@@ -8,7 +8,9 @@ import {
   createApprovalSpan,
   getObservabilityTransport,
   isObservabilityEnabled,
-  recordGeneration
+  recordGeneration,
+  getActiveTraceId,
+  getActiveSpanId
 } from '@product-agents/observability'
 
 import type {
@@ -255,6 +257,14 @@ export class GraphController implements AgentController {
     this.toolInvoker = options?.toolInvoker ?? generateText
   }
 
+  private buildTraceContext(): { traceId: string; parentSpanId?: string } | undefined {
+    const traceId = getActiveTraceId()
+    if (!traceId) {
+      return undefined
+    }
+    return { traceId, parentSpanId: getActiveSpanId() }
+  }
+
   async start<TInput, TArtifact>(
     input: ControllerStartRequest<TInput>,
     options?: ControllerStartOptions
@@ -495,7 +505,7 @@ export class GraphController implements AgentController {
     delete context.runContext.metadata?.blockedSubagent
 
     // Record approval received span for observability
-    void withSpan(
+    await withSpan(
       createApprovalSpan('received', {
         subagentId: blockedSubagent.subagentId,
         stepId,
@@ -574,28 +584,6 @@ export class GraphController implements AgentController {
     // eslint-disable-next-line no-console
     console.log(`[graph-controller]   - requirePlanConfirmation: false`)
 
-    const subagentRequest = {
-      params: {
-        ...(node.inputs ?? {}),
-        input: context.runContext.request.input,
-        approvedPlan,
-        requirePlanConfirmation: false // Don't ask for confirmation again
-      },
-      run: context.runContext,
-      sourceArtifact,
-      emit: (event: ProgressEvent) => {
-        emitEvent(
-          options,
-          toProgressEvent({
-            type: 'subagent.progress',
-            runId,
-            stepId,
-            payload: { subagentId: lifecycle.metadata.id, event }
-          })
-        )
-      }
-    }
-
     try {
       // eslint-disable-next-line no-console
       console.log(`[graph-controller] executing subagent ${lifecycle.metadata.id} for run ${runId}`)
@@ -607,7 +595,29 @@ export class GraphController implements AgentController {
           mode: 'resume',
           runId
         }),
-        async () => lifecycle.execute(subagentRequest)
+        async () =>
+          lifecycle.execute({
+            params: {
+              ...(node.inputs ?? {}),
+              input: context.runContext.request.input,
+              approvedPlan,
+              requirePlanConfirmation: false // Don't ask for confirmation again
+            },
+            run: context.runContext,
+            traceContext: this.buildTraceContext(),
+            sourceArtifact,
+            emit: (event: ProgressEvent) => {
+              emitEvent(
+                options,
+                toProgressEvent({
+                  type: 'subagent.progress',
+                  runId,
+                  stepId,
+                  payload: { subagentId: lifecycle.metadata.id, event }
+                })
+              )
+            }
+          })
       )
       // eslint-disable-next-line no-console
       console.log(`[graph-controller] subagent ${lifecycle.metadata.id} execution completed for run ${runId}`)
@@ -791,6 +801,7 @@ export class GraphController implements AgentController {
             input: context.runContext.request.input
           },
           run: context.runContext,
+          traceContext: this.buildTraceContext(),
           sourceArtifact,
           emit: (event: ProgressEvent) => {
             emitEvent(
@@ -1464,7 +1475,7 @@ export class GraphController implements AgentController {
       const subagentPlan = artifact.metadata?.extras?.plan || result.metadata?.plan
 
       // Record approval request span for observability
-      void withSpan(
+      await withSpan(
         createApprovalSpan('requested', {
           subagentId: lifecycle.metadata.id,
           artifactKind: lifecycle.metadata.artifactKind,
@@ -1909,6 +1920,7 @@ export class GraphController implements AgentController {
               const result = await subagent.execute({
                 params: subagentParams,
                 run: context.runContext,
+                traceContext: this.buildTraceContext(),
                 sourceArtifact: context.artifact,
                 emit: event =>
                   emitEvent(

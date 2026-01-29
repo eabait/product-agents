@@ -1,5 +1,6 @@
 import { tool, type ToolCallOptions } from 'ai'
 import { z } from 'zod'
+import { getActiveSpanId, getActiveTraceId } from '@product-agents/observability'
 
 import type { Artifact, PlanNode, RunContext } from '../contracts/core'
 import type { SkillResult, SkillRunner } from '../contracts/skill-runner'
@@ -99,9 +100,13 @@ export const createSubagentTool = (params: SubagentToolParams) =>
         input: params.runContext.request.input
       }
 
+      const traceId = getActiveTraceId()
+      const traceContext = traceId ? { traceId, parentSpanId: getActiveSpanId() } : undefined
+
       const result = await lifecycle.execute({
         params: subagentParams,
         run: params.runContext,
+        traceContext,
         sourceArtifact,
         emit: params.emitProgress
           ? event => params.emitProgress?.(event as unknown as Record<string, unknown>)

@@ -1,4 +1,4 @@
-import { ConfidenceAssessment, ConfidenceLevel } from './schemas.ts'
+import { ConfidenceAssessment, ConfidenceLevel } from './schemas'
 
 // Confidence threshold constants
 export const CONFIDENCE_THRESHOLDS = {

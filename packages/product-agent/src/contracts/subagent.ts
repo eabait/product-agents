@@ -10,11 +10,17 @@ export interface SubagentMetadata {
   tags?: string[]
 }
 
+export interface TraceContextInfo {
+  traceId: string
+  parentSpanId?: string
+}
+
 export interface SubagentRequest<TParams = unknown, TSourceArtifact = unknown> {
   params: TParams
   run: RunContext
   sourceArtifact?: Artifact<TSourceArtifact>
   emit?: (event: ProgressEvent) => void
+  traceContext?: TraceContextInfo
 }
 
 export interface SubagentResult<TArtifact = unknown> {
