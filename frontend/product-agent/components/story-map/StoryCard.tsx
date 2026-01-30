@@ -7,15 +7,14 @@ import type { StoryMapStory } from './types';
 
 interface StoryCardProps {
   story: StoryMapStory;
-  compact?: boolean;
 }
 
 const effortColors: Record<string, string> = {
-  xs: 'bg-green-100 text-green-800 border-green-200',
-  s: 'bg-blue-100 text-blue-800 border-blue-200',
-  m: 'bg-yellow-100 text-yellow-800 border-yellow-200',
-  l: 'bg-orange-100 text-orange-800 border-orange-200',
-  xl: 'bg-red-100 text-red-800 border-red-200'
+  xs: 'bg-green-100 text-green-800',
+  s: 'bg-blue-100 text-blue-800',
+  m: 'bg-yellow-100 text-yellow-800',
+  l: 'bg-orange-100 text-orange-800',
+  xl: 'bg-red-100 text-red-800'
 };
 
 const effortLabels: Record<string, string> = {
@@ -26,42 +25,29 @@ const effortLabels: Record<string, string> = {
   xl: 'XL'
 };
 
-function getConfidenceBadgeColor(confidence: number): string {
-  if (confidence >= 0.8) return 'bg-green-100 text-green-800 border-green-200';
-  if (confidence >= 0.6) return 'bg-yellow-100 text-yellow-800 border-yellow-200';
-  return 'bg-red-100 text-red-800 border-red-200';
-}
-
-export function StoryCard({ story, compact = false }: StoryCardProps) {
+export function StoryCard({ story }: StoryCardProps) {
   const [showCriteria, setShowCriteria] = useState(false);
 
   return (
-    <div className="bg-white border rounded-lg p-4 shadow-sm hover:shadow-md transition-shadow">
+    <div className="bg-white border rounded-lg p-3 shadow-sm">
       <div className="flex items-start justify-between gap-2 mb-2">
-        <h4 className="font-medium text-gray-900">{story.title}</h4>
-        <div className="flex items-center gap-1 flex-shrink-0">
-          {story.effort && (
-            <Badge className={`${effortColors[story.effort]} text-xs`}>
-              {effortLabels[story.effort]}
-            </Badge>
-          )}
-          {story.confidence !== undefined && (
-            <Badge className={`${getConfidenceBadgeColor(story.confidence)} text-xs`}>
-              {Math.round(story.confidence * 100)}%
-            </Badge>
-          )}
-        </div>
+        <h4 className="font-medium text-gray-900 text-sm">{story.title}</h4>
+        {story.effort && (
+          <Badge className={`${effortColors[story.effort]} text-xs`}>
+            {effortLabels[story.effort]}
+          </Badge>
+        )}
       </div>
 
-      <p className="text-sm text-gray-700 mb-3 italic">
-        As a <span className="font-medium not-italic">{story.asA}</span>, I want{' '}
-        <span className="font-medium not-italic">{story.iWant}</span>, so that{' '}
-        <span className="font-medium not-italic">{story.soThat}</span>.
+      <p className="text-sm text-gray-600 mb-2">
+        As a <span className="font-medium">{story.asA}</span>, I want{' '}
+        <span className="font-medium">{story.iWant}</span>, so that{' '}
+        <span className="font-medium">{story.soThat}</span>.
       </p>
 
       {story.personas && story.personas.length > 0 && (
-        <div className="flex items-center gap-1 mb-3 flex-wrap">
-          <Users className="w-3 h-3 text-gray-500" />
+        <div className="flex items-center gap-1 mb-2 flex-wrap">
+          <Users className="w-3 h-3 text-gray-400" />
           {story.personas.map((persona, idx) => (
             <Badge key={idx} variant="outline" className="text-xs">
               {persona.personaId}
@@ -74,22 +60,18 @@ export function StoryCard({ story, compact = false }: StoryCardProps) {
         <div>
           <button
             onClick={() => setShowCriteria(!showCriteria)}
-            className="flex items-center gap-1 text-sm text-gray-600 hover:text-gray-900 transition-colors"
+            className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700"
           >
-            <CheckCircle2 className="w-4 h-4" />
+            <CheckCircle2 className="w-3 h-3" />
             <span>{story.acceptanceCriteria.length} acceptance criteria</span>
-            {showCriteria ? (
-              <ChevronUp className="w-4 h-4" />
-            ) : (
-              <ChevronDown className="w-4 h-4" />
-            )}
+            {showCriteria ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
           </button>
 
           {showCriteria && (
-            <ul className="mt-2 space-y-1 pl-5">
+            <ul className="mt-2 space-y-1 pl-4">
               {story.acceptanceCriteria.map((criteria, idx) => (
-                <li key={idx} className="text-sm text-gray-600 flex items-start gap-2">
-                  <span className="text-green-600 mt-0.5">&#10003;</span>
+                <li key={idx} className="text-xs text-gray-600 flex items-start gap-1">
+                  <span className="text-green-600">✓</span>
                   <span>{criteria}</span>
                 </li>
               ))}

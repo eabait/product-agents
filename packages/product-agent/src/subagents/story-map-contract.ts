@@ -1,7 +1,6 @@
 export interface StoryMapPersonaLink {
   personaId: string
   goal: string
-  painPoints?: string[]
 }
 
 export interface StoryMapStory {
@@ -12,7 +11,6 @@ export interface StoryMapStory {
   soThat: string
   acceptanceCriteria: string[]
   effort?: 'xs' | 's' | 'm' | 'l' | 'xl'
-  confidence?: number
   personas?: StoryMapPersonaLink[]
 }
 
@@ -21,8 +19,6 @@ export interface StoryMapEpic {
   name: string
   outcome: string
   stories: StoryMapStory[]
-  dependencies?: string[]
-  metrics?: string[]
 }
 
 export interface StoryMapArtifact {
@@ -30,13 +26,4 @@ export interface StoryMapArtifact {
   label: string
   personasReferenced: string[]
   epics: StoryMapEpic[]
-  roadmapNotes?: {
-    releaseRings?: Array<{
-      label: string
-      targetDate?: string
-      epicIds: string[]
-    }>
-    risks?: string[]
-    assumptions?: string[]
-  }
 }

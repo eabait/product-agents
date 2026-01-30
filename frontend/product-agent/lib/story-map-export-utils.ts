@@ -1,7 +1,6 @@
 interface StoryMapPersonaLink {
   personaId: string;
   goal: string;
-  painPoints?: string[];
 }
 
 interface StoryMapStory {
@@ -12,7 +11,6 @@ interface StoryMapStory {
   soThat: string;
   acceptanceCriteria: string[];
   effort?: 'xs' | 's' | 'm' | 'l' | 'xl';
-  confidence?: number;
   personas?: StoryMapPersonaLink[];
 }
 
@@ -21,18 +19,6 @@ interface StoryMapEpic {
   name: string;
   outcome: string;
   stories: StoryMapStory[];
-  dependencies?: string[];
-  metrics?: string[];
-}
-
-interface StoryMapRoadmapNotes {
-  releaseRings?: Array<{
-    label: string;
-    targetDate?: string;
-    epicIds: string[];
-  }>;
-  risks?: string[];
-  assumptions?: string[];
 }
 
 interface StoryMapArtifact {
@@ -40,7 +26,6 @@ interface StoryMapArtifact {
   label: string;
   personasReferenced: string[];
   epics: StoryMapEpic[];
-  roadmapNotes?: StoryMapRoadmapNotes;
 }
 
 export function storyMapToMarkdown(data: StoryMapArtifact): string {
@@ -50,7 +35,7 @@ export function storyMapToMarkdown(data: StoryMapArtifact): string {
   lines.push('');
 
   if (data.personasReferenced && data.personasReferenced.length > 0) {
-    lines.push(`**Personas Referenced:** ${data.personasReferenced.join(', ')}`);
+    lines.push(`**Personas:** ${data.personasReferenced.join(', ')}`);
     lines.push('');
   }
 
@@ -58,21 +43,8 @@ export function storyMapToMarkdown(data: StoryMapArtifact): string {
     for (const epic of data.epics) {
       lines.push(`## ${epic.name}`);
       lines.push('');
-      lines.push(`**Outcome:** ${epic.outcome}`);
+      lines.push(`${epic.outcome}`);
       lines.push('');
-
-      if (epic.dependencies && epic.dependencies.length > 0) {
-        lines.push(`**Dependencies:** ${epic.dependencies.join(', ')}`);
-        lines.push('');
-      }
-
-      if (epic.metrics && epic.metrics.length > 0) {
-        lines.push('**Success Metrics:**');
-        for (const metric of epic.metrics) {
-          lines.push(`- ${metric}`);
-        }
-        lines.push('');
-      }
 
       if (epic.stories && epic.stories.length > 0) {
         for (const story of epic.stories) {
@@ -81,15 +53,8 @@ export function storyMapToMarkdown(data: StoryMapArtifact): string {
           lines.push(`> As a **${story.asA}**, I want **${story.iWant}**, so that **${story.soThat}**.`);
           lines.push('');
 
-          const effortLabel = story.effort ? story.effort.toUpperCase() : 'TBD';
-          const confidenceLabel = story.confidence !== undefined
-            ? `${Math.round(story.confidence * 100)}%`
-            : 'N/A';
-          lines.push(`**Effort:** ${effortLabel} | **Confidence:** ${confidenceLabel}`);
-          lines.push('');
-
-          if (story.personas && story.personas.length > 0) {
-            lines.push(`**Personas:** ${story.personas.map(p => p.personaId).join(', ')}`);
+          if (story.effort) {
+            lines.push(`**Effort:** ${story.effort.toUpperCase()}`);
             lines.push('');
           }
 
@@ -102,41 +67,6 @@ export function storyMapToMarkdown(data: StoryMapArtifact): string {
           }
         }
       }
-    }
-  }
-
-  if (data.roadmapNotes) {
-    lines.push('---');
-    lines.push('');
-    lines.push('## Roadmap Notes');
-    lines.push('');
-
-    if (data.roadmapNotes.releaseRings && data.roadmapNotes.releaseRings.length > 0) {
-      lines.push('### Release Rings');
-      lines.push('');
-      for (const ring of data.roadmapNotes.releaseRings) {
-        const dateStr = ring.targetDate ? ` (Target: ${ring.targetDate})` : '';
-        lines.push(`**${ring.label}**${dateStr}: ${ring.epicIds.join(', ')}`);
-      }
-      lines.push('');
-    }
-
-    if (data.roadmapNotes.risks && data.roadmapNotes.risks.length > 0) {
-      lines.push('### Risks');
-      lines.push('');
-      for (const risk of data.roadmapNotes.risks) {
-        lines.push(`- ${risk}`);
-      }
-      lines.push('');
-    }
-
-    if (data.roadmapNotes.assumptions && data.roadmapNotes.assumptions.length > 0) {
-      lines.push('### Assumptions');
-      lines.push('');
-      for (const assumption of data.roadmapNotes.assumptions) {
-        lines.push(`- ${assumption}`);
-      }
-      lines.push('');
     }
   }
 

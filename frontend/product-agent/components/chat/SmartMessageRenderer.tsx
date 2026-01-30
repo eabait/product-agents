@@ -612,8 +612,7 @@ const CollapsibleStoryMapViewer = ({ artifact }: { artifact: StoryMapArtifactSha
     version: artifact.version ?? '1.0.0',
     label: artifact.label ?? 'Story Map',
     personasReferenced: artifact.personasReferenced ?? [],
-    epics: artifact.epics ?? [],
-    roadmapNotes: artifact.roadmapNotes
+    epics: artifact.epics ?? []
   }
 
   const epicCount = data.epics?.length ?? 0
