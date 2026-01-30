@@ -7,8 +7,8 @@ import { ResearchPlanCard } from '../research/ResearchPlanCard';
 import { ResearchArtifactView } from '../research/ResearchArtifactView';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ChevronDown, ChevronUp, FileText, Users, Search, LayoutGrid } from 'lucide-react';
-import { StoryMapArtifactView } from '../story-map/StoryMapArtifactView';
-import type { StoryMapArtifact, StoryMapArtifactShape } from '../story-map/types';
+import { StoryMapArtifactView, isStoryMapArtifact, normalizeStoryMapData } from '../story-map';
+import type { StoryMapArtifactShape } from '../story-map/types';
 import { Button } from '@/components/ui/button';
 import { NewPRD, FlattenedPRD, isNewPRD, isFlattenedPRD } from '@/lib/prd-schema';
 import { Badge } from '@/components/ui/badge';
@@ -585,35 +585,9 @@ const isResearchArtifact = (value: unknown): value is ResearchArtifactShape => {
   return artifact.kind === 'research'
 }
 
-const isStoryMapArtifact = (value: unknown): value is StoryMapArtifactShape => {
-  if (!value || typeof value !== 'object') {
-    return false
-  }
-  const obj = value as StoryMapArtifactShape
-
-  // Check for wrapped artifact structure
-  if (obj.kind === 'story-map' && obj.data?.epics) {
-    return true
-  }
-
-  // Check for direct story-map structure
-  if (Array.isArray(obj.epics) && typeof obj.version === 'string') {
-    return true
-  }
-
-  return false
-}
-
 const CollapsibleStoryMapViewer = ({ artifact }: { artifact: StoryMapArtifactShape }) => {
   const [isOpen, setIsOpen] = useState(false)
-
-  // Normalize data whether wrapped or direct
-  const data: StoryMapArtifact = artifact.data ?? {
-    version: artifact.version ?? '1.0.0',
-    label: artifact.label ?? 'Story Map',
-    personasReferenced: artifact.personasReferenced ?? [],
-    epics: artifact.epics ?? []
-  }
+  const data = normalizeStoryMapData(artifact)
 
   const epicCount = data.epics?.length ?? 0
   const storyCount = data.epics?.reduce((sum, epic) => sum + (epic.stories?.length ?? 0), 0) ?? 0

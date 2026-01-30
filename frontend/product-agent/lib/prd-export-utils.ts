@@ -1,4 +1,8 @@
 import { FlattenedPRD } from './prd-schema';
+import { downloadMarkdown as downloadMd, copyToClipboard } from './export-utils';
+
+// Re-export for backwards compatibility
+export { copyToClipboard };
 
 /**
  * Converts a PRD object to a formatted text string for copying
@@ -130,54 +134,7 @@ export function convertPRDToMarkdown(prd: FlattenedPRD): string {
  * Downloads markdown content as a file
  */
 export function downloadMarkdown(content: string, filename?: string): void {
-  const timestamp = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
+  const timestamp = new Date().toISOString().split('T')[0];
   const finalFilename = filename || `prd-export-${timestamp}.md`;
-  
-  const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = finalFilename;
-  
-  // Append to body, click, and remove
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  
-  // Clean up URL
-  URL.revokeObjectURL(url);
-}
-
-/**
- * Copies text to clipboard using the modern Clipboard API
- */
-export async function copyToClipboard(text: string): Promise<boolean> {
-  try {
-    if (navigator.clipboard && window.isSecureContext) {
-      await navigator.clipboard.writeText(text);
-      return true;
-    } else {
-      // Fallback for older browsers or non-secure contexts
-      const textArea = document.createElement('textarea');
-      textArea.value = text;
-      textArea.style.position = 'absolute';
-      textArea.style.left = '-999999px';
-      
-      document.body.appendChild(textArea);
-      textArea.focus();
-      textArea.select();
-      
-      try {
-        const successful = document.execCommand('copy');
-        document.body.removeChild(textArea);
-        return successful;
-      } catch {
-        document.body.removeChild(textArea);
-        return false;
-      }
-    }
-  } catch {
-    return false;
-  }
+  downloadMd(content, finalFilename);
 }

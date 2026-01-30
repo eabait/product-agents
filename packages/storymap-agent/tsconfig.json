@@ -3,14 +3,8 @@
   "compilerOptions": {
     "rootDir": "src",
     "outDir": "dist",
-    "noEmit": false,
-    "declaration": true,
-    "declarationMap": true,
-    "composite": false,
-    "moduleResolution": "node",
-    "paths": {
-      "@product-agents/product-agent": ["packages/storymap-agent/src/types/product-agent.d.ts"]
-    }
+    "composite": true
   },
-  "include": ["src/**/*"]
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "tests"]
 }
