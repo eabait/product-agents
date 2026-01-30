@@ -122,6 +122,20 @@ const DEFAULT_RESEARCH_SUBAGENT_MANIFEST: SubagentConfigEntry = {
   tags: ['research', 'market-intelligence', 'web-search']
 }
 
+const DEFAULT_STORYMAP_SUBAGENT_MANIFEST: SubagentConfigEntry = {
+  id: 'storymap.builder',
+  package: '@product-agents/storymap-agent',
+  version: '0.1.0',
+  label: 'Story Map Agent',
+  creates: 'story-map',
+  consumes: ['prd', 'persona', 'research'],
+  capabilities: ['synthesize', 'plan'],
+  description: 'Generates user story maps from PRD, personas, and research artifacts.',
+  entry: '@product-agents/storymap-agent',
+  exportName: 'createStorymapAgentSubagent',
+  tags: ['storymap', 'planning', 'user-stories']
+}
+
 const DEFAULT_CONFIG: ProductAgentConfig = {
   runtime: {
     defaultModel: process.env.ORCHESTRATOR_MODEL ?? 'qwen/qwen-2.5-72b-instruct',
@@ -163,7 +177,11 @@ const DEFAULT_CONFIG: ProductAgentConfig = {
     eventThrottleMs: 250
   },
   subagents: {
-    manifests: [DEFAULT_PERSONA_SUBAGENT_MANIFEST, DEFAULT_RESEARCH_SUBAGENT_MANIFEST]
+    manifests: [
+      DEFAULT_PERSONA_SUBAGENT_MANIFEST,
+      DEFAULT_RESEARCH_SUBAGENT_MANIFEST,
+      DEFAULT_STORYMAP_SUBAGENT_MANIFEST
+    ]
   },
   planner: {
     strategy: 'intelligent'

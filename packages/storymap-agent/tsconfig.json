@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "noEmit": false,
+    "declaration": true,
+    "declarationMap": true,
+    "composite": false,
+    "moduleResolution": "node",
+    "paths": {
+      "@product-agents/product-agent": ["packages/storymap-agent/src/types/product-agent.d.ts"]
+    }
+  },
+  "include": ["src/**/*"]
+}

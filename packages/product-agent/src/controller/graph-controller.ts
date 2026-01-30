@@ -1054,6 +1054,7 @@ export class GraphController implements AgentController {
                 runContext: context.runContext,
                 resolveLifecycle: async () => lifecycle as SubagentLifecycle,
                 resolveSourceArtifact: lc => this.resolveSubagentSourceArtifact(lc, node, context),
+                sourceArtifacts: context.artifactsByKind,
                 emitProgress: event =>
                   emitEvent(
                     options,
@@ -1928,15 +1929,16 @@ export class GraphController implements AgentController {
               // Build params for the subagent, including any parameters from contextPayload
               const subagentParams = contextPayload ?? {}
 
-              const result = await subagent.execute({
-                params: subagentParams,
-                run: context.runContext,
-                traceContext: this.buildTraceContext(),
-                sourceArtifact: context.artifact,
-                emit: event =>
-                  emitEvent(
-                    options,
-                    toProgressEvent({
+            const result = await subagent.execute({
+              params: subagentParams,
+              run: context.runContext,
+              traceContext: this.buildTraceContext(),
+              sourceArtifact: context.artifact,
+              sourceArtifacts: context.artifactsByKind,
+              emit: event =>
+                emitEvent(
+                  options,
+                  toProgressEvent({
                       type: 'subagent.progress',
                       runId,
                       payload: {

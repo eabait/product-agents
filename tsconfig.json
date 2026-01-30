@@ -32,7 +32,8 @@
       "@product-agents/persona-agent": ["./packages/persona-agent/agent/src"],
       "@product-agents/story-mapper-agent": ["./packages/story-mapper-agent/agent/src"],
       "@product-agents/story-generator-agent": ["./packages/story-generator-agent/agent/src"],
-      "@product-agents/story-refiner-agent": ["./packages/story-refiner-agent/agent/src"]
+      "@product-agents/story-refiner-agent": ["./packages/story-refiner-agent/agent/src"],
+      "@product-agents/storymap-agent": ["./packages/storymap-agent/src"]
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],

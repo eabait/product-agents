@@ -34,6 +34,7 @@ import {
 } from '@product-agents/product-agent'
 import { personaAgentManifest } from '@product-agents/persona-agent'
 import { researchAgentManifest, createResearchAgentSubagent } from '@product-agents/research-agent'
+import { storymapAgentManifest, createStorymapAgentSubagent } from '@product-agents/storymap-agent'
 import type { SectionRoutingRequest } from '@product-agents/prd-shared'
 
 const loadEnvFiles = () => {
@@ -116,10 +117,17 @@ const researchAgentLoader = async () => {
   }
 }
 
+// Story map agent loader (no special injection needed today)
+const storymapAgentLoader = async () => ({
+  createStorymapAgentSubagent
+})
+
 for (const manifest of config.subagents.manifests) {
   // Use custom loader for research agent
   if (manifest.id === researchAgentManifest.id) {
     subagentRegistry.register(manifest, researchAgentLoader)
+  } else if (manifest.id === storymapAgentManifest.id) {
+    subagentRegistry.register(manifest, storymapAgentLoader)
   } else {
     subagentRegistry.register(manifest)
   }
@@ -132,6 +140,10 @@ if (!registeredSubagents.has(personaAgentManifest.id)) {
 
 if (!registeredSubagents.has(researchAgentManifest.id)) {
   subagentRegistry.register(researchAgentManifest, researchAgentLoader)
+}
+
+if (!registeredSubagents.has(storymapAgentManifest.id)) {
+  subagentRegistry.register(storymapAgentManifest, storymapAgentLoader)
 }
 
 if (!registeredSubagents.has(prdAgentManifest.id)) {

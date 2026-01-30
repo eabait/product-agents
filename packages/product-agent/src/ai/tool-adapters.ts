@@ -2,7 +2,7 @@ import { tool, type ToolCallOptions } from 'ai'
 import { z } from 'zod'
 import { getActiveSpanId, getActiveTraceId } from '@product-agents/observability'
 
-import type { Artifact, PlanNode, RunContext } from '../contracts/core'
+import type { Artifact, ArtifactKind, PlanNode, RunContext } from '../contracts/core'
 import type { SkillResult, SkillRunner } from '../contracts/skill-runner'
 import type { SubagentLifecycle } from '../contracts/subagent'
 
@@ -32,6 +32,7 @@ type SubagentToolParams = {
   resolveLifecycle: () => Promise<SubagentLifecycle>
   resolveSourceArtifact: (lifecycle: SubagentLifecycle) => Artifact | undefined
   emitProgress?: (event: Record<string, unknown>) => void
+  sourceArtifacts?: Map<ArtifactKind, Artifact[]>
 }
 
 const defaultInputSchema = z.object({
@@ -81,9 +82,10 @@ export const createSubagentTool = (params: SubagentToolParams) =>
     execute: async (_input: z.infer<typeof defaultInputSchema>, options: ToolCallOptions): Promise<ToolExecutionResult> => {
       const lifecycle = await params.resolveLifecycle()
       const sourceArtifact = params.resolveSourceArtifact(lifecycle)
-      if (!sourceArtifact) {
+      const hasArtifactMap = params.sourceArtifacts && params.sourceArtifacts.size > 0
+      if (!sourceArtifact && !hasArtifactMap) {
         throw new Error(
-          `Subagent "${lifecycle.metadata.id}" requires a source artifact but none was available`
+          `Subagent "${lifecycle.metadata.id}" requires input context but no artifacts were available`
         )
       }
 
@@ -108,6 +110,7 @@ export const createSubagentTool = (params: SubagentToolParams) =>
         run: params.runContext,
         traceContext,
         sourceArtifact,
+        sourceArtifacts: params.sourceArtifacts,
         emit: params.emitProgress
           ? event => params.emitProgress?.(event as unknown as Record<string, unknown>)
           : undefined

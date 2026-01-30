@@ -1,0 +1,27 @@
+{
+  "name": "@product-agents/storymap-agent",
+  "version": "0.1.0",
+  "description": "Story Map builder subagent synthesizing PRD, persona, and research artifacts into user story maps.",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsup",
+    "lint": "eslint 'src/**/*.{ts,tsx}'",
+    "clean": "rm -rf dist",
+    "test": "node --test --loader ../../product-agent/tests/ts-loader.mjs tests/**/*.test.ts"
+  },
+  "dependencies": {
+    "@product-agents/openrouter-client": "*",
+    "@product-agents/product-agent": "*",
+    "zod": "^3.25.76"
+  },
+  "peerDependencies": {
+    "@product-agents/product-agent": "*"
+  },
+  "devDependencies": {
+    "tsup": "^7.2.0",
+    "typescript": "^5.0.0"
+  }
+}

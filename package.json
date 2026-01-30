@@ -16,7 +16,8 @@
     "packages/story-mapper-agent/*",
     "packages/story-generator-agent/*",
     "packages/story-refiner-agent/*",
-    "frontend/product-agent"
+    "frontend/product-agent",
+    "packages/storymap-agent"
   ],
   "scripts": {
     "build": "turbo run build",

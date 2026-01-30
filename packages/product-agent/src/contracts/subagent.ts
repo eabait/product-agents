@@ -19,6 +19,11 @@ export interface SubagentRequest<TParams = unknown, TSourceArtifact = unknown> {
   params: TParams
   run: RunContext
   sourceArtifact?: Artifact<TSourceArtifact>
+  /**
+   * Optional map of all artifacts available in the run, grouped by kind.
+   * Enables subagents that need to combine multiple artifact types (e.g., story-map).
+   */
+  sourceArtifacts?: Map<ArtifactKind, Artifact[]>
   emit?: (event: ProgressEvent) => void
   traceContext?: TraceContextInfo
 }
