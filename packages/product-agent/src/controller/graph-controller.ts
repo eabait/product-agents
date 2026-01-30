@@ -486,7 +486,7 @@ export class GraphController implements AgentController {
 
     // Verify we're blocked on the expected step
     const blockedSubagent = context.runContext.metadata?.blockedSubagent as
-      | { stepId: string; subagentId: string; status: string; plan: unknown }
+      | { stepId: string; subagentId: string; status: string; plan: unknown; approvalRequestedAt?: string }
       | undefined
 
     // eslint-disable-next-line no-console
@@ -500,18 +500,26 @@ export class GraphController implements AgentController {
       )
     }
 
+    // Calculate approval wait duration before clearing blocked state
+    const approvalRequestedAt = blockedSubagent.approvalRequestedAt as string | undefined
+    const approvalWaitMs = approvalRequestedAt
+      ? Date.now() - new Date(approvalRequestedAt).getTime()
+      : undefined
+
     // Clear blocked state
     context.status = STATUS_RUNNING
     delete context.runContext.metadata?.blockedSubagent
 
-    // Record approval received span for observability
+    // Record approval received span for observability with timing metadata
     await withSpan(
       createApprovalSpan('received', {
         subagentId: blockedSubagent.subagentId,
         stepId,
-        runId
+        runId,
+        approvalRequestedAt,
+        approvalWaitMs
       }),
-      async () => ({ stepId, subagentId: blockedSubagent.subagentId })
+      async () => ({ stepId, subagentId: blockedSubagent.subagentId, approvalWaitMs })
     )
 
     // eslint-disable-next-line no-console
@@ -1474,15 +1482,17 @@ export class GraphController implements AgentController {
     if (subagentStatus === 'awaiting-plan-confirmation' || subagentStatus === 'awaiting-clarification') {
       const subagentPlan = artifact.metadata?.extras?.plan || result.metadata?.plan
 
-      // Record approval request span for observability
+      // Record approval request span for observability with timestamp
+      const approvalRequestedAt = new Date().toISOString()
       await withSpan(
         createApprovalSpan('requested', {
           subagentId: lifecycle.metadata.id,
           artifactKind: lifecycle.metadata.artifactKind,
           status: subagentStatus,
-          runId: context.runContext.runId
+          runId: context.runContext.runId,
+          approvalRequestedAt
         }),
-        async () => ({ status: subagentStatus, subagentId: lifecycle.metadata.id })
+        async () => ({ status: subagentStatus, subagentId: lifecycle.metadata.id, approvalRequestedAt })
       )
 
       // Emit approval-required event
@@ -1512,7 +1522,8 @@ export class GraphController implements AgentController {
         stepId: node.id,
         subagentId: lifecycle.metadata.id,
         status: subagentStatus,
-        plan: subagentPlan
+        plan: subagentPlan,
+        approvalRequestedAt
       }
 
       // Store partial artifact for later continuation
