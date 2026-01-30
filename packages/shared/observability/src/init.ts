@@ -98,13 +98,20 @@ export async function shutdownObservability(): Promise<void> {
 
 /**
  * Check if observability is currently enabled and initialized.
+ * Auto-initializes if not already done (handles module duplication in bundled packages).
  */
 export function isObservabilityEnabled(): boolean {
+  if (!state.initialized) {
+    initObservability();
+  }
   return state.enabled;
 }
 
 export function getObservabilityTransport():
   | ObservabilityTransport
   | undefined {
+  if (!state.initialized) {
+    initObservability();
+  }
   return state.transport;
 }

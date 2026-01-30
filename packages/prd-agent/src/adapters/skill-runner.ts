@@ -16,6 +16,7 @@ import {
   type SectionName,
   DEFAULT_TEMPERATURE
 } from '@product-agents/prd-shared'
+import { withSpan, createSkillSpan } from '@product-agents/observability'
 import type {
   SkillRunner,
   SkillRequest,
@@ -248,6 +249,30 @@ export class PrdSkillRunner implements SkillRunner<PrdPlanTask, unknown> {
     }
   }
 
+  private extractTokenUsage(metadata?: Record<string, unknown> | null):
+    | { promptTokens?: number; completionTokens?: number; totalTokens?: number }
+    | undefined {
+    if (!metadata || typeof metadata !== 'object') {
+      return undefined
+    }
+    const usage = (metadata as Record<string, any>).usage
+    if (!usage || typeof usage !== 'object') {
+      return undefined
+    }
+    const promptTokens =
+      typeof usage.promptTokens === 'number' ? usage.promptTokens : undefined
+    const completionTokens =
+      typeof usage.completionTokens === 'number' ? usage.completionTokens : undefined
+    const totalTokens =
+      typeof usage.totalTokens === 'number' ? usage.totalTokens : undefined
+
+    if (promptTokens === undefined && completionTokens === undefined && totalTokens === undefined) {
+      return undefined
+    }
+
+    return { promptTokens, completionTokens, totalTokens }
+  }
+
   private async runSectionWriter(
     request: PrdSkillRequest,
     runInput: SectionRoutingRequest,
@@ -263,16 +288,32 @@ export class PrdSkillRunner implements SkillRunner<PrdPlanTask, unknown> {
 
     const existingSection = this.getExistingSection(runInput, section)
 
-    const result = await writer.writeSection({
-      message: runInput.message,
-      context: {
-        contextPayload: runInput.context?.contextPayload,
-        existingPRD: runInput.context?.existingPRD,
-        existingSection,
-        targetSection: section,
-        sharedAnalysisResults: sharedResults
+    const result = await withSpan(
+      createSkillSpan(`section:${section}`, {
+        runId: request.context.run.runId,
+        section,
+        targetSections: runInput.targetSections
+      }),
+      async () =>
+        writer.writeSection({
+          message: runInput.message,
+          context: {
+            contextPayload: runInput.context?.contextPayload,
+            existingPRD: runInput.context?.existingPRD,
+            existingSection,
+            targetSection: section,
+            sharedAnalysisResults: sharedResults
+          }
+        })
+    )
+
+    const tokenUsage = this.extractTokenUsage(result.metadata)
+    if (tokenUsage) {
+      result.metadata = {
+        ...(result.metadata ?? {}),
+        tokenUsage
       }
-    })
+    }
 
     state.sections[section] = result.content
     if (result.confidence) {

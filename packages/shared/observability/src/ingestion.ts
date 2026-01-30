@@ -75,9 +75,15 @@ const ingestBatch = async (events: any[]) => {
 
 export const runWithTraceContext = async <T>(
   traceId: string,
-  fn: () => Promise<T>
+  fn: () => Promise<T>,
+  parentSpanId?: string
 ): Promise<T> => {
-  return traceStorage.run({ traceId }, fn);
+  const runFn = () => traceStorage.run({ traceId }, fn);
+  // If parentSpanId is provided, also set the span context for proper nesting
+  if (parentSpanId) {
+    return spanStorage.run({ spanId: parentSpanId }, runFn);
+  }
+  return runFn();
 };
 
 export const getActiveTraceId = (): string | undefined => {

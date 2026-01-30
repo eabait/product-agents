@@ -8,9 +8,13 @@ export default defineConfig({
   clean: true,
   noExternal: [
     '@product-agents/product-agent',
-    '@product-agents/prd-agent',
     '@product-agents/prd-shared',
-    '@product-agents/agent-core',
+    '@product-agents/agent-core'
+  ],
+  external: [
+    // Keep these external to ensure singleton module state across all packages
+    '@product-agents/observability',
+    '@product-agents/prd-agent',
     '@product-agents/research-agent'
   ]
 })

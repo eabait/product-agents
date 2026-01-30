@@ -7,6 +7,7 @@ import type {
   SubagentRequest,
   SubagentResult
 } from '@product-agents/product-agent'
+import { runWithTraceContext } from '@product-agents/observability'
 import type { AgentSettings } from '@product-agents/agent-core'
 
 import type { ResearchArtifactData } from './contracts/research-artifact'
@@ -203,10 +204,11 @@ export const createResearchAgentSubagent = (
     async execute(
       request: SubagentRequest<ResearchBuilderParams>
     ): Promise<SubagentResult<ResearchArtifactData>> {
-      const params = request.params ?? ({} as ResearchBuilderParams)
-      const emit = request.emit ?? (() => {})
-      const runId = request.run.runId
-      const query = extractQueryFromRequest(request)
+      const executeWithinTrace = async (): Promise<SubagentResult<ResearchArtifactData>> => {
+        const params = request.params ?? ({} as ResearchBuilderParams)
+        const emit = request.emit ?? (() => {})
+        const runId = request.run.runId
+        const query = extractQueryFromRequest(request)
       // Extract run settings and map to AgentSettings format
       // EffectiveRunSettings uses maxOutputTokens, AgentSettings uses maxTokens
       const effectiveRunSettings: AgentSettings = {
@@ -482,13 +484,20 @@ export const createResearchAgentSubagent = (
         }
       }
 
-      // Auto-approve mode: proceed directly with the generated plan
-      // eslint-disable-next-line no-console
-      console.log(`[research-agent] AUTO-APPROVE: proceeding with generated plan for run ${runId}`)
-      // eslint-disable-next-line no-console
-      console.log(`[research-agent]   - using plan: ${planResult.plan.id}`)
+        // Auto-approve mode: proceed directly with the generated plan
+        // eslint-disable-next-line no-console
+        console.log(`[research-agent] AUTO-APPROVE: proceeding with generated plan for run ${runId}`)
+        // eslint-disable-next-line no-console
+        console.log(`[research-agent]   - using plan: ${planResult.plan.id}`)
 
-      return executeResearchWithPlan(planResult.plan)
+        return executeResearchWithPlan(planResult.plan)
+      }
+
+      // Wrap execution with parent trace context if available
+      if (request.traceContext?.traceId) {
+        return runWithTraceContext(request.traceContext.traceId, executeWithinTrace, request.traceContext.parentSpanId)
+      }
+      return executeWithinTrace()
     }
   }
 }

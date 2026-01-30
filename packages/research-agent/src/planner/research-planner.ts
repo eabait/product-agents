@@ -142,7 +142,7 @@ export class ResearchPlanner {
   ): Promise<z.infer<typeof AnalysisResultSchema>> {
     return withSpan(
       {
-        name: 'analyze-request',
+        name: 'plan:analyze-request',
         type: 'plan',
         input: { query: input.query, depth: input.depth },
         metadata: { model: settings.model }
@@ -186,7 +186,7 @@ export class ResearchPlanner {
   ): Promise<ResearchPlan> {
     return withSpan(
       {
-        name: 'generate-plan',
+        name: 'plan:generate-plan',
         type: 'plan',
         input: { topic: analysis.topic, depth: input.depth },
         metadata: { model: settings.model }

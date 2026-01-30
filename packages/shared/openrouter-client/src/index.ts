@@ -1,7 +1,8 @@
 import { createOpenRouter } from '@openrouter/ai-sdk-provider'
-import { generateObject, generateText, streamText, streamObject } from 'ai'
+import { generateObject, streamObject } from 'ai'
 import { z } from 'zod'
 import { GenerationUsage } from '@product-agents/agent-core'
+import { tracedGenerateText, tracedStreamText } from '@product-agents/observability'
 
 // ---- Pricing & helpers ----
 type ModelPrice = { inputPerMTok: number; outputPerMTok: number }
@@ -646,12 +647,12 @@ export class OpenRouterClient {
   }): Promise<string> {
     this.resetUsage()
     const startTime = new Date().toISOString()
-    const response = await generateText({
+    const response = await tracedGenerateText({
       model: this.getModel(params.model),
       prompt: params.prompt,
       temperature: params.temperature || 0.7,
-      maxTokens: params.maxTokens || 2000,
-      experimental_telemetry: this.getTelemetrySettings(params.model)
+      // tracedGenerateText follows the AI SDK option naming: maxOutputTokens
+      maxOutputTokens: params.maxTokens || 2000
     })
     const endTime = new Date().toISOString()
 
@@ -685,11 +686,10 @@ export class OpenRouterClient {
   }) {
     this.resetUsage()
     const startTime = new Date().toISOString()
-    const stream = await streamText({
+    const stream = await tracedStreamText({
       model: this.getModel(params.model),
       prompt: params.prompt,
-      temperature: params.temperature || 0.7,
-      experimental_telemetry: this.getTelemetrySettings(params.model)
+      temperature: params.temperature || 0.7
     })
 
     const respPromise = resolveMaybePromise<Response>((stream as any)?.response)

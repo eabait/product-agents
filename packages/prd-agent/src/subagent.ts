@@ -12,6 +12,7 @@ import {
   type ProgressEvent,
   type RunRequest
 } from '@product-agents/product-agent'
+import { runWithTraceContext } from '@product-agents/observability'
 import type { SectionRoutingRequest, SectionRoutingResponse } from '@product-agents/prd-shared'
 import { createPrdController } from './compositions/prd-controller'
 import { PRD_AGENT_VERSION } from './version'
@@ -117,72 +118,80 @@ export const createPrdAgentSubagent = (
         throw new Error('PRD subagent requires input payload')
       }
 
-      const controller = ensureController()
-      const prdRunId = request.params.runId ?? `prd-subagent-${randomUUID()}`
-      const inheritedIntentPlan = request.run.intentPlan ?? request.run.request.intentPlan
-      const runAttributes: Record<string, unknown> = {
-        ...(request.params.attributes ?? {}),
-        parentRunId: request.run.runId,
-        subagentId: prdAgentManifest.id
-      }
-
-      if (inheritedIntentPlan) {
-        runAttributes.intent = inheritedIntentPlan
-      }
-
-      const runRequest: RunRequest<SectionRoutingRequest> = {
-        artifactKind: 'prd',
-        input: request.params.input,
-        createdBy: request.params.createdBy ?? request.run.request.createdBy ?? DEFAULT_LABEL,
-        attributes: runAttributes,
-        intentPlan: inheritedIntentPlan
-      }
-
-      const progress: ProgressEvent[] = []
-      const summary = await controller.start(
-        {
-          runId: prdRunId,
-          request: runRequest
-        },
-        {
-          emit: forwardProgress(request.emit, progress),
-          metadata: {
-            parentRunId: request.run.runId,
-            sourceArtifactId: request.sourceArtifact?.id,
-            subagentId: prdAgentManifest.id
-          }
+      const executeWithinTrace = async (): Promise<SubagentResult<SectionRoutingResponse>> => {
+        const controller = ensureController()
+        const prdRunId = request.params.runId ?? `prd-subagent-${randomUUID()}`
+        const inheritedIntentPlan = request.run.intentPlan ?? request.run.request.intentPlan
+        const runAttributes: Record<string, unknown> = {
+          ...(request.params.attributes ?? {}),
+          parentRunId: request.run.runId,
+          subagentId: prdAgentManifest.id
         }
-      )
 
-      // Allow awaiting-input to propagate for clarification flows
-      if (summary.status !== 'completed' || !summary.artifact) {
-        if (summary.status === 'awaiting-input') {
-          return {
-            // Artifact may be absent for clarification flows; cast to satisfy interface.
-            artifact: summary.artifact as Artifact<SectionRoutingResponse>,
-            progress,
+        if (inheritedIntentPlan) {
+          runAttributes.intent = inheritedIntentPlan
+        }
+
+        const runRequest: RunRequest<SectionRoutingRequest> = {
+          artifactKind: 'prd',
+          input: request.params.input,
+          createdBy: request.params.createdBy ?? request.run.request.createdBy ?? DEFAULT_LABEL,
+          attributes: runAttributes,
+          intentPlan: inheritedIntentPlan
+        }
+
+        const progress: ProgressEvent[] = []
+        const summary = await controller.start(
+          {
+            runId: prdRunId,
+            request: runRequest
+          },
+          {
+            emit: forwardProgress(request.emit, progress),
             metadata: {
-              subagentRunId: summary.runId,
-              originatingSubagent: prdAgentManifest.id,
-              runStatus: summary.status,
-              ...(summary.metadata?.clarification ? { clarification: summary.metadata.clarification } : {})
+              parentRunId: request.run.runId,
+              sourceArtifactId: request.sourceArtifact?.id,
+              subagentId: prdAgentManifest.id
             }
           }
+        )
+
+        // Allow awaiting-input to propagate for clarification flows
+        if (summary.status !== 'completed' || !summary.artifact) {
+          if (summary.status === 'awaiting-input') {
+            return {
+              // Artifact may be absent for clarification flows; cast to satisfy interface.
+              artifact: summary.artifact as Artifact<SectionRoutingResponse>,
+              progress,
+              metadata: {
+                subagentRunId: summary.runId,
+                originatingSubagent: prdAgentManifest.id,
+                runStatus: summary.status,
+                ...(summary.metadata?.clarification ? { clarification: summary.metadata.clarification } : {})
+              }
+            }
+          }
+          throw new Error(`PRD subagent run did not complete successfully (status: ${summary.status})`)
         }
-        throw new Error(`PRD subagent run did not complete successfully (status: ${summary.status})`)
+
+        return {
+          artifact: toArtifactWithSourceMetadata(
+            summary.artifact as Artifact<SectionRoutingResponse>,
+            request
+          ),
+          progress,
+          metadata: {
+            subagentRunId: summary.runId,
+            originatingSubagent: prdAgentManifest.id
+          }
+        }
       }
 
-      return {
-        artifact: toArtifactWithSourceMetadata(
-          summary.artifact as Artifact<SectionRoutingResponse>,
-          request
-        ),
-        progress,
-        metadata: {
-          subagentRunId: summary.runId,
-          originatingSubagent: prdAgentManifest.id
-        }
+      // Wrap execution with parent trace context if available
+      if (request.traceContext?.traceId) {
+        return runWithTraceContext(request.traceContext.traceId, executeWithinTrace, request.traceContext.parentSpanId)
       }
+      return executeWithinTrace()
     }
   }
 }

@@ -1,6 +1,7 @@
 import { z } from 'zod'
 
 import { OpenRouterClient } from '@product-agents/openrouter-client'
+import { recordGeneration, withSpan } from '@product-agents/observability'
 type GenerationUsage = ReturnType<OpenRouterClient['getLastUsage']>
 
 import { buildPersonaProfiles, type PersonaBuilderParams, type PersonaProfile } from './persona-subagent.js'
@@ -102,6 +103,7 @@ type PersonaResponse = z.infer<typeof PersonaResponseSchema>
 const MAX_CONTEXT_CHARS = 2000
 
 export interface PersonaAgentRunnerInput {
+  runId?: string
   model: string
   temperature: number
   maxOutputTokens: number
@@ -248,15 +250,30 @@ export class PersonaAgentRunner {
   async run(input: PersonaAgentRunnerInput): Promise<PersonaAgentRunnerResult> {
     const prompt = buildPersonaPrompt(input)
     const startedAt = Date.now()
+    const generationStartedAt = new Date()
 
     try {
-      const response = (await this.client.generateStructured({
-        model: input.model,
-        schema: PersonaResponseSchema,
-        prompt,
-        temperature: input.temperature,
-        maxTokens: input.maxOutputTokens
-      })) as PersonaResponse
+      const response = (await withSpan(
+        {
+          name: 'persona:generation',
+          type: 'skill',
+          input: {
+            runId: input.runId,
+            targetUsers: input.targetUsers?.length ?? 0,
+            keyFeatures: input.keyFeatures?.length ?? 0,
+            constraints: input.constraints?.length ?? 0
+          },
+          metadata: { model: input.model }
+        },
+        async () =>
+          (await this.client.generateStructured({
+            model: input.model,
+            schema: PersonaResponseSchema,
+            prompt,
+            temperature: input.temperature,
+            maxTokens: input.maxOutputTokens
+          })) as PersonaResponse
+      )) as PersonaResponse
 
       if (!Array.isArray(response.personas)) {
         throw new Error('Persona payload malformed')
@@ -278,6 +295,31 @@ export class PersonaAgentRunner {
         return entries.length > 0 ? entries : undefined
       })()
 
+      const usage = this.getLastUsage()
+      void recordGeneration({
+        name: 'persona.generate',
+        model: input.model,
+        input: { prompt },
+        output: response,
+        startTime: generationStartedAt.toISOString(),
+        endTime: new Date().toISOString(),
+        usage: usage
+          ? {
+              promptTokens: usage.promptTokens,
+              completionTokens: usage.completionTokens,
+              totalTokens: usage.totalTokens
+            }
+          : undefined,
+        modelParameters: {
+          temperature: input.temperature,
+          maxTokens: input.maxOutputTokens
+        },
+        metadata: {
+          runId: input.runId,
+          strategy: 'llm'
+        }
+      })
+
       const telemetry: PersonaAgentTelemetry = {
         model: input.model,
         durationMs: Date.now() - startedAt,
@@ -292,7 +334,7 @@ export class PersonaAgentRunner {
         personas,
         strategy: 'llm',
         notes,
-        usage: this.getLastUsage(),
+        usage,
         telemetry
       }
     } catch (error) {

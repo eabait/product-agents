@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 
 import type { Artifact, SubagentLifecycle, SubagentManifest } from '@product-agents/product-agent'
-import { withSpan } from '@product-agents/observability'
+import { runWithTraceContext, withSpan } from '@product-agents/observability'
 import type { SectionRoutingRequest, SectionRoutingResponse } from '@product-agents/prd-shared'
 
 import {
@@ -81,16 +81,17 @@ export const createPersonaAgentSubagent = (
       tags: personaAgentManifest.capabilities
     },
     async execute(request) {
-      return withSpan(
-        {
-          name: 'persona-agent',
-          type: 'subagent',
-          input: {
-            runId: request.run.runId,
-            sourceArtifactId: request.sourceArtifact?.id
-          }
-        },
-        async () => {
+      const executeWithSpan = () =>
+        withSpan(
+          {
+            name: 'persona-agent',
+            type: 'subagent',
+            input: {
+              runId: request.run.runId,
+              sourceArtifactId: request.sourceArtifact?.id
+            }
+          },
+          async () => {
           try {
             const params = (request.params as PersonaBuilderParams | undefined) ?? undefined
             const sectionInput = request.run.request.input as SectionRoutingRequest | undefined
@@ -160,6 +161,7 @@ export const createPersonaAgentSubagent = (
             })
 
             const runnerResult: PersonaRunnerResult = await runner.run({
+              runId: request.run.runId,
               model: request.run.settings.model,
               temperature: request.run.settings.temperature ?? 0.7,
               maxOutputTokens: request.run.settings.maxOutputTokens ?? 800,
@@ -258,7 +260,14 @@ export const createPersonaAgentSubagent = (
             throw new Error(`Persona generation failed: ${message}`)
           }
         }
-      )
+        )
+
+      // Wrap execution with parent trace context if available
+      const traceContext = (request as any).traceContext as { traceId: string; parentSpanId?: string } | undefined
+      if (traceContext?.traceId) {
+        return runWithTraceContext(traceContext.traceId, executeWithSpan, traceContext.parentSpanId)
+      }
+      return executeWithSpan()
     }
   }
 }

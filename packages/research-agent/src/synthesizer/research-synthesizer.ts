@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { OpenRouterClient } from '@product-agents/openrouter-client'
+import { withSpan } from '@product-agents/observability'
 import type { AgentSettings } from '@product-agents/agent-core'
 import type { ResearchPlan } from '../contracts/research-plan'
 import type {
@@ -210,13 +211,22 @@ export class ResearchSynthesizer {
     )
 
     try {
-      const response = await this.client.generateStructured({
-        model: settings.model,
-        schema: FindingsResponseSchema,
-        prompt,
-        temperature: 0.2,
-        maxTokens: 4000
-      })
+      const response = await withSpan(
+        {
+          name: 'synthesis:findings',
+          type: 'skill',
+          input: { topic, stepId: stepResult.stepId, stepType: stepResult.stepType },
+          metadata: { model: settings.model }
+        },
+        async () =>
+          this.client.generateStructured({
+            model: settings.model,
+            schema: FindingsResponseSchema,
+            prompt,
+            temperature: 0.2,
+            maxTokens: 4000
+          })
+      )
 
       return response.findings.map(f => ({
         ...f,
@@ -260,13 +270,22 @@ export class ResearchSynthesizer {
     })
 
     try {
-      const response = await this.client.generateStructured({
-        model: settings.model,
-        schema: ExecutiveSummaryResponseSchema,
-        prompt,
-        temperature: 0.3,
-        maxTokens: 2000
-      })
+      const response = await withSpan(
+        {
+          name: 'synthesis:executive-summary',
+          type: 'skill',
+          input: { topic: plan.topic, scope: plan.scope },
+          metadata: { model: settings.model }
+        },
+        async () =>
+          this.client.generateStructured({
+            model: settings.model,
+            schema: ExecutiveSummaryResponseSchema,
+            prompt,
+            temperature: 0.3,
+            maxTokens: 2000
+          })
+      )
       return response.summary
     } catch (error) {
       console.error('Failed to generate executive summary:', error)
@@ -288,13 +307,22 @@ export class ResearchSynthesizer {
     const prompt = createCompetitorAnalysisPrompt(competitorSources, topic)
 
     try {
-      const response = await this.client.generateStructured({
-        model: settings.model,
-        schema: CompetitorsResponseSchema,
-        prompt,
-        temperature: 0.2,
-        maxTokens: 4000
-      })
+      const response = await withSpan(
+        {
+          name: 'synthesis:competitors',
+          type: 'skill',
+          input: { topic, sourceCount: competitorSources.length },
+          metadata: { model: settings.model }
+        },
+        async () =>
+          this.client.generateStructured({
+            model: settings.model,
+            schema: CompetitorsResponseSchema,
+            prompt,
+            temperature: 0.2,
+            maxTokens: 4000
+          })
+      )
 
       return response.competitors.map(c => ({
         ...c,
@@ -320,13 +348,22 @@ export class ResearchSynthesizer {
     const prompt = createMarketInsightsPrompt(marketSources, topic)
 
     try {
-      const response = await this.client.generateStructured({
-        model: settings.model,
-        schema: MarketInsightsResponseSchema,
-        prompt,
-        temperature: 0.2,
-        maxTokens: 3000
-      })
+      const response = await withSpan(
+        {
+          name: 'synthesis:market-insights',
+          type: 'skill',
+          input: { topic, sourceCount: marketSources.length },
+          metadata: { model: settings.model }
+        },
+        async () =>
+          this.client.generateStructured({
+            model: settings.model,
+            schema: MarketInsightsResponseSchema,
+            prompt,
+            temperature: 0.2,
+            maxTokens: 3000
+          })
+      )
 
       return response
     } catch (error) {
@@ -352,13 +389,22 @@ export class ResearchSynthesizer {
     )
 
     try {
-      const response = await this.client.generateStructured({
-        model: settings.model,
-        schema: RecommendationsResponseSchema,
-        prompt,
-        temperature: 0.4,
-        maxTokens: 2000
-      })
+      const response = await withSpan(
+        {
+          name: 'synthesis:recommendations',
+          type: 'skill',
+          input: { topic, findingsCount, hasCompetitors, hasMarketInsights },
+          metadata: { model: settings.model }
+        },
+        async () =>
+          this.client.generateStructured({
+            model: settings.model,
+            schema: RecommendationsResponseSchema,
+            prompt,
+            temperature: 0.4,
+            maxTokens: 2000
+          })
+      )
 
       return response.recommendations
     } catch (error) {
@@ -376,13 +422,22 @@ export class ResearchSynthesizer {
     const prompt = createLimitationsPrompt(topic, sourcesConsulted, searchQueries)
 
     try {
-      const response = await this.client.generateStructured({
-        model: settings.model,
-        schema: LimitationsResponseSchema,
-        prompt,
-        temperature: 0.3,
-        maxTokens: 1000
-      })
+      const response = await withSpan(
+        {
+          name: 'synthesis:limitations',
+          type: 'skill',
+          input: { topic, sourcesConsulted, queryCount: searchQueries.length },
+          metadata: { model: settings.model }
+        },
+        async () =>
+          this.client.generateStructured({
+            model: settings.model,
+            schema: LimitationsResponseSchema,
+            prompt,
+            temperature: 0.3,
+            maxTokens: 1000
+          })
+      )
 
       return response.limitations
     } catch (error) {
