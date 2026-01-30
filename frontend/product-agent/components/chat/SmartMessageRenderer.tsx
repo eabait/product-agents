@@ -6,7 +6,9 @@ import { PRDEditor } from './PRDEditor';
 import { ResearchPlanCard } from '../research/ResearchPlanCard';
 import { ResearchArtifactView } from '../research/ResearchArtifactView';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { ChevronDown, ChevronUp, FileText, Users, Search } from 'lucide-react';
+import { ChevronDown, ChevronUp, FileText, Users, Search, LayoutGrid } from 'lucide-react';
+import { StoryMapArtifactView } from '../story-map/StoryMapArtifactView';
+import type { StoryMapArtifact, StoryMapArtifactShape } from '../story-map/types';
 import { Button } from '@/components/ui/button';
 import { NewPRD, FlattenedPRD, isNewPRD, isFlattenedPRD } from '@/lib/prd-schema';
 import { Badge } from '@/components/ui/badge';
@@ -72,6 +74,13 @@ export function SmartMessageRenderer({
     return null
   }, [parsedContent])
 
+  const storyMapArtifact = useMemo(() => {
+    if (parsedContent && isStoryMapArtifact(parsedContent)) {
+      return parsedContent
+    }
+    return null
+  }, [parsedContent])
+
   const handlePRDChange = useCallback((updatedPRD: NewPRD) => {
     setLocalPRD(updatedPRD);
     onPRDUpdate?.(messageId, updatedPRD);
@@ -80,6 +89,10 @@ export function SmartMessageRenderer({
   const handleRegenerateSection = useCallback((sectionName: string) => {
     onRegenerateSection?.(messageId, sectionName);
   }, [messageId, onRegenerateSection]);
+
+  if (storyMapArtifact) {
+    return <CollapsibleStoryMapViewer artifact={storyMapArtifact} />
+  }
 
   if (personaArtifact) {
     return <CollapsiblePersonaViewer artifact={personaArtifact} />
@@ -570,6 +583,83 @@ const isResearchArtifact = (value: unknown): value is ResearchArtifactShape => {
   }
   const artifact = value as ResearchArtifactShape
   return artifact.kind === 'research'
+}
+
+const isStoryMapArtifact = (value: unknown): value is StoryMapArtifactShape => {
+  if (!value || typeof value !== 'object') {
+    return false
+  }
+  const obj = value as StoryMapArtifactShape
+
+  // Check for wrapped artifact structure
+  if (obj.kind === 'story-map' && obj.data?.epics) {
+    return true
+  }
+
+  // Check for direct story-map structure
+  if (Array.isArray(obj.epics) && typeof obj.version === 'string') {
+    return true
+  }
+
+  return false
+}
+
+const CollapsibleStoryMapViewer = ({ artifact }: { artifact: StoryMapArtifactShape }) => {
+  const [isOpen, setIsOpen] = useState(false)
+
+  // Normalize data whether wrapped or direct
+  const data: StoryMapArtifact = artifact.data ?? {
+    version: artifact.version ?? '1.0.0',
+    label: artifact.label ?? 'Story Map',
+    personasReferenced: artifact.personasReferenced ?? [],
+    epics: artifact.epics ?? [],
+    roadmapNotes: artifact.roadmapNotes
+  }
+
+  const epicCount = data.epics?.length ?? 0
+  const storyCount = data.epics?.reduce((sum, epic) => sum + (epic.stories?.length ?? 0), 0) ?? 0
+
+  return (
+    <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+      <div className="border rounded-lg bg-card">
+        <CollapsibleTrigger asChild>
+          <Button
+            variant="ghost"
+            className="flex w-full justify-between items-center p-4 hover:bg-muted/50"
+          >
+            <div className="flex items-center gap-2">
+              <LayoutGrid className="w-4 h-4" />
+              <span className="font-medium">{data.label || 'Story Map'}</span>
+              <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
+                {epicCount} epic{epicCount !== 1 ? 's' : ''}
+              </span>
+              <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full">
+                {storyCount} stor{storyCount !== 1 ? 'ies' : 'y'}
+              </span>
+            </div>
+            {isOpen ? (
+              <ChevronUp className="w-4 h-4" />
+            ) : (
+              <ChevronDown className="w-4 h-4" />
+            )}
+          </Button>
+        </CollapsibleTrigger>
+
+        {!isOpen && (
+          <div className="px-4 pb-4">
+            <p className="text-sm text-muted-foreground line-clamp-2">
+              {data.epics?.slice(0, 3).map(e => e.name).join(', ')}
+              {epicCount > 3 ? ` and ${epicCount - 3} more...` : ''}
+            </p>
+          </div>
+        )}
+
+        <CollapsibleContent className="border-t">
+          <StoryMapArtifactView data={data} />
+        </CollapsibleContent>
+      </div>
+    </Collapsible>
+  )
 }
 
 const CollapsibleResearchView = ({
