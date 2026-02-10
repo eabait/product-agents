@@ -6,11 +6,14 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
 import { CheckCircle, XCircle, AlertTriangle, ChevronDown, ChevronRight } from 'lucide-react';
-import type { PlanProposal, PlanStepProposal } from '@/types';
+import type { PlanProposal, PlanStepProposal, AskUserQuestionRequest } from '@/types';
+import { AskUserQuestionCard } from '@/components/ask-user-question';
+import type { ClarificationResponse } from '@/lib/run-client';
 
 export interface PlanReviewProps {
   plan: PlanProposal;
-  onApprove: (_feedback?: string) => void;
+  structuredClarifications?: AskUserQuestionRequest;
+  onApprove: (_feedback?: string, _clarificationResponse?: ClarificationResponse) => void;
   onReject: (_feedback?: string) => void;
   isLoading?: boolean;
   error?: string;
@@ -95,9 +98,12 @@ function StepCard({ step, index }: { step: PlanStepProposal; index: number }) {
   );
 }
 
-export function PlanReview({ plan, onApprove, onReject, isLoading, error }: PlanReviewProps) {
+export function PlanReview({ plan, structuredClarifications, onApprove, onReject, isLoading, error }: PlanReviewProps) {
   const [feedback, setFeedback] = useState('');
-  const hasClarifications = plan.suggestedClarifications && plan.suggestedClarifications.length > 0;
+  const [clarificationResponse, setClarificationResponse] = useState<ClarificationResponse | null>(null);
+  const hasStructuredClarifications = structuredClarifications && structuredClarifications.questions.length > 0;
+  const hasLegacyClarifications = plan.suggestedClarifications && plan.suggestedClarifications.length > 0;
+  const hasClarifications = hasStructuredClarifications || hasLegacyClarifications;
 
   const handleReject = () => {
     onReject();
@@ -108,13 +114,25 @@ export function PlanReview({ plan, onApprove, onReject, isLoading, error }: Plan
   };
 
   const handleApprove = () => {
-    // When there are clarifications, include feedback as the user's answers
-    if (hasClarifications && feedback.trim()) {
+    // When there are structured clarifications, include the response
+    if (hasStructuredClarifications && clarificationResponse) {
+      onApprove(feedback.trim() || undefined, clarificationResponse);
+    } else if (hasLegacyClarifications && feedback.trim()) {
+      // Legacy flow: include feedback as the user's answers
       onApprove(feedback.trim());
     } else {
-      onApprove();
+      onApprove(feedback.trim() || undefined);
     }
   };
+
+  const handleClarificationSubmit = (response: ClarificationResponse) => {
+    setClarificationResponse(response);
+  };
+
+  // Determine if approval should be disabled
+  const approvalDisabled = isLoading ||
+    (hasStructuredClarifications && !clarificationResponse) ||
+    (hasLegacyClarifications && !hasStructuredClarifications && !feedback.trim());
 
   return (
     <Card className="w-full max-w-2xl mx-auto">
@@ -166,12 +184,34 @@ export function PlanReview({ plan, onApprove, onReject, isLoading, error }: Plan
           </div>
         )}
 
-        {/* Suggested Clarifications */}
-        {plan.suggestedClarifications && plan.suggestedClarifications.length > 0 && (
+        {/* Structured Clarifications */}
+        {hasStructuredClarifications && (
+          <div className="space-y-2">
+            <AskUserQuestionCard
+              questions={structuredClarifications.questions}
+              context={structuredClarifications.context}
+              canSkip={structuredClarifications.canSkip}
+              onSubmit={handleClarificationSubmit}
+              isProcessing={isLoading}
+              submitLabel="Confirm Answers"
+            />
+            {clarificationResponse && (
+              <div className="p-2 bg-green-500/10 border border-green-500/30 rounded-md">
+                <div className="text-xs text-green-600 flex items-center gap-1">
+                  <CheckCircle className="h-3 w-3" />
+                  Answers confirmed. You can now approve the plan.
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Legacy Suggested Clarifications (fallback when no structured ones) */}
+        {!hasStructuredClarifications && hasLegacyClarifications && (
           <div className="p-3 bg-blue-500/10 border border-blue-500/30 rounded-md">
             <div className="text-sm font-medium text-blue-600 mb-2">Questions for you</div>
             <ul className="text-sm space-y-1">
-              {plan.suggestedClarifications.map((q, i) => (
+              {plan.suggestedClarifications!.map((q, i) => (
                 <li key={i} className="text-blue-700">• {q}</li>
               ))}
             </ul>
@@ -190,22 +230,38 @@ export function PlanReview({ plan, onApprove, onReject, isLoading, error }: Plan
           </div>
         </div>
 
-        {/* Feedback Input */}
-        <div className="space-y-2">
-          <label className="text-sm font-medium">
-            {hasClarifications ? 'Your answers (required to proceed)' : 'Refinement feedback (optional)'}
-          </label>
-          <Textarea
-            placeholder={hasClarifications
-              ? "Please answer the questions above to help refine the plan..."
-              : "Describe any changes you'd like to the plan..."
-            }
-            value={feedback}
-            onChange={(e) => setFeedback(e.target.value)}
-            rows={3}
-            disabled={isLoading}
-          />
-        </div>
+        {/* Feedback Input - only show when not using structured clarifications */}
+        {!hasStructuredClarifications && (
+          <div className="space-y-2">
+            <label className="text-sm font-medium">
+              {hasLegacyClarifications ? 'Your answers (required to proceed)' : 'Refinement feedback (optional)'}
+            </label>
+            <Textarea
+              placeholder={hasLegacyClarifications
+                ? "Please answer the questions above to help refine the plan..."
+                : "Describe any changes you'd like to the plan..."
+              }
+              value={feedback}
+              onChange={(e) => setFeedback(e.target.value)}
+              rows={3}
+              disabled={isLoading}
+            />
+          </div>
+        )}
+
+        {/* Optional feedback when using structured clarifications */}
+        {hasStructuredClarifications && (
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Additional feedback (optional)</label>
+            <Textarea
+              placeholder="Any additional comments or context..."
+              value={feedback}
+              onChange={(e) => setFeedback(e.target.value)}
+              rows={2}
+              disabled={isLoading}
+            />
+          </div>
+        )}
       </CardContent>
 
       <CardFooter className="flex justify-end gap-2">
@@ -228,7 +284,7 @@ export function PlanReview({ plan, onApprove, onReject, isLoading, error }: Plan
         )}
         <Button
           onClick={handleApprove}
-          disabled={isLoading || (hasClarifications && !feedback.trim())}
+          disabled={approvalDisabled}
         >
           <CheckCircle className="h-4 w-4 mr-2" />
           Approve & Execute

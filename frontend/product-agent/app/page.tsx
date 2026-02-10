@@ -40,7 +40,7 @@ import { ContextUsageIndicator } from "@/components/context/ContextUsageIndicato
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { contextStorage } from "@/lib/context-storage";
 import { buildEnhancedContextPayload, getContextSummary } from "@/lib/context-utils";
-import { getRun, startRun, streamRun, submitRunApproval, type ArtifactType } from "@/lib/run-client";
+import { getRun, startRun, streamRun, submitRunApproval, submitClarificationResponse, type ArtifactType, type ClarificationResponse } from "@/lib/run-client";
 import {
   UI_DIMENSIONS,
   VALIDATION_LIMITS,
@@ -98,6 +98,31 @@ type ConversationCostSummary = {
   currency: string;
   entries: ConversationCostEntry[];
   hasEstimated: boolean;
+};
+
+/**
+ * Format a ClarificationResponse into plain text to include as feedback
+ * during plan approval (mirrors backend formatClarificationResponse).
+ */
+const formatClarificationAsText = (cr: ClarificationResponse): string => {
+  if (cr.allSkipped) {
+    return 'User skipped clarification questions. Please proceed with reasonable assumptions.';
+  }
+
+  const parts: string[] = ['Clarification responses:'];
+  for (const answer of cr.answers) {
+    if (answer.skipped) continue;
+    if (answer.selectedOptions && answer.selectedOptions.length > 0) {
+      parts.push(`- ${answer.questionId}: ${answer.selectedOptions.join(', ')}`);
+    }
+    if (answer.customText) {
+      parts.push(`- ${answer.questionId} (custom): ${answer.customText}`);
+    }
+  }
+  if (cr.feedback) {
+    parts.push(`\nAdditional context: ${cr.feedback}`);
+  }
+  return parts.join('\n');
 };
 
 function PRDAgentPageContent() {
@@ -517,10 +542,16 @@ function PRDAgentPageContent() {
         }
       }
 
+      let askUserQuestions = card.askUserQuestions;
+
       if (event.type === 'pending-approval') {
         const approval = extractApprovalPlanFromEvent(event);
         if (approval.plan) {
           approvalPlan = approval.plan;
+          // Extract structured clarifications from the plan for AskUserQuestionCard
+          if (approval.plan.structuredClarifications?.questions?.length) {
+            askUserQuestions = approval.plan.structuredClarifications;
+          }
         }
         if (approval.approvalUrl) {
           approvalUrl = approval.approvalUrl;
@@ -535,7 +566,8 @@ function PRDAgentPageContent() {
         plan: planUpdate,
         nodeStates: updatedNodeStates,
         approvalPlan,
-        approvalUrl
+        approvalUrl,
+        askUserQuestions
       };
     });
   };
@@ -1390,13 +1422,24 @@ function PRDAgentPageContent() {
     cardId: string;
     approved: boolean;
     feedback?: string;
+    clarificationResponse?: ClarificationResponse;
   }) => {
-    const { runId, cardId, approved, feedback } = params;
+    const { runId, cardId, approved, feedback, clarificationResponse } = params;
     setApprovalLoadingByRun(prev => ({ ...prev, [runId]: true }));
     setApprovalErrorsByRun(prev => ({ ...prev, [runId]: null }));
 
     try {
-      const response = await submitRunApproval(runId, { approved, feedback });
+      // If there's a clarification response during plan approval, include it as feedback
+      // (the separate /clarification endpoint is only for awaiting-input status)
+      let effectiveFeedback = feedback;
+      if (approved && clarificationResponse) {
+        const clarificationText = formatClarificationAsText(clarificationResponse);
+        effectiveFeedback = effectiveFeedback
+          ? `${effectiveFeedback}\n\n${clarificationText}`
+          : clarificationText;
+      }
+
+      const response = await submitRunApproval(runId, { approved, feedback: effectiveFeedback });
 
       if (approved) {
         const titleSeedMessage = [...activeMessages].reverse().find(message => message.role === 'user');
@@ -1418,9 +1461,13 @@ function PRDAgentPageContent() {
         });
       } else {
         if (response?.plan) {
+          const refinedPlan = response.plan as PlanProposal;
           updateProgressCard(cardId, card => ({
             ...card,
-            approvalPlan: response.plan as PlanProposal
+            approvalPlan: refinedPlan,
+            askUserQuestions: refinedPlan.structuredClarifications?.questions?.length
+              ? refinedPlan.structuredClarifications
+              : card.askUserQuestions
           }));
         }
         if (response?.status === 'failed') {
@@ -1500,6 +1547,41 @@ function PRDAgentPageContent() {
     } catch (error) {
       console.error('Subagent approval error:', error);
       const errorMessage = error instanceof Error ? error.message : 'Failed to process subagent approval';
+      setApprovalErrorsByRun(prev => ({ ...prev, [runId]: errorMessage }));
+    } finally {
+      setApprovalLoadingByRun(prev => ({ ...prev, [runId]: false }));
+    }
+  };
+
+  const handleClarificationResponse = async (params: {
+    runId: string;
+    cardId: string;
+    response: ClarificationResponse;
+  }) => {
+    const { runId, cardId, response } = params;
+    setApprovalLoadingByRun(prev => ({ ...prev, [runId]: true }));
+    setApprovalErrorsByRun(prev => ({ ...prev, [runId]: null }));
+
+    try {
+      await submitClarificationResponse(runId, response);
+
+      // Clear askUserQuestions from the card and resume execution
+      updateProgressCard(cardId, card => ({
+        ...card,
+        status: 'active' as RunProgressStatus,
+        askUserQuestions: undefined
+      }));
+
+      // Reconnect to stream to receive remaining events
+      setIsChatLoading(true);
+      await streamRunExecution({
+        runId,
+        fallbackCardId: cardId,
+        titleSeedMessage: undefined
+      });
+    } catch (error) {
+      console.error('Clarification response error:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to submit clarification response';
       setApprovalErrorsByRun(prev => ({ ...prev, [runId]: errorMessage }));
     } finally {
       setApprovalLoadingByRun(prev => ({ ...prev, [runId]: false }));
@@ -2006,10 +2088,14 @@ function PRDAgentPageContent() {
             (runSummary?.summary?.artifact as Record<string, unknown> | undefined) ?? null;
 
           if (runSummary?.plan && fallbackCardId) {
+            const summaryPlan = runSummary.plan as PlanProposal;
             updateProgressCard(fallbackCardId, card => ({
               ...card,
-              approvalPlan: runSummary.plan as PlanProposal,
-              approvalUrl: runSummary.approvalUrl ?? card.approvalUrl
+              approvalPlan: summaryPlan,
+              approvalUrl: runSummary.approvalUrl ?? card.approvalUrl,
+              askUserQuestions: summaryPlan.structuredClarifications?.questions?.length
+                ? summaryPlan.structuredClarifications
+                : (runSummary.askUserQuestions ?? card.askUserQuestions)
             }));
           }
 
@@ -2431,6 +2517,7 @@ function PRDAgentPageContent() {
                   onResearchPlanAction={handleResearchPlanAction}
                   onPlanApproval={handlePlanApproval}
                   onSubagentApproval={handleSubagentApproval}
+                  onClarificationResponse={handleClarificationResponse}
                   approvalLoadingByRun={approvalLoadingByRun}
                   approvalErrorsByRun={approvalErrorsByRun}
                   progressCards={activeProgressCards}

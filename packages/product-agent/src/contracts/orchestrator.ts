@@ -1,4 +1,5 @@
 import type { Artifact, ArtifactKind, PlanGraph, RunContext } from './core'
+import type { AskUserQuestionRequest } from '@product-agents/prd-shared'
 
 /**
  * Describes a tool (skill or subagent) available to the Orchestrator.
@@ -76,8 +77,10 @@ export interface OrchestratorPlanProposal {
   targetArtifact: ArtifactKind
   /** Warnings about potential issues */
   warnings?: string[]
-  /** Questions to clarify with the user before proceeding */
+  /** Questions to clarify with the user before proceeding (legacy string format) */
   suggestedClarifications?: string[]
+  /** Structured questions with selectable options (new format) */
+  structuredClarifications?: AskUserQuestionRequest
 }
 
 /**

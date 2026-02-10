@@ -229,6 +229,7 @@ const toPlanPayload = (proposal: OrchestratorPlanProposal) => ({
   confidence: proposal.confidence,
   warnings: proposal.warnings,
   suggestedClarifications: proposal.suggestedClarifications,
+  structuredClarifications: proposal.structuredClarifications,
   steps: proposal.steps.map(step => ({
     id: step.id,
     toolId: step.toolId,
@@ -239,6 +240,44 @@ const toPlanPayload = (proposal: OrchestratorPlanProposal) => ({
     outputArtifact: step.outputArtifact
   }))
 })
+
+// Schema for clarification response (AskUserQuestion answers)
+const ClarificationResponseSchema = z.object({
+  answers: z.array(z.object({
+    questionId: z.string(),
+    selectedOptions: z.array(z.string()).optional(),
+    customText: z.string().optional(),
+    skipped: z.boolean().default(false)
+  })),
+  allSkipped: z.boolean().default(false),
+  feedback: z.string().optional()
+})
+
+// Format clarification response as a user message
+const formatClarificationResponse = (payload: z.infer<typeof ClarificationResponseSchema>): string => {
+  if (payload.allSkipped) {
+    return 'User skipped clarification questions. Please proceed with reasonable assumptions.'
+  }
+
+  const parts: string[] = ['Clarification responses:']
+
+  for (const answer of payload.answers) {
+    if (answer.skipped) continue
+
+    if (answer.selectedOptions && answer.selectedOptions.length > 0) {
+      parts.push(`- ${answer.questionId}: ${answer.selectedOptions.join(', ')}`)
+    }
+    if (answer.customText) {
+      parts.push(`- ${answer.questionId} (custom): ${answer.customText}`)
+    }
+  }
+
+  if (payload.feedback) {
+    parts.push(`\nAdditional context: ${payload.feedback}`)
+  }
+
+  return parts.join('\n')
+}
 
 const extractExistingArtifact = (messages: StartRunPayload['messages']): unknown => {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -1246,6 +1285,65 @@ const server = http.createServer(async (req, res) => {
           : error instanceof Error
             ? error.message
             : 'Unable to process subagent approval'
+      writeJson(res, 400, { error: message })
+    }
+    return
+  }
+
+  // POST /runs/:runId/clarification - Submit clarification response
+  if (req.method === 'POST' && /^\/runs\/[^/]+\/clarification$/.test(url.pathname)) {
+    const runId = url.pathname.split('/')[2]
+    const record = findRunOrRespond(runId, res)
+    if (!record) return
+
+    console.log(`[product-agent/api] clarification response for run ${runId}, current status: ${record.status}`)
+
+    if (record.status !== 'awaiting-input') {
+      console.warn(`[product-agent/api] clarification rejected: run ${runId} status is ${record.status}, not awaiting-input`)
+      writeJson(res, 400, {
+        error: `Run is not awaiting input. Current status: ${record.status}`,
+        runId: record.id,
+        status: record.status
+      })
+      return
+    }
+
+    try {
+      const payload = ClarificationResponseSchema.parse(await parseJson<unknown>(req))
+
+      // Format the response as a user message
+      const formattedResponse = formatClarificationResponse(payload)
+
+      // Append to conversation history
+      record.request.messages.push({
+        id: `clarification-response-${Date.now()}`,
+        role: 'user',
+        content: formattedResponse,
+        timestamp: new Date().toISOString()
+      })
+
+      // Clear clarification state and restart execution
+      record.clarification = null
+      updateRunRecord(runId, { status: 'running', clarification: null })
+
+      // Resume execution with updated context
+      startRunExecution(record).catch(error => {
+        console.error('[product-agent/api] unhandled run error:', error)
+      })
+
+      writeJson(res, 202, {
+        runId: record.id,
+        status: 'running',
+        streamUrl: `/runs/${record.id}/stream`,
+        message: 'Clarification received. Resuming execution.'
+      })
+    } catch (error) {
+      const message =
+        error instanceof z.ZodError
+          ? 'Invalid clarification payload'
+          : error instanceof Error
+            ? error.message
+            : 'Unable to process clarification'
       writeJson(res, 400, { error: message })
     }
     return

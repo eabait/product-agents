@@ -4,14 +4,15 @@ import {
   type AnalyzerResult,
   type AnalyzerInput
 } from '@product-agents/skill-analyzer-core'
-import { createClarificationPrompt } from '../prompts'
+import { createClarificationPrompt, createStructuredQuestionPrompt } from '../prompts'
 import {
   ClarificationResult,
   assessConfidence,
   assessInputCompleteness,
   assessContextRichness,
   CONFIDENCE_THRESHOLDS,
-  CONTENT_VALIDATION
+  CONTENT_VALIDATION,
+  type AskUserQuestionRequest
 } from '@product-agents/prd-shared'
 import { ensureArrayFields } from '../utils/structured-response'
 
@@ -21,6 +22,26 @@ const ClarificationResultRawSchema = z.object({
   confidence: z.number().min(0).max(100),
   missingCritical: z.array(z.string()),
   questions: z.array(z.string())
+})
+
+// Schema for structured question generation
+const StructuredQuestionResultSchema = z.object({
+  questions: z.array(
+    z.object({
+      id: z.string(),
+      header: z.string(),
+      question: z.string(),
+      options: z.array(
+        z.object({
+          label: z.string(),
+          description: z.string()
+        })
+      ),
+      multiSelect: z.boolean().optional()
+    })
+  ),
+  context: z.string().optional(),
+  canSkip: z.boolean().optional()
 })
 
 export class ClarificationAnalyzer extends BaseAnalyzer {
@@ -55,12 +76,48 @@ export class ClarificationAnalyzer extends BaseAnalyzer {
             : 'low'
     })
 
+    // Generate structured questions if clarification is needed
+    let structuredQuestions: AskUserQuestionRequest | undefined
+
+    if (rawResult.needsClarification && rawResult.missingCritical.length > 0) {
+      try {
+        const structuredResult = await this.generateStructured({
+          schema: StructuredQuestionResultSchema,
+          prompt: createStructuredQuestionPrompt(input.message, rawResult.missingCritical)
+        })
+
+        // Transform to AskUserQuestionRequest format
+        structuredQuestions = {
+          questions: structuredResult.questions.map((q, index) => ({
+            id: q.id || `question-${index}`,
+            header: q.header.slice(0, 12), // Ensure max 12 chars
+            question: q.question,
+            options: q.options.slice(0, 4).map((opt) => ({
+              label: opt.label,
+              description: opt.description
+            })),
+            multiSelect: q.multiSelect ?? false,
+            required: true
+          })),
+          context: structuredResult.context,
+          canSkip: structuredResult.canSkip ?? false
+        }
+      } catch (error) {
+        // Fallback to legacy questions if structured generation fails
+        console.warn(
+          'ClarificationAnalyzer: Failed to generate structured questions, using legacy format',
+          error
+        )
+      }
+    }
+
     // Build the final result with new confidence format
     const result: ClarificationResult = {
       needsClarification: rawResult.needsClarification,
       confidence: confidenceAssessment,
       missingCritical: rawResult.missingCritical,
-      questions: rawResult.questions
+      questions: rawResult.questions,
+      structuredQuestions
     }
 
     // If clarification is not needed but original confidence was low, log warning
@@ -80,6 +137,7 @@ export class ClarificationAnalyzer extends BaseAnalyzer {
       metadata: this.composeMetadata({
         missing_critical_count: result.missingCritical.length,
         missing_helpful_count: result.questions.length,
+        has_structured_questions: !!structuredQuestions,
         original_ai_confidence: rawResult.confidence
       })
     }

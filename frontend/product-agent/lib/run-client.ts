@@ -138,4 +138,35 @@ export const submitRunApproval = async (
   return response.json()
 }
 
+export interface ClarificationAnswer {
+  questionId: string
+  selectedOptions?: string[]
+  customText?: string
+  skipped: boolean
+}
+
+export interface ClarificationResponse {
+  answers: ClarificationAnswer[]
+  allSkipped: boolean
+  feedback?: string
+}
+
+export const submitClarificationResponse = async (
+  runId: string,
+  response: ClarificationResponse
+) => {
+  const res = await fetch(`/api/runs/${runId}/clarification`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(response)
+  })
+
+  if (!res.ok) {
+    const errorPayload = await res.json().catch(() => ({}))
+    throw new Error(errorPayload?.error ?? `Clarification submission failed (${res.status})`)
+  }
+
+  return res.json()
+}
+
 export type { StartRunParams, ArtifactType }

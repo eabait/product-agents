@@ -7,6 +7,8 @@ import { Message, type RunProgressCard } from '../../types';
 import { useState, useMemo } from 'react';
 import { PlanReview } from '@/components/plan-review';
 import { ResearchPlanCard } from '@/components/research/ResearchPlanCard';
+import { AskUserQuestionCard } from '@/components/ask-user-question';
+import type { ClarificationResponse } from '@/lib/run-client';
 
 interface ChatMessagesProps {
   messages: Message[];
@@ -20,6 +22,7 @@ interface ChatMessagesProps {
     cardId: string;
     approved: boolean;
     feedback?: string;
+    clarificationResponse?: ClarificationResponse;
   }) => void;
   onSubagentApproval?: (_params: {
     runId: string;
@@ -28,6 +31,11 @@ interface ChatMessagesProps {
     subagentId: string;
     approved: boolean;
     feedback?: string;
+  }) => void;
+  onClarificationResponse?: (_params: {
+    runId: string;
+    cardId: string;
+    response: ClarificationResponse;
   }) => void;
   approvalLoadingByRun?: Record<string, boolean>;
   approvalErrorsByRun?: Record<string, string | null>;
@@ -44,6 +52,7 @@ export function ChatMessages({
   onResearchPlanAction,
   onPlanApproval,
   onSubagentApproval,
+  onClarificationResponse,
   approvalLoadingByRun = {},
   approvalErrorsByRun = {},
   progressCards = [],
@@ -122,8 +131,9 @@ export function ChatMessages({
                   <div className="mt-4">
                     <PlanReview
                       plan={card.approvalPlan}
-                      onApprove={feedback =>
-                        onPlanApproval?.({ runId, cardId: card.id, approved: true, feedback })
+                      structuredClarifications={card.askUserQuestions}
+                      onApprove={(feedback, clarificationResponse) =>
+                        onPlanApproval?.({ runId, cardId: card.id, approved: true, feedback, clarificationResponse })
                       }
                       onReject={feedback =>
                         onPlanApproval?.({
@@ -170,6 +180,26 @@ export function ChatMessages({
                   </div>
                 );
               })()}
+              {card.status === 'awaiting-input' && card.askUserQuestions && card.runId && (() => {
+                const runId = card.runId;
+                return (
+                  <div className="mt-4">
+                    <AskUserQuestionCard
+                      questions={card.askUserQuestions.questions}
+                      context={card.askUserQuestions.context}
+                      canSkip={card.askUserQuestions.canSkip}
+                      onSubmit={(response) => {
+                        onClarificationResponse?.({
+                          runId,
+                          cardId: card.id,
+                          response
+                        });
+                      }}
+                      isProcessing={Boolean(approvalLoadingByRun[runId])}
+                    />
+                  </div>
+                );
+              })()}
             </motion.div>
           ))}
         </div>
@@ -198,8 +228,9 @@ export function ChatMessages({
               <div className="mt-4">
                 <PlanReview
                   plan={card.approvalPlan}
-                  onApprove={feedback =>
-                    onPlanApproval?.({ runId, cardId: card.id, approved: true, feedback })
+                  structuredClarifications={card.askUserQuestions}
+                  onApprove={(feedback, clarificationResponse) =>
+                    onPlanApproval?.({ runId, cardId: card.id, approved: true, feedback, clarificationResponse })
                   }
                   onReject={feedback =>
                     onPlanApproval?.({
@@ -239,6 +270,26 @@ export function ChatMessages({
                       stepId: blocked.stepId,
                       subagentId: blocked.subagentId,
                       approved: false
+                    });
+                  }}
+                  isProcessing={Boolean(approvalLoadingByRun[runId])}
+                />
+              </div>
+            );
+          })()}
+          {card.status === 'awaiting-input' && card.askUserQuestions && card.runId && (() => {
+            const runId = card.runId;
+            return (
+              <div className="mt-4">
+                <AskUserQuestionCard
+                  questions={card.askUserQuestions.questions}
+                  context={card.askUserQuestions.context}
+                  canSkip={card.askUserQuestions.canSkip}
+                  onSubmit={(response) => {
+                    onClarificationResponse?.({
+                      runId,
+                      cardId: card.id,
+                      response
                     });
                   }}
                   isProcessing={Boolean(approvalLoadingByRun[runId])}

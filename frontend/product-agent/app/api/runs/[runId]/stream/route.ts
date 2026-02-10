@@ -33,13 +33,24 @@ const handleEventForStore = (runId: string, eventType: string, data: any) => {
       if (data?.type === 'run.status' && data?.status === 'awaiting-input') {
         updateRunRecord(runId, { status: 'awaiting-input' })
       }
+      // Extract askUserQuestions from skill metadata if present
+      if (data?.metadata?.askUserQuestions) {
+        updateRunRecord(runId, {
+          status: 'awaiting-input',
+          askUserQuestions: data.metadata.askUserQuestions
+        })
+      }
       break
-    case 'clarification':
+    case 'clarification': {
+      // Extract structured questions if available
+      const structuredQuestions = data?.structuredQuestions ?? null
       updateRunRecord(runId, {
         status: 'awaiting-input',
-        clarification: data ?? null
+        clarification: data ?? null,
+        askUserQuestions: structuredQuestions
       })
       break
+    }
     case 'complete': {
       const artifact = data?.artifact ?? null
       const metadata =
@@ -60,10 +71,14 @@ const handleEventForStore = (runId: string, eventType: string, data: any) => {
       break
     }
     case 'pending-approval': {
+      const plan = data?.plan ?? null
+      // Extract structured clarifications from plan proposal
+      const structuredClarifications = plan?.structuredClarifications ?? null
       updateRunRecord(runId, {
         status: 'pending-approval',
-        plan: data?.plan ?? null,
-        approvalUrl: `/api/runs/${runId}/approve`
+        plan,
+        approvalUrl: `/api/runs/${runId}/approve`,
+        askUserQuestions: structuredClarifications
       })
       break
     }

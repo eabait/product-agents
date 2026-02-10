@@ -172,12 +172,63 @@ export const SectionRoutingResponseSchema = z.object({
 
 export type SectionRoutingResponse = z.infer<typeof SectionRoutingResponseSchema>
 
+// ============================================================================
+// AskUserQuestion schemas - for structured user input collection
+// ============================================================================
+
+// Option for a question
+export const AskUserQuestionOptionSchema = z.object({
+  label: z.string().min(1).max(30),
+  description: z.string().max(200)
+})
+export type AskUserQuestionOption = z.infer<typeof AskUserQuestionOptionSchema>
+
+// Single question structure
+export const AskUserQuestionSchema = z.object({
+  id: z.string(),
+  header: z.string().max(12), // chip label like "Auth", "Storage"
+  question: z.string(),
+  options: z.array(AskUserQuestionOptionSchema).min(2).max(4),
+  multiSelect: z.boolean().default(false),
+  required: z.boolean().default(true)
+})
+export type AskUserQuestion = z.infer<typeof AskUserQuestionSchema>
+
+// Request payload (skill/orchestrator returns this)
+export const AskUserQuestionRequestSchema = z.object({
+  questions: z.array(AskUserQuestionSchema).min(1).max(4),
+  context: z.string().optional(),
+  canSkip: z.boolean().default(false)
+})
+export type AskUserQuestionRequest = z.infer<typeof AskUserQuestionRequestSchema>
+
+// Answer for a single question
+export const AskUserQuestionAnswerSchema = z.object({
+  questionId: z.string(),
+  selectedOptions: z.array(z.string()).optional(),
+  customText: z.string().optional(),
+  skipped: z.boolean().default(false)
+})
+export type AskUserQuestionAnswer = z.infer<typeof AskUserQuestionAnswerSchema>
+
+// Response payload (frontend sends this)
+export const AskUserQuestionResponseSchema = z.object({
+  answers: z.array(AskUserQuestionAnswerSchema),
+  allSkipped: z.boolean().default(false),
+  feedback: z.string().optional()
+})
+export type AskUserQuestionResponse = z.infer<typeof AskUserQuestionResponseSchema>
+
+// ============================================================================
 // Clarification schemas - for internal analyzer use
+// ============================================================================
+
 export const ClarificationResultSchema = z.object({
   needsClarification: z.boolean(),
   confidence: ConfidenceAssessmentSchema,
   missingCritical: z.array(z.string()),
-  questions: z.array(z.string()),
+  questions: z.array(z.string()), // legacy string questions
+  structuredQuestions: AskUserQuestionRequestSchema.optional(), // new structured format
   usage: UsageSummarySchema.optional()
 })
 

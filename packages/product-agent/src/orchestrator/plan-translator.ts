@@ -5,7 +5,7 @@ import type {
   OrchestratorPlanProposal
 } from '../contracts/orchestrator'
 import { ALL_SECTION_NAMES } from '@product-agents/prd-shared'
-import type { SectionName } from '@product-agents/prd-shared'
+import type { SectionName, AskUserQuestionRequest } from '@product-agents/prd-shared'
 
 /**
  * Raw step from LLM output.
@@ -21,6 +21,17 @@ interface RawStep {
 }
 
 /**
+ * Raw structured question from LLM output (optional, when LLM returns structured format).
+ */
+interface RawStructuredQuestion {
+  id: string
+  header: string
+  question: string
+  options: Array<{ label: string; description: string }>
+  multiSelect?: boolean
+}
+
+/**
  * Raw plan output from LLM.
  */
 interface RawPlanOutput {
@@ -29,6 +40,11 @@ interface RawPlanOutput {
   confidence: number
   warnings?: string[]
   clarifications?: string[]
+  structuredClarifications?: {
+    questions: RawStructuredQuestion[]
+    context?: string
+    canSkip?: boolean
+  }
   steps: RawStep[]
 }
 
@@ -419,6 +435,33 @@ export class PlanTranslator {
   }
 
   /**
+   * Transform raw structured clarifications to AskUserQuestionRequest format.
+   */
+  private translateStructuredClarifications(
+    raw: RawPlanOutput['structuredClarifications']
+  ): AskUserQuestionRequest | undefined {
+    if (!raw || !raw.questions || raw.questions.length === 0) {
+      return undefined
+    }
+
+    return {
+      questions: raw.questions.map((q, index) => ({
+        id: q.id || `question-${index}`,
+        header: q.header.slice(0, 12), // Ensure max 12 chars
+        question: q.question,
+        options: q.options.slice(0, 4).map((opt) => ({
+          label: opt.label,
+          description: opt.description
+        })),
+        multiSelect: q.multiSelect ?? false,
+        required: true
+      })),
+      context: raw.context,
+      canSkip: raw.canSkip ?? false
+    }
+  }
+
+  /**
    * Translate a complete raw plan to OrchestratorPlanProposal.
    */
   translate(raw: RawPlanOutput): OrchestratorPlanProposal {
@@ -436,6 +479,11 @@ export class PlanTranslator {
       ...validation.warnings
     ]
 
+    // Translate structured clarifications if present
+    const structuredClarifications = this.translateStructuredClarifications(
+      raw.structuredClarifications
+    )
+
     return {
       plan,
       steps,
@@ -443,7 +491,8 @@ export class PlanTranslator {
       confidence: raw.confidence,
       targetArtifact: raw.targetArtifact as ArtifactKind,
       warnings: allWarnings.length > 0 ? allWarnings : undefined,
-      suggestedClarifications: raw.clarifications
+      suggestedClarifications: raw.clarifications,
+      structuredClarifications
     }
   }
 }

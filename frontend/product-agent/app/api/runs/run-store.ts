@@ -1,6 +1,6 @@
 import type { StartRunPayload } from './schemas'
 import type { UsageSummary } from '@product-agents/agent-core'
-import type { PlanProposal } from '@/types'
+import type { PlanProposal, AskUserQuestionRequest } from '@/types'
 
 export type ApprovalMode = 'auto' | 'manual'
 
@@ -30,6 +30,7 @@ export interface RunRecord {
       generatedAt: string
     }
   >
+  askUserQuestions?: AskUserQuestionRequest | null
 }
 
 const MAX_RUN_RECORDS = 50
@@ -124,6 +125,9 @@ export const updateRunRecord = (
   if (updates.progressAppend) {
     record.progress.push(updates.progressAppend)
   }
+  if (updates.askUserQuestions !== undefined) {
+    record.askUserQuestions = updates.askUserQuestions
+  }
 
   touch(record)
   return record
@@ -169,5 +173,6 @@ export const serializeRunRecord = (record: RunRecord) => ({
   approvalUrl: record.approvalUrl ?? null,
   approvalMode: record.approvalMode ?? null,
   progress: record.progress,
-  subagentArtifacts: record.subagentArtifacts ?? null
+  subagentArtifacts: record.subagentArtifacts ?? null,
+  askUserQuestions: record.askUserQuestions ?? null
 })

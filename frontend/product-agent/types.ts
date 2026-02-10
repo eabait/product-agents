@@ -82,12 +82,34 @@ export interface PlanStepProposal {
   outputArtifact?: string
 }
 
+// AskUserQuestion types for structured clarifications
+export interface AskUserQuestionOption {
+  label: string
+  description: string
+}
+
+export interface AskUserQuestion {
+  id: string
+  header: string
+  question: string
+  options: AskUserQuestionOption[]
+  multiSelect: boolean
+  required: boolean
+}
+
+export interface AskUserQuestionRequest {
+  questions: AskUserQuestion[]
+  context?: string
+  canSkip: boolean
+}
+
 export interface PlanProposal {
   targetArtifact: string
   overallRationale: string
   confidence: number
   warnings?: string[]
   suggestedClarifications?: string[]
+  structuredClarifications?: AskUserQuestionRequest
   steps: PlanStepProposal[]
 }
 
@@ -122,6 +144,7 @@ export interface RunProgressCard {
   approvalUrl?: string
   nodeStates: Record<string, PlanNodeState>
   blockedSubagent?: BlockedSubagentInfo
+  askUserQuestions?: AskUserQuestionRequest
 }
 
 // PRD-specific types

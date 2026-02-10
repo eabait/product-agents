@@ -50,6 +50,40 @@ declare module '@product-agents/prd-shared' {
     needsClarification: boolean
     questions?: string[]
     details?: Record<string, unknown>
+    structuredQuestions?: AskUserQuestionRequest
+  }
+
+  export interface AskUserQuestionOption {
+    label: string
+    description: string
+  }
+
+  export interface AskUserQuestion {
+    id: string
+    header: string
+    question: string
+    options: AskUserQuestionOption[]
+    multiSelect: boolean
+    required: boolean
+  }
+
+  export interface AskUserQuestionRequest {
+    questions: AskUserQuestion[]
+    context?: string
+    canSkip: boolean
+  }
+
+  export interface AskUserQuestionAnswer {
+    questionId: string
+    selectedOptions?: string[]
+    customText?: string
+    skipped: boolean
+  }
+
+  export interface AskUserQuestionResponse {
+    answers: AskUserQuestionAnswer[]
+    allSkipped: boolean
+    feedback?: string
   }
 
   export interface SectionContext {

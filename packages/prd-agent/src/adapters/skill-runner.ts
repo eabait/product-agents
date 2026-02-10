@@ -170,6 +170,8 @@ export class PrdSkillRunner implements SkillRunner<PrdPlanTask, unknown> {
     const metadata = {
       ...result.metadata,
       clarification: result.data,
+      // Include structured questions for frontend consumption
+      askUserQuestions: result.data.structuredQuestions ?? null,
       ...(result.data.needsClarification ? { runStatus: 'awaiting-input' } : {})
     }
 

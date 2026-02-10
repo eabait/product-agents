@@ -174,7 +174,22 @@ const buildOutputSchema = (): string => {
   "overallRationale": "string - Why this plan was chosen overall",
   "confidence": "number (0-1) - How confident you are in this plan",
   "warnings": ["string array - Any potential issues or concerns"],
-  "clarifications": ["string array - Questions to ask the user if information is missing"],
+  "clarifications": ["string array - Plain-text questions for the user (legacy format, always include)"],
+  "structuredClarifications": {
+    "questions": [
+      {
+        "id": "string - unique kebab-case identifier (e.g., 'target-users', 'auth-method')",
+        "header": "string - short chip label, max 12 chars (e.g., 'Users', 'Auth', 'Market')",
+        "question": "string - clear question ending with ?",
+        "options": [
+          { "label": "string - brief option name (1-5 words)", "description": "string - what this choice means (max 200 chars)" }
+        ],
+        "multiSelect": "boolean - true if multiple options can be selected, false for single-choice"
+      }
+    ],
+    "context": "string - 1-2 sentence explanation of why these questions matter",
+    "canSkip": "boolean - true only for optional refinements, false for critical missing info"
+  },
   "steps": [
     {
       "id": "string - Unique step identifier (e.g., 'step-1')",
@@ -204,6 +219,7 @@ const buildRules = (): string => {
 7. **Rationale Required**: Every step must explain WHY that specific tool was chosen
 8. **Clarify Before Planning**: If the user's request is too vague to propose meaningful steps, return a minimal plan (0-2 steps) with clarification questions. Don't propose research on overly broad topics.
 9. **Research-first requires clarifications**: When you start with research or your confidence is below 0.7, include at least 3 targeted clarifications covering target users, market/segment, and differentiation/constraints. Set confidence to 0.65 or lower until those answers are provided.
+10. **Structured Clarifications**: Whenever you include \`clarifications\`, you MUST ALSO include \`structuredClarifications\` with the same questions reformatted as interactive cards. Each question needs 2-4 predefined options that cover the most common answers. Use kebab-case ids, headers max 12 chars, and clear option descriptions. This makes it easier for the user to respond quickly.
 
 ## When to Ask for Clarifications (No Research Yet)
 
@@ -286,6 +302,36 @@ const buildExamples = (): string => {
   "confidence": 0.7,
   "warnings": ["Limited context provided - research will help define target user segments"],
   "clarifications": ["What specific fitness goals does your app target?", "Is this for beginners, athletes, or a general audience?"],
+  "structuredClarifications": {
+    "questions": [
+      {
+        "id": "fitness-goals",
+        "header": "Goals",
+        "question": "What specific fitness goals does your app target?",
+        "options": [
+          { "label": "Weight loss", "description": "Calorie tracking, diet plans, cardio workouts" },
+          { "label": "Strength", "description": "Weightlifting, muscle building, progressive overload" },
+          { "label": "General wellness", "description": "Daily activity, mindfulness, sleep tracking" },
+          { "label": "Sports training", "description": "Sport-specific drills and performance metrics" }
+        ],
+        "multiSelect": true
+      },
+      {
+        "id": "audience-level",
+        "header": "Audience",
+        "question": "Is this for beginners, athletes, or a general audience?",
+        "options": [
+          { "label": "Beginners", "description": "New to fitness, need guided programs" },
+          { "label": "Intermediate", "description": "Regular exercisers looking to level up" },
+          { "label": "Athletes", "description": "Competitive or advanced athletes" },
+          { "label": "General audience", "description": "All fitness levels, broad appeal" }
+        ],
+        "multiSelect": false
+      }
+    ],
+    "context": "Understanding your target fitness goals and audience level will help us research the right market and create more accurate personas.",
+    "canSkip": false
+  },
   "steps": [
     {
       "id": "step-1",
@@ -320,6 +366,48 @@ const buildExamples = (): string => {
     "Who are the intended users or target audience? (e.g., small businesses, enterprise teams, consumers)",
     "Are there any similar products or competitors you're aware of?"
   ],
+  "structuredClarifications": {
+    "questions": [
+      {
+        "id": "market",
+        "header": "Market",
+        "question": "What specific market or industry is this SaaS product targeting?",
+        "options": [
+          { "label": "Healthcare", "description": "Medical, clinical, or health-related workflows" },
+          { "label": "Education", "description": "Schools, universities, or ed-tech platforms" },
+          { "label": "E-commerce", "description": "Online retail, marketplaces, or shopping" },
+          { "label": "Enterprise IT", "description": "Internal tools, DevOps, or infrastructure" }
+        ],
+        "multiSelect": false
+      },
+      {
+        "id": "problem",
+        "header": "Problem",
+        "question": "What core problem or pain point will this product solve?",
+        "options": [
+          { "label": "Collaboration", "description": "Helping teams work together more effectively" },
+          { "label": "Automation", "description": "Reducing manual work and repetitive tasks" },
+          { "label": "Analytics", "description": "Providing insights and data-driven decisions" },
+          { "label": "Communication", "description": "Improving messaging, notifications, or outreach" }
+        ],
+        "multiSelect": true
+      },
+      {
+        "id": "target-users",
+        "header": "Users",
+        "question": "Who are the intended users or target audience?",
+        "options": [
+          { "label": "Small businesses", "description": "Teams of 1-50 employees" },
+          { "label": "Enterprise teams", "description": "Large organizations with 500+ employees" },
+          { "label": "Consumers", "description": "Individual end-users" },
+          { "label": "Developers", "description": "Technical users building software" }
+        ],
+        "multiSelect": false
+      }
+    ],
+    "context": "The request is too broad to plan effectively. Answering these questions will help us scope the research and PRD generation.",
+    "canSkip": false
+  },
   "steps": []
 }
 
@@ -334,6 +422,48 @@ const buildExamples = (): string => {
     "What makes your mobile payment app different from existing solutions like Venmo, PayPal, or Cash App?",
     "Which markets or regions should we prioritize? (e.g., US gig workers, EU SMEs, LATAM peer-to-peer)"
   ],
+  "structuredClarifications": {
+    "questions": [
+      {
+        "id": "target-users",
+        "header": "Users",
+        "question": "Who is the primary target audience for this payment app?",
+        "options": [
+          { "label": "Consumers (P2P)", "description": "Individuals sending money to friends and family" },
+          { "label": "Small businesses", "description": "Merchants and SMBs accepting payments" },
+          { "label": "Gig workers", "description": "Freelancers and contractors managing earnings" },
+          { "label": "Underbanked", "description": "Users with limited access to traditional banking" }
+        ],
+        "multiSelect": true
+      },
+      {
+        "id": "differentiator",
+        "header": "Differentiator",
+        "question": "What makes this app different from Venmo, PayPal, or Cash App?",
+        "options": [
+          { "label": "Lower fees", "description": "Significantly cheaper transaction costs" },
+          { "label": "Speed", "description": "Instant transfers with no delays" },
+          { "label": "Crypto support", "description": "Native cryptocurrency and digital asset payments" },
+          { "label": "Regional focus", "description": "Designed for a specific market or region" }
+        ],
+        "multiSelect": true
+      },
+      {
+        "id": "market-region",
+        "header": "Region",
+        "question": "Which markets or regions should we prioritize?",
+        "options": [
+          { "label": "US / North America", "description": "Mature market with established competitors" },
+          { "label": "Europe", "description": "Strong regulation (PSD2), open banking ecosystem" },
+          { "label": "Latin America", "description": "High mobile adoption, growing fintech market" },
+          { "label": "Southeast Asia", "description": "Mobile-first economies, diverse payment needs" }
+        ],
+        "multiSelect": false
+      }
+    ],
+    "context": "Understanding your target users, competitive advantage, and geographic focus will help us research the right market segment and build a more relevant PRD.",
+    "canSkip": false
+  },
   "steps": [
     {
       "id": "step-1",
